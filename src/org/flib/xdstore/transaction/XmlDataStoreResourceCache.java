@@ -36,28 +36,28 @@ public class XmlDataStoreResourceCache {
 			IXmlDataStoreIdentifiable object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				} else {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else if (record.isInsertChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				}
 			} else if (record.isDeleteChange()) {
 				if (!record.isCommitedState() && !record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else {
-				object = ObjectUtils.clone(record.getObject());
+				object = record.getObject();
 			}
 
 			if (object != null && predicate.passed(object)) {
-				result.put(object.getId(), object);
+				result.put(object.getId(), ObjectUtils.clone(object));
 			}
 		}
 		return result;
@@ -70,28 +70,28 @@ public class XmlDataStoreResourceCache {
 			IXmlDataStoreIdentifiable object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				} else {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else if (record.isInsertChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				}
 			} else if (record.isDeleteChange()) {
 				if (!record.isCommitedState() && !record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else {
-				object = ObjectUtils.clone(record.getObject());
+				object = record.getObject();
 			}
 
 			if (object != null) {
-				result.put(object.getId(), object);
+				result.put(object.getId(), ObjectUtils.clone(object));
 			}
 		}
 		return result;
@@ -104,28 +104,28 @@ public class XmlDataStoreResourceCache {
 			IXmlDataStoreIdentifiable object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				} else {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else if (record.isInsertChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				}
 			} else if (record.isDeleteChange()) {
 				if (!record.isCommitedState() && !record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else {
-				object = ObjectUtils.clone(record.getObject());
+				object = record.getObject();
 			}
 
 			if (object != null) {
-				return object;
+				return ObjectUtils.clone(object);
 			}
 		}
 		// ARCH ?
@@ -139,28 +139,28 @@ public class XmlDataStoreResourceCache {
 			IXmlDataStoreIdentifiable object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				} else {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else if (record.isInsertChange()) {
 				if (record.isCommitedState()) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				} else if (record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 				}
 			} else if (record.isDeleteChange()) {
 				if (!record.isCommitedState() && !record.changedByTransaction(transaction)) {
-					object = ObjectUtils.clone(record.getObject());
+					object = record.getObject();
 				}
 			} else {
-				object = ObjectUtils.clone(record.getObject());
+				object = record.getObject();
 			}
 
 			if (object != null) {
-				ObjectUtils.fillObject(reference, record.getObject());
+				ObjectUtils.fillObject(reference, object);
 				return;
 			}
 		}
