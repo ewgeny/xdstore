@@ -23,7 +23,7 @@ public class XmlDataStoreTransactionsManager {
 		return transaction;
 	}
 
-	public synchronized void commitTransaction(final XmlDataStoreTransaction transaction) {
+	public void commitTransaction(final XmlDataStoreTransaction transaction) {
 		final Collection<XmlDataStoreResource> resources;
 		synchronized (this) {
 			transactions.remove(transaction.getTransactionId());
@@ -36,7 +36,7 @@ public class XmlDataStoreTransactionsManager {
 		}
 	}
 
-	public synchronized void rollbackTransaction(final XmlDataStoreTransaction transaction) {
+	public void rollbackTransaction(final XmlDataStoreTransaction transaction) {
 		final Collection<XmlDataStoreResource> resources;
 		synchronized (this) {
 			transactions.remove(transaction.getTransactionId());
