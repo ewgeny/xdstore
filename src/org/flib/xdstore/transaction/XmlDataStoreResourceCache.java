@@ -395,7 +395,7 @@ public class XmlDataStoreResourceCache {
 		}
 
 		public boolean changedByTransaction(final XmlDataStoreTransaction transaction) {
-			return this.change != Change.read && this.transaction.isTransaction(transaction);
+			return this.change != Change.read && this.transaction != null && this.transaction.isTransaction(transaction);
 		}
 
 		public IXmlDataStoreIdentifiable getObject() {
