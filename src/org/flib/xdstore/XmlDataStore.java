@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.flib.xdstore.serialization.IXmlDataStoreIOFactory;
 import org.flib.xdstore.transaction.XmlDataStoreDeleteException;
+import org.flib.xdstore.transaction.XmlDataStoreIndexResource;
 import org.flib.xdstore.transaction.XmlDataStoreInsertException;
 import org.flib.xdstore.transaction.XmlDataStoreReadException;
 import org.flib.xdstore.transaction.XmlDataStoreResource;
@@ -33,6 +34,8 @@ public class XmlDataStore {
 
 	private final XmlDataStoreResourcesManager                                        resourcesManager;
 
+	private boolean                                                                   useFragmentation;
+
 	/**
 	 * This constructor initialize store for specified folder. All files will be
 	 * stored in this folder.
@@ -47,7 +50,30 @@ public class XmlDataStore {
 		this.folder = folder;
 		this.policies = new HashMap<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy>();
 		this.transactionsManager = new XmlDataStoreTransactionsManager();
-		this.resourcesManager = new XmlDataStoreResourcesManager(folder, this.policies);
+		this.useFragmentation = false;
+		this.resourcesManager = new XmlDataStoreResourcesManager(folder, this.policies, 10);
+	}
+
+	/**
+	 * This constructor initialize store for specified folder. All files will be
+	 * stored in this folder. This constructor enables fragmentation.
+	 * 
+	 * @param folder
+	 *            Store path.
+	 * @param fragmentSize
+	 *            Max count objects in one fragment file. Fragmentation works
+	 *            only with policy ClassObjectsFile and doesn't work with root
+	 *            objects.
+	 */
+	public XmlDataStore(final String folder, final int fragmentSize) {
+		if (StringUtils.isBlank(folder))
+			throw new IllegalArgumentException("store folder's name cannot be blank");
+
+		this.folder = folder;
+		this.policies = new HashMap<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy>();
+		this.transactionsManager = new XmlDataStoreTransactionsManager();
+		this.useFragmentation = true;
+		this.resourcesManager = new XmlDataStoreResourcesManager(folder, this.policies, fragmentSize);
 	}
 
 	/**
@@ -229,7 +255,7 @@ public class XmlDataStore {
 		}
 		return (Map<String, T>) objects;
 	}
-	
+
 	/**
 	 * This method load roots by specified predicate. Can be used only for roots
 	 * of class policy ClassObjectsFile and SingleObjectFile.
@@ -470,12 +496,15 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = object.getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.insertObject(object, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				resource.insertObject(object, transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				resource.insertObject(object, transaction);
+			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
-
 			resource.insertObject(object, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName()
@@ -506,15 +535,20 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = objects.iterator().next().getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			for (final T object : objects) {
-				resource.insertObject(object, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				for (final T object : objects) {
+					resource.insertObject(object, transaction);
+				}
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				for (final T object : objects) {
+					resource.insertObject(object, transaction);
+				}
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			for (final T object : objects) {
 				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
-
 				resource.insertObject(object, transaction);
 			}
 		} else {
@@ -543,12 +577,15 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = reference.getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.readObjectByReference(reference, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				resource.readObjectByReference(reference, transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				resource.readObjectByReference(reference, transaction);
+			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
-
 			resource.readObjectByReference(reference, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName()
@@ -581,12 +618,15 @@ public class XmlDataStore {
 		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			return (T) resource.readObject(id, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				return (T) resource.readObject(id, transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				return (T) resource.readObject(id, transaction);
+			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(cl, id, transaction);
-
 			return (T) resource.readObject(id, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy "
@@ -619,15 +659,20 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = references.iterator().next().getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			for (final T reference : references) {
-				resource.readObjectByReference(reference, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				for (final T reference : references) {
+					resource.readObjectByReference(reference, transaction);
+				}
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				for (final T reference : references) {
+					resource.readObjectByReference(reference, transaction);
+				}
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			for (final T reference : references) {
 				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
-
 				resource.readObjectByReference(reference, transaction);
 			}
 		} else {
@@ -636,7 +681,7 @@ public class XmlDataStore {
 		}
 		return result;
 	}
-	
+
 	/**
 	 * This method load objects by specified predicate. Can be used only for
 	 * objects of class policy ClassObjectsFile.
@@ -659,8 +704,13 @@ public class XmlDataStore {
 		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-			return resource.readObjects(transaction, predicate);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				return resource.readObjects(transaction, predicate);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				return resource.readObjects(transaction, predicate);
+			}
 		} else {
 			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy "
 			        + XmlDataStorePolicy.ClassObjectsFile);
@@ -687,12 +737,15 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = object.getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.updateObject(object, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				resource.updateObject(object, transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				resource.updateObject(object, transaction);
+			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
-
 			resource.updateObject(object, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName()
@@ -722,12 +775,15 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = reference.getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.deleteObject(reference, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				resource.deleteObject(reference, transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				resource.deleteObject(reference, transaction);
+			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
-
 			resource.deleteObject(reference, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName()
@@ -758,15 +814,20 @@ public class XmlDataStore {
 		final Class<? extends IXmlDataStoreIdentifiable> cl = references.iterator().next().getClass();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			for (final T reference : references) {
-				resource.deleteObject(reference, transaction);
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				for (final T reference : references) {
+					resource.deleteObject(reference, transaction);
+				}
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				for (final T reference : references) {
+					resource.deleteObject(reference, transaction);
+				}
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			for (final T reference : references) {
 				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
-
 				resource.deleteObject(reference, transaction);
 			}
 		} else {

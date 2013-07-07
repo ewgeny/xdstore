@@ -21,17 +21,65 @@ public class XmlDataStoreResourcesManager {
 
 	private IXmlDataStoreIOFactory                                                    factory;
 
+	private final int                                                                 fragmentSize;
+
 	public XmlDataStoreResourcesManager(final String folder,
-	        final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies) {
+	        final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies, final int fragmentSize) {
 		this.folder = folder;
 		this.policies = policies;
 		this.resources = new TreeMap<String, XmlDataStoreResource>();
 		this.locks = new HashMap<String, Long>();
 		this.factory = new XmlDataStoreDefaultIOFactory();
+		this.fragmentSize = fragmentSize;
 	}
 
 	public void setIOFactory(final IXmlDataStoreIOFactory factory) {
 		this.factory = factory;
+	}
+
+	public synchronized XmlDataStoreIndexResource lockIndexResource(
+	        final Class<? extends IXmlDataStoreIdentifiable> cl, final XmlDataStoreTransaction transaction) {
+		XmlDataStoreIndexResource resource = null;
+		final XmlDataStorePolicy policy = policies.get(cl);
+		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
+			final String resourceId = folder + "/" + cl.getSimpleName() + "-index";
+			resource = (XmlDataStoreIndexResource) resources.get(resourceId);
+			if (resource == null) {
+				resources.put(resourceId, resource = new XmlDataStoreIndexResource(this, resourceId, policies, factory,
+				        fragmentSize));
+			}
+			if (!transaction.isResourceRegistred(resource)) {
+				transaction.registerResource(resource);
+				lockResource(resource);
+			}
+		}
+		return resource;
+	}
+
+	synchronized XmlDataStoreResource lockResource(final String resourceId, final XmlDataStoreTransaction transaction) {
+		XmlDataStoreResource resource = resources.get(resourceId);
+		if (resource == null) {
+			resources.put(resourceId, resource = new XmlDataStoreResource(this, resourceId, policies, factory));
+		}
+		if (!transaction.isResourceRegistred(resource)) {
+			transaction.registerResource(resource);
+			lockResource(resource);
+		}
+		return resource;
+	}
+
+	synchronized XmlDataStoreResource lockResource(final Class<? extends IXmlDataStoreIdentifiable> cl,
+	        final String id, final XmlDataStoreTransaction transaction) {
+		final String resourceId = folder + "/" + cl.getSimpleName() + "/" + cl.getSimpleName() + "-" + id;
+		XmlDataStoreResource resource = resources.get(resourceId);
+		if (resource == null) {
+			resources.put(resourceId, resource = new XmlDataStoreResource(this, resourceId, policies, factory));
+		}
+		if (!transaction.isResourceRegistred(resource)) {
+			transaction.registerResource(resource);
+			lockResource(resource);
+		}
+		return resource;
 	}
 
 	public synchronized XmlDataStoreResource lockReferencesResource(

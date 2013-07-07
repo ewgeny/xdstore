@@ -49,7 +49,7 @@ public class XmlDataStoreTransaction {
 	void registerResource(final XmlDataStoreResource resource) {
 		if (!isResourceRegistred(resource)) {
 			resources.put(resource.getResourceId(), resource);
-			resource.prepare();
+			resource.prepare(this);
 		}
 	}
 

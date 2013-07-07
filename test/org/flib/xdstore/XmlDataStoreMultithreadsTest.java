@@ -97,7 +97,7 @@ public class XmlDataStoreMultithreadsTest {
 	private static XmlDataStore initStore(final String storedir) {
 		final XmlDataStore store = new XmlDataStore(storedir);
 		store.setStorePolicy(XdUniverse.class, XmlDataStorePolicy.ClassObjectsFile);
-		store.setStorePolicy(XdGalaxy.class, XmlDataStorePolicy.SingleObjectFile);
+		store.setStorePolicy(XdGalaxy.class, XmlDataStorePolicy.ClassObjectsFile);
 		store.setStorePolicy(XdBlackHole.class, XmlDataStorePolicy.ParentObjectFile);
 		store.setStorePolicy(XdStarSystem.class, XmlDataStorePolicy.SingleObjectFile);
 		store.setStorePolicy(XdStar.class, XmlDataStorePolicy.ParentObjectFile);

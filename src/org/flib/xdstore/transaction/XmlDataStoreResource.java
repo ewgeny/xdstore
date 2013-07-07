@@ -18,19 +18,19 @@ import org.flib.xdstore.serialization.IXmlDataStoreObjectsWriter;
 
 public class XmlDataStoreResource {
 
-	private final XmlDataStoreResourcesManager manager;
+	protected final XmlDataStoreResourcesManager manager;
 
-	private final String                       resourceId;
+	private final String                         resourceId;
 
-	private final boolean                      isReferences;
+	private final boolean                        isReferences;
 
-	private int                                locks = 0;
+	private int                                  locks = 0;
 
-	private final IXmlDataStoreObjectsReader   reader;
+	private final IXmlDataStoreObjectsReader     reader;
 
-	private final IXmlDataStoreObjectsWriter   writer;
+	private final IXmlDataStoreObjectsWriter     writer;
 
-	private final XmlDataStoreResourceCache    cache = new XmlDataStoreResourceCache();
+	private final XmlDataStoreResourceCache      cache = new XmlDataStoreResourceCache();
 
 	XmlDataStoreResource(final XmlDataStoreResourcesManager manager, final String resourceId,
 	        final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies,
@@ -55,8 +55,8 @@ public class XmlDataStoreResource {
 	public String getFileName() {
 		return resourceId + ".xml";
 	}
-
-	synchronized void prepare() {
+	
+	synchronized void prepare(final XmlDataStoreTransaction transaction) {
 		++locks;
 		if (locks == 1) {
 			Collection<IXmlDataStoreIdentifiable> objects = null;
@@ -80,8 +80,13 @@ public class XmlDataStoreResource {
 			}
 			if (objects != null)
 				cache.fillCache(objects);
+			postPrepare(transaction);
 		}
 	}
+
+	void postPrepare(final XmlDataStoreTransaction transaction) {
+	    // do nothing
+    }
 
 	synchronized void commit(final XmlDataStoreTransaction transaction) {
 		final boolean hasChanges = cache.hasChanges(transaction);
@@ -131,7 +136,12 @@ public class XmlDataStoreResource {
 			cache.clearCache();
 		}
 		--locks;
+		postCommit(transaction);
 	}
+
+	void postCommit(final XmlDataStoreTransaction transaction) {
+	    // do nothing
+    }
 
 	synchronized void rollback(final XmlDataStoreTransaction transaction) {
 		cache.rollback(transaction);
@@ -139,7 +149,12 @@ public class XmlDataStoreResource {
 			cache.clearCache();
 		}
 		--locks;
+		postRollback(transaction);
 	}
+	
+	void postRollback(final XmlDataStoreTransaction transaction) {
+	    // do nothing
+    }
 
 	void release() {
 		manager.releaseResource(this);
