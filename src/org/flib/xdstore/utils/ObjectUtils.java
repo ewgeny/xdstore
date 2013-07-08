@@ -16,7 +16,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.flib.xdstore.IXmlDataStoreIdentifiable;
 import org.flib.xdstore.serialization.XmlDataStoreClassProperty;
 
-public class ObjectUtils {
+public final class ObjectUtils {
+	
+	private ObjectUtils() {
+		// do nothing
+	}
 
 	private static final Map<Class<?>, Set<XmlDataStoreClassProperty>> classesProperties = new ConcurrentHashMap<Class<?>, Set<XmlDataStoreClassProperty>>();
 
