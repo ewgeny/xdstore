@@ -49,7 +49,7 @@ public class XmlDataStoreTriggerManager {
 			synchronized (list) {
 	            for (final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger : list) {
 	                if(trigger.getType() == XmlDataStoreTriggerType.Insert) {
-	                	performTrigger(trigger, object);
+	                	trigger.perform(object);
 	                }
                 }
             }
@@ -65,7 +65,7 @@ public class XmlDataStoreTriggerManager {
 			synchronized (list) {
 	            for (final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger : list) {
 	                if(trigger.getType() == XmlDataStoreTriggerType.Update) {
-	                	performTrigger(trigger, object);
+	                	trigger.perform(object);
 	                }
                 }
             }
@@ -81,23 +81,10 @@ public class XmlDataStoreTriggerManager {
 			synchronized (list) {
 	            for (final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger : list) {
 	                if(trigger.getType() == XmlDataStoreTriggerType.Delete) {
-	                	performTrigger(trigger, object);
+	                	trigger.perform(object);
 	                }
                 }
             }
 		}
-	}
-	
-	private <T extends IXmlDataStoreIdentifiable> void performTrigger(final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger, final T object) {
-		// TODO review this code - maybe need to use ThreadPoolExecutor
-    	final Thread thread = new Thread(new Runnable() {
-			
-			@Override
-			public void run() {
-				trigger.perform(object);
-			}
-		});
-    	thread.setDaemon(true);
-    	thread.start();
 	}
 }

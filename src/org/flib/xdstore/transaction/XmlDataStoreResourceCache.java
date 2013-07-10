@@ -295,10 +295,10 @@ public class XmlDataStoreResourceCache {
 				IXmlDataStoreIdentifiable object = null;
 				XmlDataStoreTriggerType type = null;
 				if(record.isInsertChange()) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 					type = XmlDataStoreTriggerType.Insert;
 				} else if(record.isUpdateChange()) {
-					object = ObjectUtils.clone(record.getNewObject());
+					object = record.getNewObject();
 					type = XmlDataStoreTriggerType.Update;
 				} else if(record.isDeleteChange()) {
 					object = record.getObject();
@@ -308,7 +308,7 @@ public class XmlDataStoreResourceCache {
 				if (record.getObject() == null)
 					cache.remove(record.getId());
 				record.unlock(transaction);
-				
+
 				if(type != null)
 					resource.performTriggers(type, object);
 			}
