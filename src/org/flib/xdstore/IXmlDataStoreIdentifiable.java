@@ -4,11 +4,11 @@ package org.flib.xdstore;
  * This interface must be implemented all serialize classes.
  * 
  * @author Евгений
- *
+ * 
  */
 public interface IXmlDataStoreIdentifiable {
 
-	String getId();
+	String getDataStoreId();
 
-	void setId(String id);
+	void setDataStoreId(String dataStoreId);
 }

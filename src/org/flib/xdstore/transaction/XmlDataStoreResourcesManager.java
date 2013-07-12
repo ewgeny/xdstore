@@ -130,7 +130,7 @@ public class XmlDataStoreResourcesManager {
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			final String resourceId = folder + "/" + cl.getSimpleName() + "/" + cl.getSimpleName() + "-"
-			        + object.getId();
+			        + object.getDataStoreId();
 			resource = resources.get(resourceId);
 			if (resource == null) {
 				resources.put(resourceId, resource = new XmlDataStoreResource(this, triggersManager, resourceId, policies, factory));

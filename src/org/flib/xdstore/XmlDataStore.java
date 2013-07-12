@@ -1,6 +1,5 @@
 package org.flib.xdstore;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -137,14 +136,16 @@ public class XmlDataStore {
 	}
 
 	/**
-	 * This method registers trigger.
+	 * This method registers trigger. Every trigger will be executed in change
+	 * transaction and must work only with parameter's object.
 	 * 
-	 * @param trigger This trigger will be registered.
+	 * @param trigger
+	 *            This trigger will be registered.
 	 */
 	public <T extends IXmlDataStoreIdentifiable> void registerTrigger(final IXmlDataStoreTrigger<T> trigger) {
 		triggersManager.registerTrigger(trigger);
 	}
-	
+
 	/**
 	 * This method starts new transaction.
 	 * 
@@ -284,7 +285,7 @@ public class XmlDataStore {
 	 *             This exception will throw if error arises in loading process.
 	 */
 	@SuppressWarnings("unchecked")
-	public <T extends IXmlDataStoreIdentifiable> Map<String, T> loadRoots(final Class<T> cl,
+    public <T extends IXmlDataStoreIdentifiable> Map<String, T> loadRoots(final Class<T> cl,
 	        final IXmlDataStorePredicate<T> predicate) throws XmlDataStoreReadException {
 		if (cl == null)
 			throw new XmlDataStoreRuntimeException("class cannot be null");
@@ -300,7 +301,7 @@ public class XmlDataStore {
 			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
 			return resource.readObjects(transaction, predicate);
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			final Collection<T> result = new ArrayList<T>();
+			final Map<String, T> result = new HashMap<String, T>();
 			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
 
 			final Map<String, IXmlDataStoreIdentifiable> references = referencesResource.readReferences(transaction);
@@ -310,10 +311,10 @@ public class XmlDataStore {
 				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
 				resource.readObjectByReference(reference, transaction);
 				if (predicate.passed((T) reference)) {
-					result.add((T) reference);
+					result.put(reference.getDataStoreId(), (T) reference);
 				}
 			}
-			return (Map<String, T>) result;
+			return result;
 		} else {
 			throw new XmlDataStoreRuntimeException("root's class " + cl.getName() + " must have one policy "
 			        + XmlDataStorePolicy.ClassObjectsFile + " or " + XmlDataStorePolicy.SingleObjectFile);
@@ -420,7 +421,7 @@ public class XmlDataStore {
 
 		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
 		final Class<? extends IXmlDataStoreIdentifiable> cl = root.getClass();
-		final String id = root.getId();
+		final String id = root.getDataStoreId();
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == XmlDataStorePolicy.SingleObjectFile) {
 			// resource with references to roots objects

@@ -13,12 +13,12 @@ public class XmlDataStoreIndexObject implements IXmlDataStoreIdentifiable {
 	private Map<String, IXmlDataStoreIdentifiable>	references	=	new HashMap<String, IXmlDataStoreIdentifiable>();
 
 	@Override
-	public String getId() {
+	public String getDataStoreId() {
 		return id;
 	}
 
 	@Override
-	public void setId(final String id) {
+	public void setDataStoreId(final String id) {
 		this.id = id;
 	}
 	
@@ -35,10 +35,10 @@ public class XmlDataStoreIndexObject implements IXmlDataStoreIdentifiable {
 	}
 	
 	public void addReference(final IXmlDataStoreIdentifiable reference) {
-		references.put(reference.getId(), reference);
+		references.put(reference.getDataStoreId(), reference);
 	}
 	
 	public void removeReference(final IXmlDataStoreIdentifiable reference) {
-		references.remove(reference.getId());
+		references.remove(reference.getDataStoreId());
 	}
 }

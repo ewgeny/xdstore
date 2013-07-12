@@ -17,6 +17,9 @@ import javax.xml.stream.XMLStreamReader;
 
 import org.flib.xdstore.IXmlDataStoreIdentifiable;
 import org.flib.xdstore.XmlDataStorePolicy;
+import org.flib.xdstore.serialization.IXmlDataStoreObjectsReader;
+import org.flib.xdstore.serialization.XmlDataStoreClassProperty;
+import org.flib.xdstore.serialization.XmlDataStoreIOException;
 import org.flib.xdstore.utils.ObjectUtils;
 
 public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsReader {
@@ -25,12 +28,7 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 
 	private Map<Class<?>, Map<String, XmlDataStoreClassProperty>>               properties = new HashMap<Class<?>, Map<String, XmlDataStoreClassProperty>>();
 
-	public XmlDataStoreDefaultObjectsReader() {
-		// do nothing
-	}
-
-	public XmlDataStoreDefaultObjectsReader(
-	        final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies) {
+	public XmlDataStoreDefaultObjectsReader(final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies) {
 		this.policies.putAll(policies);
 	}
 
@@ -105,17 +103,13 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 
 			if (attName.equals("name")) {
 				fieldName[0] = attValue;
-			} else if (attName.equals("isNull")) {
-				if (Boolean.parseBoolean(attValue)) {
-					xmlReader.nextTag();
-					return null;
-				}
 			} else if (attName.equals("class")) {
 				className = attValue;
 			} else if (attName.equals("value")) {
 				value = attValue;
 			}
 		}
+		if(className == null) return null;
 
 		final Class<?> cl = Class.forName(className);
 		if (value != null) {
@@ -440,14 +434,13 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 				fieldName[0] = attValue;
 			} else if (attName.equals("class")) {
 				className = attValue;
-			} else if (attName.equals("id")) {
+			} else if (attName.equals("dataStoreId")) {
 				idValue = attValue;
 			}
 		}
 
 		final IXmlDataStoreIdentifiable result = (IXmlDataStoreIdentifiable) Class.forName(className).newInstance();
-		result.setId(idValue);
+		result.setDataStoreId(idValue);
 		return result;
 	}
-
 }

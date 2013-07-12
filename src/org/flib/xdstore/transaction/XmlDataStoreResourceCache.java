@@ -26,7 +26,7 @@ public class XmlDataStoreResourceCache {
 
 	public synchronized void fillCache(final Collection<IXmlDataStoreIdentifiable> objects) {
 		for (final IXmlDataStoreIdentifiable object : objects) {
-			cache.put(object.getId(), CacheRecord.createReadRecord(object));
+			cache.put(object.getDataStoreId(), CacheRecord.createReadRecord(object));
 		}
 	}
 
@@ -64,7 +64,7 @@ public class XmlDataStoreResourceCache {
 			}
 
 			if (object != null && predicate.passed(object)) {
-				result.put(object.getId(), ObjectUtils.clone(object));
+				result.put(object.getDataStoreId(), ObjectUtils.clone(object));
 			}
 		}
 		return result;
@@ -98,7 +98,7 @@ public class XmlDataStoreResourceCache {
 			}
 
 			if (object != null) {
-				result.put(object.getId(), ObjectUtils.clone(object));
+				result.put(object.getDataStoreId(), ObjectUtils.clone(object));
 			}
 		}
 		return result;
@@ -141,7 +141,7 @@ public class XmlDataStoreResourceCache {
 
 	public synchronized void readByReference(final IXmlDataStoreIdentifiable reference,
 	        final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
-		CacheRecord record = cache.get(reference.getId());
+		CacheRecord record = cache.get(reference.getDataStoreId());
 		if (record != null) {
 			IXmlDataStoreIdentifiable object = null;
 			if (record.isUpdateChange()) {
@@ -173,15 +173,15 @@ public class XmlDataStoreResourceCache {
 		}
 		// ARCH ?
 		throw new XmlDataStoreReadException("cannot load by reference object of class " + reference.getClass()
-		        + " with id " + reference.getId());
+		        + " with id " + reference.getDataStoreId());
 	}
 
 	public synchronized void update(final IXmlDataStoreIdentifiable newObject, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreUpdateException {
-		CacheRecord record = cache.get(newObject.getId());
+		CacheRecord record = cache.get(newObject.getDataStoreId());
 		if (record == null) {
 			throw new XmlDataStoreUpdateException("object of class " + newObject.getClass() + " with id "
-			        + newObject.getId() + " does not exists");
+			        + newObject.getDataStoreId() + " does not exists");
 		} else {
 			if (record.isReadChange()) {
 				record.lock(transaction);
@@ -192,7 +192,7 @@ public class XmlDataStoreResourceCache {
 					record.setNewObject(ObjectUtils.clone(newObject));
 				} else {
 					throw new XmlDataStoreUpdateException("object of class " + newObject.getClass() + " with id "
-					        + newObject.getId() + " was deleted this transaction");
+					        + newObject.getDataStoreId() + " was deleted this transaction");
 				}
 			} else if (record.canBeChangedByTransaction(transaction)) {
 				record.lock(transaction);
@@ -200,7 +200,7 @@ public class XmlDataStoreResourceCache {
 				record.markUpdate();
 			} else {
 				throw new XmlDataStoreUpdateException("concurrent modification one object of class "
-				        + newObject.getClass() + " with id " + newObject.getId());
+				        + newObject.getClass() + " with id " + newObject.getDataStoreId());
 			}
 		}
 
@@ -208,16 +208,16 @@ public class XmlDataStoreResourceCache {
 		if (map == null) {
 			changes.put(transaction.getTransactionId(), map = new HashMap<String, CacheRecord>());
 		}
-		if (!map.containsKey(newObject.getId()))
-			map.put(newObject.getId(), record);
+		if (!map.containsKey(newObject.getDataStoreId()))
+			map.put(newObject.getDataStoreId(), record);
 	}
 
 	public synchronized void delete(final IXmlDataStoreIdentifiable oldObject, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreDeleteException {
-		CacheRecord record = cache.get(oldObject.getId());
+		CacheRecord record = cache.get(oldObject.getDataStoreId());
 		if (record == null) {
 			throw new XmlDataStoreDeleteException("object of class " + oldObject.getClass() + " with id "
-			        + oldObject.getId() + " does not exists");
+			        + oldObject.getDataStoreId() + " does not exists");
 		} else {
 			if (record.isReadChange()) {
 				record.lock(transaction);
@@ -225,13 +225,13 @@ public class XmlDataStoreResourceCache {
 				record.markDelete();
 			} else if (!record.isCommitedState() && record.changedByTransaction(transaction)) {
 				if (record.isInsertChange()) {
-					cache.remove(oldObject.getId());
+					cache.remove(oldObject.getDataStoreId());
 				} else if (record.isUpdateChange()) {
 					record.setNewObject(null);
 					record.markDelete();
 				} else {
 					throw new XmlDataStoreDeleteException("trying to double delete one object of class "
-					        + oldObject.getClass() + " with id " + oldObject.getId());
+					        + oldObject.getClass() + " with id " + oldObject.getDataStoreId());
 				}
 			} else if (record.canBeChangedByTransaction(transaction)) {
 				record.lock(transaction);
@@ -239,7 +239,7 @@ public class XmlDataStoreResourceCache {
 				record.markDelete();
 			} else {
 				throw new XmlDataStoreDeleteException("concurrent modification one object of class "
-				        + oldObject.getClass() + " with id " + oldObject.getId());
+				        + oldObject.getClass() + " with id " + oldObject.getDataStoreId());
 			}
 		}
 
@@ -247,39 +247,39 @@ public class XmlDataStoreResourceCache {
 		if (map == null) {
 			changes.put(transaction.getTransactionId(), map = new HashMap<String, CacheRecord>());
 		}
-		if (!map.containsKey(oldObject.getId()))
-			map.put(oldObject.getId(), record);
+		if (!map.containsKey(oldObject.getDataStoreId()))
+			map.put(oldObject.getDataStoreId(), record);
 	}
 
 	public synchronized void insert(final IXmlDataStoreIdentifiable newObject, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreInsertException {
-		CacheRecord record = cache.get(newObject.getId());
+		CacheRecord record = cache.get(newObject.getDataStoreId());
 		if (record == null) {
-			cache.put(newObject.getId(),
+			cache.put(newObject.getDataStoreId(),
 			        record = CacheRecord.createInsertRecord(ObjectUtils.clone(newObject), transaction));
 		} else {
 			if (record.changedByTransaction(transaction)) {
 				if (record.isDeleteChange()) {
 					throw new XmlDataStoreInsertException("trying to insert deleted object of class "
-					        + newObject.getClass() + " with id " + newObject.getId());
+					        + newObject.getClass() + " with id " + newObject.getDataStoreId());
 				} else if (record.isInsertChange()) {
 					throw new XmlDataStoreInsertException("trying to double insert one object of class "
-					        + newObject.getClass() + " with id " + newObject.getId());
+					        + newObject.getClass() + " with id " + newObject.getDataStoreId());
 				} else {
 					throw new XmlDataStoreInsertException("object of class " + newObject.getClass() + " with id "
-					        + newObject.getId() + " is exists");
+					        + newObject.getDataStoreId() + " is exists");
 				}
 			} else {
 				throw new XmlDataStoreInsertException("concurrent modification one object of class "
-				        + newObject.getClass() + " with id " + newObject.getId());
+				        + newObject.getClass() + " with id " + newObject.getDataStoreId());
 			}
 		}
 		Map<String, CacheRecord> map = changes.get(transaction.getTransactionId());
 		if (map == null) {
 			changes.put(transaction.getTransactionId(), map = new HashMap<String, CacheRecord>());
 		}
-		if (!map.containsKey(newObject.getId()))
-			map.put(newObject.getId(), record);
+		if (!map.containsKey(newObject.getDataStoreId()))
+			map.put(newObject.getDataStoreId(), record);
 	}
 
 	public synchronized boolean hasChanges(final XmlDataStoreTransaction transaction) {
@@ -363,7 +363,7 @@ public class XmlDataStoreResourceCache {
 
 		public static CacheRecord createReadRecord(final IXmlDataStoreIdentifiable object) {
 			CacheRecord record = new CacheRecord();
-			record.id = object.getId();
+			record.id = object.getDataStoreId();
 			record.object = object;
 			record.newObject = null;
 			record.transaction = null;
@@ -375,7 +375,7 @@ public class XmlDataStoreResourceCache {
 		public static CacheRecord createUpdateRecord(final IXmlDataStoreIdentifiable oldObject,
 		        final IXmlDataStoreIdentifiable newObject, final XmlDataStoreTransaction transaction) {
 			CacheRecord record = new CacheRecord();
-			record.id = oldObject.getId();
+			record.id = oldObject.getDataStoreId();
 			record.object = oldObject;
 			record.newObject = newObject;
 			record.transaction = transaction;
@@ -387,7 +387,7 @@ public class XmlDataStoreResourceCache {
 		public static CacheRecord createDeleteRecord(final IXmlDataStoreIdentifiable oldObject,
 		        final XmlDataStoreTransaction transaction) {
 			CacheRecord record = new CacheRecord();
-			record.id = oldObject.getId();
+			record.id = oldObject.getDataStoreId();
 			record.object = oldObject;
 			record.newObject = null;
 			record.transaction = transaction;
@@ -399,7 +399,7 @@ public class XmlDataStoreResourceCache {
 		public static CacheRecord createInsertRecord(final IXmlDataStoreIdentifiable newObject,
 		        final XmlDataStoreTransaction transaction) {
 			CacheRecord record = new CacheRecord();
-			record.id = newObject.getId();
+			record.id = newObject.getDataStoreId();
 			record.object = null;
 			record.newObject = newObject;
 			record.transaction = transaction;

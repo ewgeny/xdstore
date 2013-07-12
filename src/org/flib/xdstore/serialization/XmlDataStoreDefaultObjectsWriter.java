@@ -10,6 +10,9 @@ import java.util.Set;
 
 import org.flib.xdstore.IXmlDataStoreIdentifiable;
 import org.flib.xdstore.XmlDataStorePolicy;
+import org.flib.xdstore.serialization.IXmlDataStoreObjectsWriter;
+import org.flib.xdstore.serialization.XmlDataStoreClassProperty;
+import org.flib.xdstore.serialization.XmlDataStoreIOException;
 import org.flib.xdstore.utils.ObjectUtils;
 
 public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWriter {
@@ -18,12 +21,7 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 
 	private Map<Class<?>, Set<XmlDataStoreClassProperty>>                       properties = new HashMap<Class<?>, Set<XmlDataStoreClassProperty>>();
 
-	public XmlDataStoreDefaultObjectsWriter() {
-		// do nothing
-	}
-
-	public XmlDataStoreDefaultObjectsWriter(
-	        final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies) {
+	public XmlDataStoreDefaultObjectsWriter(final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies) {
 		this.policies.putAll(policies);
 	}
 
@@ -72,8 +70,8 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		writeNewLevelAndTabulations(writer, level);
 		writer.append("<reference class=\"");
 		writer.append(object.getClass().getName());
-		writer.append("\" id=\"");
-		writer.append(object.getId());
+		writer.append("\" dataStoreId=\"");
+		writer.append(object.getDataStoreId());
 		writer.append("\"/>");
 	}
 
@@ -85,10 +83,8 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 			properties.put(cl, props = ObjectUtils.getProperties(cl));
 		}
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object isNull=\"false\" class=\"");
+		writer.append("<object class=\"");
 		writer.append(object.getClass().getName());
-		writer.append("\" id=\"");
-		writer.append(object.getId());
 		writer.append("\">");
 
 		for (final XmlDataStoreClassProperty property : props) {
@@ -101,8 +97,6 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 			final Class<?> c = value.getClass();
 			if (c.isArray()) {
 				writeArray(property.name, c, value, writer, level + 1);
-			} else if (c.isPrimitive()) {
-				writePrimitiveValue(property.name, c, value, writer, level + 1);
 			} else if (isSimpleType(c, value)) {
 				writeSimpleType(property.name, c, value, writer, level + 1);
 			} else if (c.isEnum()) {
@@ -128,12 +122,12 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 
 	private void writeNull(final String name, final Writer writer, int level) throws IOException {
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object name=\"").append(name).append("\" isNull=\"true\"/>");
+		writer.append("<object name=\"").append(name).append("\"/>");
 	}
 
 	private void writeNull(final Writer writer, int level) throws IOException {
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object isNull=\"true\"/>");
+		writer.append("<object/>");
 	}
 
 	@SuppressWarnings("unchecked")
@@ -151,8 +145,6 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 				writeNull(writer, level + 1);
 			} else if (c.isArray()) {
 				writeArray(c, object, writer, level + 1);
-			} else if (c.isPrimitive()) {
-				writePrimitiveValue(c, object, writer, level + 1);
 			} else if (isSimpleType(c, object)) {
 				writeSimpleType(c, object, writer, level + 1);
 			} else if (c.isEnum()) {
@@ -186,8 +178,6 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 				writeNull(writer, level + 1);
 			} else if (c.isArray()) {
 				writeArray(c, object, writer, level + 1);
-			} else if (c.isPrimitive()) {
-				writePrimitiveValue(c, object, writer, level + 1);
 			} else if (isSimpleType(c, object)) {
 				writeSimpleType(c, object, writer, level + 1);
 			} else if (c.isEnum()) {
@@ -207,31 +197,17 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		writer.append("</array>");
 	}
 
-	private void writePrimitiveValue(final String name, final Class<?> cl, final Object object, final Writer writer,
-	        int level) throws IOException {
-		writeNewLevelAndTabulations(writer, level);
-		writer.append("<primitive name=\"").append(name).append("\" class=\"").append(cl.getName())
-		        .append("\" value=\"").append(encode(object.toString())).append("\"/>");
-	}
-
-	private void writePrimitiveValue(final Class<?> cl, final Object object, final Writer writer, int level)
-	        throws IOException {
-		writeNewLevelAndTabulations(writer, level);
-		writer.append("<primitive class=\"").append(cl.getName()).append("\" value=\"")
-		        .append(encode(object.toString())).append("\"/>");
-	}
-
 	private void writeSimpleType(final String name, final Class<?> cl, final Object object, final Writer writer,
 	        int level) throws IOException {
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object name=\"").append(name).append("\" isNull=\"false\" class=\"").append(cl.getName())
+		writer.append("<object name=\"").append(name).append("\" class=\"").append(cl.getName())
 		        .append("\" value=\"").append(encode(object.toString())).append("\"/>");
 	}
 
 	private void writeSimpleType(final Class<?> cl, final Object object, final Writer writer, int level)
 	        throws IOException {
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object isNull=\"false\" class=\"").append(cl.getName()).append("\" value=\"")
+		writer.append("<object class=\"").append(cl.getName()).append("\" value=\"")
 		        .append(encode(object.toString())).append("\"/>");
 	}
 
@@ -449,7 +425,7 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		}
 
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object name=\"").append(name).append("\" isNull=\"false\" class=\"").append(cl.getName())
+		writer.append("<object name=\"").append(name).append("\" class=\"").append(cl.getName())
 		        .append("\">");
 		for (final XmlDataStoreClassProperty property : props) {
 			final Object value = property.get(object);
@@ -458,8 +434,6 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 				writeNull(property.name, writer, level + 1);
 			} else if (c.isArray()) {
 				writeArray(property.name, c, value, writer, level + 1);
-			} else if (c.isPrimitive()) {
-				writePrimitiveValue(property.name, c, value, writer, level + 1);
 			} else if (isSimpleType(c, value)) {
 				writeSimpleType(property.name, c, value, writer, level + 1);
 			} else if (c.isEnum()) {
@@ -487,7 +461,7 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		}
 
 		writeNewLevelAndTabulations(writer, level);
-		writer.append("<object isNull=\"false\" class=\"").append(cl.getName()).append("\">");
+		writer.append("<object class=\"").append(cl.getName()).append("\">");
 		for (final XmlDataStoreClassProperty property : props) {
 			final Object value = property.get(object);
 			final Class<?> c = value != null ? value.getClass() : null;
@@ -495,8 +469,6 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 				writeNull(property.name, writer, level + 1);
 			} else if (c.isArray()) {
 				writeArray(property.name, c, value, writer, level + 1);
-			} else if (c.isPrimitive()) {
-				writePrimitiveValue(property.name, c, value, writer, level + 1);
 			} else if (isSimpleType(c, value)) {
 				writeSimpleType(property.name, c, value, writer, level + 1);
 			} else if (c.isEnum()) {
@@ -521,8 +493,8 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		writeNewLevelAndTabulations(writer, level);
 		writer.append("<reference name=\"").append(name).append("\" class=\"");
 		writer.append(object.getClass().getName());
-		writer.append("\" id=\"");
-		writer.append(object.getId());
+		writer.append("\" dataStoreId=\"");
+		writer.append(object.getDataStoreId());
 		writer.append("\"/>");
 	}
 
@@ -556,4 +528,5 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		for (int i = 0; i < level; ++i)
 			writer.append('\t');
 	}
+
 }

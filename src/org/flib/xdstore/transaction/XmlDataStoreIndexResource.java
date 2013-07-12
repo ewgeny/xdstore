@@ -38,7 +38,7 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 				final Map<String, IXmlDataStoreIdentifiable> objects = ((XmlDataStoreIndexObject) indexObject)
 				        .getReferences();
 				for (final IXmlDataStoreIdentifiable object : objects.values()) {
-					index.put(object.getId(), indexObject.getId());
+					index.put(object.getDataStoreId(), indexObject.getDataStoreId());
 				}
 			}
 		}
@@ -71,7 +71,7 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 		final Map<String, IXmlDataStoreIdentifiable> result = new HashMap<String, IXmlDataStoreIdentifiable>();
 		final Map<String, IXmlDataStoreIdentifiable> indexObjects = super.readObjects(transaction);
 		for (final IXmlDataStoreIdentifiable indexObject : indexObjects.values()) {
-			final XmlDataStoreResource resource = manager.lockResource(indexObject.getId(), transaction);
+			final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
 			result.putAll(resource.readObjects(transaction));
 		}
 		return result;
@@ -82,7 +82,7 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 		final Map<String, T> result = new HashMap<String, T>();
 		final Map<String, IXmlDataStoreIdentifiable> indexObjects = super.readObjects(transaction);
 		for (final IXmlDataStoreIdentifiable indexObject : indexObjects.values()) {
-			final XmlDataStoreResource resource = manager.lockResource(indexObject.getId(), transaction);
+			final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
 			result.putAll(resource.readObjects(transaction, predicate));
 		}
 		return result;
@@ -90,10 +90,10 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	public void readObjectByReference(final IXmlDataStoreIdentifiable reference,
 	        final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
-		final String resourceId = index.get(reference.getId());
+		final String resourceId = index.get(reference.getDataStoreId());
 		if (resourceId == null) {
 			throw new XmlDataStoreReadException("cannot load by reference object of class " + reference.getClass()
-			        + " with id " + reference.getId());
+			        + " with id " + reference.getDataStoreId());
 		}
 		final XmlDataStoreResource resource = manager.lockResource(resourceId, transaction);
 		resource.readObjectByReference(reference, transaction);
@@ -111,7 +111,7 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	public void insertObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreInsertException {
-		final String objectId = object.getId();
+		final String objectId = object.getDataStoreId();
 		final String resourceId = index.get(objectId);
 		if (resourceId != null) {
 			throw new XmlDataStoreInsertException("object of class " + object.getClass() + " with id " + objectId
@@ -123,15 +123,15 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 			XmlDataStoreIndexObject indexObject = (XmlDataStoreIndexObject) tmp;
 			if (indexObject.getCountReferences() < fragmentSize) {
 				try {
-					indexObject = (XmlDataStoreIndexObject) super.readObject(indexObject.getId(), transaction);
+					indexObject = (XmlDataStoreIndexObject) super.readObject(indexObject.getDataStoreId(), transaction);
 				} catch (final XmlDataStoreReadException e) {
 					throw new XmlDataStoreInsertException(e);
 				}
 
-				final XmlDataStoreResource resource = manager.lockResource(indexObject.getId(), transaction);
+				final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
 				resource.insertObject(object, transaction); // will be
 				                                            // rolled back
-				index.put(objectId, indexObject.getId());
+				index.put(objectId, indexObject.getDataStoreId());
 				indexObject.addReference(object);
 				try {
 					super.updateObject(indexObject, transaction);
@@ -153,11 +153,11 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 		if (!isInserted) {
 			final XmlDataStoreResource resource = manager.lockResource(object.getClass(), objectId, transaction);
 			final XmlDataStoreIndexObject indexObject = new XmlDataStoreIndexObject();
-			indexObject.setId(resource.getResourceId());
+			indexObject.setDataStoreId(resource.getResourceId());
 
 			resource.insertObject(object, transaction); // will be rolled
 			                                            // back
-			index.put(objectId, indexObject.getId());
+			index.put(objectId, indexObject.getDataStoreId());
 			indexObject.addReference(object);
 			try {
 				super.insertObject(indexObject, transaction);
@@ -177,9 +177,9 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	public void updateObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreUpdateException {
-		final String resourceId = index.get(object.getId());
+		final String resourceId = index.get(object.getDataStoreId());
 		if (resourceId == null) {
-			throw new XmlDataStoreUpdateException("object of class " + object.getClass() + " with id " + object.getId()
+			throw new XmlDataStoreUpdateException("object of class " + object.getClass() + " with id " + object.getDataStoreId()
 			        + " does not exists");
 		}
 		final XmlDataStoreResource resource = manager.lockResource(resourceId, transaction);
@@ -188,7 +188,7 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	public void deleteObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreDeleteException {
-		final String objectId = object.getId();
+		final String objectId = object.getDataStoreId();
 		final String resourceId = index.get(objectId);
 		if (resourceId == null) {
 			throw new XmlDataStoreDeleteException("object of class " + object.getClass() + " with id " + objectId
