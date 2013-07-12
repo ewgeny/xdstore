@@ -191,308 +191,6 @@ public class XmlDataStore {
 	}
 
 	/**
-	 * This method saves root into store by store policy for the type (class) of
-	 * the element.
-	 * 
-	 * @param root
-	 *            Saved object
-	 * @throws XmlDataStoreInsertException
-	 *             This exception throws if in the save process arise error.
-	 */
-	public <T extends IXmlDataStoreIdentifiable> void saveRoot(final T root) throws XmlDataStoreInsertException {
-		if (root == null)
-			throw new XmlDataStoreRuntimeException("root cannot be null");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final Class<? extends IXmlDataStoreIdentifiable> cl = root.getClass();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			// resource with references to roots objects
-			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
-			// resource with root object
-			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(root, transaction);
-
-			referencesResource.insertReference(root, transaction);
-			resource.insertObject(root, transaction);
-		} else if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			// resource with roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.insertObject(root, transaction);
-		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " has policy "
-			        + XmlDataStorePolicy.ParentObjectFile);
-		}
-	}
-
-	/**
-	 * This method loads all root elements of specified class.
-	 * 
-	 * @param cl
-	 *            Specified class
-	 * @return Return map of the root elements.
-	 * @throws XmlDataStoreReadException
-	 *             This exception throws if in the load process arise error.
-	 */
-	@SuppressWarnings("unchecked")
-	public <T extends IXmlDataStoreIdentifiable> Map<String, T> loadRoots(final Class<T> cl)
-	        throws XmlDataStoreReadException {
-		if (cl == null)
-			throw new XmlDataStoreRuntimeException("class cannot be null");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		Map<String, IXmlDataStoreIdentifiable> objects = null;
-		XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			// resource with references to roots objects
-			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
-
-			objects = referencesResource.readReferences(transaction);
-			for (final Map.Entry<String, IXmlDataStoreIdentifiable> entry : objects.entrySet()) {
-				final XmlDataStoreResource resource = resourcesManager
-				        .lockObjectResource(entry.getValue(), transaction);
-
-				resource.readObjectByReference(entry.getValue(), transaction);
-			}
-		} else if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			// resource with roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			objects = resource.readObjects(transaction);
-		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " has policy "
-			        + XmlDataStorePolicy.ParentObjectFile);
-		}
-		return (Map<String, T>) objects;
-	}
-
-	/**
-	 * This method load roots by specified predicate. Can be used only for roots
-	 * of class policy ClassObjectsFile and SingleObjectFile.
-	 * 
-	 * @param cl
-	 *            Class of roots.
-	 * @param predicate
-	 *            Predicate for filtering roots.
-	 * @return Return map of roots.
-	 * @throws XmlDataStoreReadException
-	 *             This exception will throw if error arises in loading process.
-	 */
-	@SuppressWarnings("unchecked")
-    public <T extends IXmlDataStoreIdentifiable> Map<String, T> loadRoots(final Class<T> cl,
-	        final IXmlDataStorePredicate<T> predicate) throws XmlDataStoreReadException {
-		if (cl == null)
-			throw new XmlDataStoreRuntimeException("class cannot be null");
-		if (predicate == null)
-			throw new XmlDataStoreRuntimeException("predicate cannot be null");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-			return resource.readObjects(transaction, predicate);
-		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			final Map<String, T> result = new HashMap<String, T>();
-			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
-
-			final Map<String, IXmlDataStoreIdentifiable> references = referencesResource.readReferences(transaction);
-			for (final Map.Entry<String, IXmlDataStoreIdentifiable> entry : references.entrySet()) {
-				final IXmlDataStoreIdentifiable reference = entry.getValue();
-
-				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
-				resource.readObjectByReference(reference, transaction);
-				if (predicate.passed((T) reference)) {
-					result.put(reference.getDataStoreId(), (T) reference);
-				}
-			}
-			return result;
-		} else {
-			throw new XmlDataStoreRuntimeException("root's class " + cl.getName() + " must have one policy "
-			        + XmlDataStorePolicy.ClassObjectsFile + " or " + XmlDataStorePolicy.SingleObjectFile);
-		}
-	}
-
-	/**
-	 * This method load one root element by the identifier.
-	 * 
-	 * @param cl
-	 *            Class of the required root element.
-	 * @param id
-	 *            Identifier of the required element.
-	 * @return Return required root element if exist, else this method throws
-	 *         exception.
-	 * @throws XmlDataStoreReadException
-	 *             This exception will be throw if required object isn't exist.
-	 */
-	@SuppressWarnings("unchecked")
-	public <T extends IXmlDataStoreIdentifiable> T loadRoot(final Class<T> cl, final String id)
-	        throws XmlDataStoreReadException {
-		if (cl == null)
-			throw new XmlDataStoreRuntimeException("class cannot be null");
-		if (StringUtils.isBlank(id))
-			throw new XmlDataStoreRuntimeException("id cannot be blank");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		IXmlDataStoreIdentifiable object = null;
-		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			// resource with references to roots objects
-			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
-			object = referencesResource.readReference(id, transaction);
-
-			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
-
-			resource.readObjectByReference(object, transaction);
-		} else if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			// resource with roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			object = resource.readObject(id, transaction);
-		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " has policy "
-			        + XmlDataStorePolicy.ParentObjectFile);
-		}
-		return (T) object;
-	}
-
-	/**
-	 * This method updates specified root object.
-	 * 
-	 * @param root
-	 *            Specified root object for update.
-	 * @throws XmlDataStoreUpdateException
-	 *             This exception will be throw if an error arises in update
-	 *             operation.
-	 */
-	public <T extends IXmlDataStoreIdentifiable> void updateRoot(final T root) throws XmlDataStoreUpdateException {
-		if (root == null)
-			throw new XmlDataStoreRuntimeException("root cannot be null");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final Class<? extends IXmlDataStoreIdentifiable> cl = root.getClass();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			// resource with references to roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(root, transaction);
-
-			resource.updateObject(root, transaction);
-		} else if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			// resource with roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.updateObject(root, transaction);
-		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " has policy "
-			        + XmlDataStorePolicy.ParentObjectFile);
-		}
-	}
-
-	/**
-	 * This method deletes specified root object.
-	 * 
-	 * @param root
-	 *            Specified root object for delete.
-	 * @throws XmlDataStoreUpdateException
-	 *             This exception will be throw if an error arises in delete
-	 *             operation.
-	 */
-	public <T extends IXmlDataStoreIdentifiable> void deleteRoot(final T root) throws XmlDataStoreReadException,
-	        XmlDataStoreDeleteException {
-		if (root == null)
-			throw new XmlDataStoreRuntimeException("root cannot be null");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final Class<? extends IXmlDataStoreIdentifiable> cl = root.getClass();
-		final String id = root.getDataStoreId();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			// resource with references to roots objects
-			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
-
-			final IXmlDataStoreIdentifiable reference = referencesResource.readReference(id, transaction);
-
-			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(root, transaction);
-
-			referencesResource.deleteReference(reference, transaction);
-			resource.deleteObject(root, transaction);
-		} else if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			// resource with roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			resource.deleteObject(root, transaction);
-		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " has policy "
-			        + XmlDataStorePolicy.ParentObjectFile);
-		}
-	}
-
-	/**
-	 * This method deletes specified root object by identifier.
-	 * 
-	 * @param cl
-	 *            Specified root class.
-	 * @param id
-	 *            Specified root identifier.
-	 * @throws XmlDataStoreReadException
-	 *             This exception will be throw if the root object isn't exist.
-	 * @throws XmlDataStoreDeleteException
-	 *             This exception will be throw if an error arises in delete
-	 *             process.
-	 */
-	public <T extends IXmlDataStoreIdentifiable> void deleteRoot(final Class<T> cl, final String id)
-	        throws XmlDataStoreReadException, XmlDataStoreDeleteException {
-		if (cl == null)
-			throw new XmlDataStoreRuntimeException("class cannot be null");
-		if (StringUtils.isBlank(id))
-			throw new XmlDataStoreRuntimeException("id cannot be blank");
-
-		if (!checkIsInTransaction())
-			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
-
-		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
-		final XmlDataStorePolicy policy = policies.get(cl);
-		if (policy == XmlDataStorePolicy.SingleObjectFile) {
-			// resource with references to roots objects
-			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
-
-			final IXmlDataStoreIdentifiable reference = referencesResource.readReference(id, transaction);
-
-			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
-
-			referencesResource.deleteReference(reference, transaction);
-			resource.deleteObject(reference, transaction);
-		} else if (policy == XmlDataStorePolicy.ClassObjectsFile) {
-			// resource with roots objects
-			final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
-
-			final IXmlDataStoreIdentifiable object = resource.readObject(id, transaction);
-
-			resource.deleteObject(object, transaction);
-		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " has policy "
-			        + XmlDataStorePolicy.ParentObjectFile);
-		}
-	}
-
-	/**
 	 * This method saves specified object.
 	 * 
 	 * @param object
@@ -520,7 +218,10 @@ public class XmlDataStore {
 				resource.insertObject(object, transaction);
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
+
+			referencesResource.insertReference(object, transaction);
 			resource.insertObject(object, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName()
@@ -563,8 +264,10 @@ public class XmlDataStore {
 				}
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
 			for (final T object : objects) {
 				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
+				referencesResource.insertReference(object, transaction);
 				resource.insertObject(object, transaction);
 			}
 		} else {
@@ -699,8 +402,7 @@ public class XmlDataStore {
 	}
 
 	/**
-	 * This method load objects by specified predicate. Can be used only for
-	 * objects of class policy ClassObjectsFile.
+	 * This method load all objects of specified class.
 	 * 
 	 * @param cl
 	 *            Class of objects.
@@ -710,6 +412,54 @@ public class XmlDataStore {
 	 * @throws XmlDataStoreReadException
 	 *             This exception will throw if error arises in loading process.
 	 */
+	@SuppressWarnings("unchecked")
+	public <T extends IXmlDataStoreIdentifiable> Map<String, T> loadObjects(final Class<T> cl)
+	        throws XmlDataStoreReadException {
+		if (cl == null)
+			throw new XmlDataStoreRuntimeException("class cannot be null");
+
+		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
+		final XmlDataStorePolicy policy = policies.get(cl);
+		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				return (Map<String, T>) resource.readObjects(transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				return (Map<String, T>) resource.readObjects(transaction);
+			}
+		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final Map<String, T> result = new HashMap<String, T>();
+			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
+
+			final Map<String, IXmlDataStoreIdentifiable> references = referencesResource.readReferences(transaction);
+			for (final Map.Entry<String, IXmlDataStoreIdentifiable> entry : references.entrySet()) {
+				final IXmlDataStoreIdentifiable reference = entry.getValue();
+
+				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
+				resource.readObjectByReference(reference, transaction);
+				
+				result.put(reference.getDataStoreId(), (T) reference);
+			}
+			return result;
+		} else {
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy "
+			        + XmlDataStorePolicy.ClassObjectsFile);
+		}
+	}
+
+	/**
+	 * This method load objects by specified predicate.
+	 * 
+	 * @param cl
+	 *            Class of objects.
+	 * @param predicate
+	 *            Predicate for filtering objects.
+	 * @return Return map of objects.
+	 * @throws XmlDataStoreReadException
+	 *             This exception will throw if error arises in loading process.
+	 */
+	@SuppressWarnings("unchecked")
 	public <T extends IXmlDataStoreIdentifiable> Map<String, T> loadObjects(final Class<T> cl,
 	        final IXmlDataStorePredicate<T> predicate) throws XmlDataStoreReadException {
 		if (cl == null)
@@ -727,6 +477,21 @@ public class XmlDataStore {
 				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
 				return resource.readObjects(transaction, predicate);
 			}
+		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final Map<String, T> result = new HashMap<String, T>();
+			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
+
+			final Map<String, IXmlDataStoreIdentifiable> references = referencesResource.readReferences(transaction);
+			for (final Map.Entry<String, IXmlDataStoreIdentifiable> entry : references.entrySet()) {
+				final IXmlDataStoreIdentifiable reference = entry.getValue();
+
+				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
+				resource.readObjectByReference(reference, transaction);
+				if (predicate.passed((T) reference)) {
+					result.put(reference.getDataStoreId(), (T) reference);
+				}
+			}
+			return result;
 		} else {
 			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy "
 			        + XmlDataStorePolicy.ClassObjectsFile);
@@ -799,7 +564,9 @@ public class XmlDataStore {
 				resource.deleteObject(reference, transaction);
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
+			referencesResource.deleteReference(reference, transaction);
 			resource.deleteObject(reference, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName()
@@ -842,8 +609,10 @@ public class XmlDataStore {
 				}
 			}
 		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final XmlDataStoreResource referencesResource = resourcesManager.lockReferencesResource(cl, transaction);
 			for (final T reference : references) {
 				final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
+				referencesResource.deleteReference(reference, transaction);
 				resource.deleteObject(reference, transaction);
 			}
 		} else {
