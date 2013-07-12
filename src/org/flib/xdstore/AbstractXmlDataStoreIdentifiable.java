@@ -1,7 +1,7 @@
 package org.flib.xdstore;
 
 
-public class AbstractXmlDataStoreIdentifiable implements IXmlDataStoreIdentifiable {
+public abstract class AbstractXmlDataStoreIdentifiable implements IXmlDataStoreIdentifiable {
 	
 	private String	dataStoreId;
 
