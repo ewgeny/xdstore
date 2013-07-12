@@ -28,7 +28,7 @@ public class InsertUniverseOperation implements Runnable {
 		System.out.println("InsertUniverseOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			store.saveRoot(universe);
+			store.saveObject(universe);
 			store.saveObjects(universe.getGalaxies());
 			for (final XdGalaxy galaxy : universe.getGalaxies()) {
 				store.saveObjects(galaxy.getSystems());
@@ -45,37 +45,37 @@ public class InsertUniverseOperation implements Runnable {
 
 	private static XdUniverse generateBigUniverse(int countGalaxies, int countStarSystems, int countPlanets) {
 		final XdUniverse universe = new XdUniverse();
-		universe.setId(nextStringId());
+		universe.setDataStoreId(nextStringId());
 		universe.setGalaxies(new ArrayList<XdGalaxy>());
 
 		for (int i = 0; i < countGalaxies; ++i) {
 			final XdGalaxy galaxy = new XdGalaxy();
-			galaxy.setId(nextStringId());
+			galaxy.setDataStoreId(nextStringId());
 			galaxy.setSystems(new LinkedList<XdStarSystem>());
 
 			universe.addGalaxy(galaxy);
 
 			final XdBlackHole hole = new XdBlackHole();
-			hole.setId(nextStringId());
+			hole.setDataStoreId(nextStringId());
 
 			galaxy.setHole(hole);
 
 			for (int j = 0; j < countStarSystems; ++j) {
 				final XdStarSystem system = new XdStarSystem();
-				system.setId(nextStringId());
+				system.setDataStoreId(nextStringId());
 				system.setStars(new LinkedList<XdStar>());
 				system.setPlanets(new ArrayList<XdPlanet>());
 
 				galaxy.addSystem(system);
 
 				final XdStar star = new XdStar();
-				star.setId(nextStringId());
+				star.setDataStoreId(nextStringId());
 
 				system.addStar(star);
 
 				for (int k = 0; k < countPlanets; ++k) {
 					final XdPlanet planet = new XdPlanet();
-					planet.setId(nextStringId());
+					planet.setDataStoreId(nextStringId());
 
 					system.addPlanet(planet);
 				}

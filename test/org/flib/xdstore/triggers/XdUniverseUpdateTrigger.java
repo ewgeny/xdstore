@@ -19,7 +19,7 @@ public class XdUniverseUpdateTrigger implements IXmlDataStoreTrigger<XdUniverse>
 
 	@Override
 	public void perform(final XdUniverse object) {
-		System.out.println("UPDATED XdUniverse " + object.getId());
+		System.out.println("UPDATED XdUniverse " + object.getDataStoreId());
 	}
 
 }

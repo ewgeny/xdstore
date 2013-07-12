@@ -20,9 +20,9 @@ public class UpdateUniverseOperation implements Runnable {
 		System.out.println("UpdateUniverseOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			final Map<String, XdUniverse> universes = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> universes = store.loadObjects(XdUniverse.class);
 			for (final XdUniverse uni : universes.values()) {
-				store.updateRoot(uni);
+				store.updateObject(uni);
 				break;
 			}
 

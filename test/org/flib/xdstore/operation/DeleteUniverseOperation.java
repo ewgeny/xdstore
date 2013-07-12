@@ -22,13 +22,13 @@ public class DeleteUniverseOperation implements Runnable {
 		System.out.println("DeleteUniverseOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			final Map<String, XdUniverse> universes = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> universes = store.loadObjects(XdUniverse.class);
 			for (final XdUniverse uni : universes.values()) {
 
 				final Collection<XdGalaxy> galaxies = uni.getGalaxies();
 				store.loadObjects(galaxies);
 
-				store.deleteRoot(uni);
+				store.deleteObject(uni);
 				store.deleteObjects(galaxies);
 				for (final XdGalaxy galaxy : galaxies) {
 					store.deleteObjects(galaxy.getSystems()); // deleting by

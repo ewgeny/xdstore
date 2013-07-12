@@ -19,7 +19,7 @@ public class XdStarSystemInsertTrigger implements IXmlDataStoreTrigger<XdStarSys
 
 	@Override
 	public void perform(final XdStarSystem object) {
-		System.out.println("INSERTED XdStarSystem " + object.getId());
+		System.out.println("INSERTED XdStarSystem " + object.getDataStoreId());
 	}
 
 }

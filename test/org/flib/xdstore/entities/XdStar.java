@@ -7,19 +7,19 @@ public class XdStar implements IXmlDataStoreIdentifiable {
 	private String id;
 
 	@Override
-	public String getId() {
+	public String getDataStoreId() {
 		return id;
 	}
 
 	@Override
-	public void setId(String id) {
+	public void setDataStoreId(String id) {
 		this.id = id;
 	}
 
 	@Override
 	public IXmlDataStoreIdentifiable clone() {
 		XdStar copy = new XdStar();
-		copy.setId(id);
+		copy.setDataStoreId(id);
 		return copy;
 	}
 }

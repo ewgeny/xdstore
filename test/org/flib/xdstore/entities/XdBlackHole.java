@@ -7,19 +7,19 @@ public class XdBlackHole implements IXmlDataStoreIdentifiable {
 	private String id;
 
 	@Override
-	public String getId() {
+	public String getDataStoreId() {
 		return id;
 	}
 
 	@Override
-	public void setId(String id) {
+	public void setDataStoreId(String id) {
 		this.id = id;
 	}
 
 	@Override
 	public IXmlDataStoreIdentifiable clone() {
 		XdBlackHole copy = new XdBlackHole();
-		copy.setId(id);
+		copy.setDataStoreId(id);
 		return copy;
 	}
 }

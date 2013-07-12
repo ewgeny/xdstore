@@ -28,7 +28,7 @@ public class InsertGalaxyOperation implements Runnable {
 		System.out.println("InsertGalaxyOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			final Map<String, XdUniverse> universes = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> universes = store.loadObjects(XdUniverse.class);
 			if (universes.size() > 0) {
 				int index = Math.abs(rand.nextInt()) % universes.size();
 				Iterator<XdUniverse> it = universes.values().iterator();
@@ -38,7 +38,7 @@ public class InsertGalaxyOperation implements Runnable {
 						final XdGalaxy galaxy = generateGalaxy();
 						universe.addGalaxy(galaxy);
 
-						store.updateRoot(universe);
+						store.updateObject(universe);
 						store.saveObject(galaxy);
 						break;
 					}
@@ -56,11 +56,11 @@ public class InsertGalaxyOperation implements Runnable {
 
 	private static XdGalaxy generateGalaxy() {
 		final XdGalaxy galaxy = new XdGalaxy();
-		galaxy.setId(nextStringId());
+		galaxy.setDataStoreId(nextStringId());
 		galaxy.setSystems(new LinkedList<XdStarSystem>());
 
 		final XdBlackHole hole = new XdBlackHole();
-		hole.setId(nextStringId());
+		hole.setDataStoreId(nextStringId());
 
 		galaxy.setHole(hole);
 

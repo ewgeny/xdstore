@@ -30,7 +30,7 @@ public class InsertSystemOperation implements Runnable {
 		System.out.println("InsertSystemOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			final Map<String, XdUniverse> universes = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> universes = store.loadObjects(XdUniverse.class);
 			if (universes.size() > 0) {
 				int index = Math.abs(rand.nextInt()) % universes.size();
 				Iterator<XdUniverse> it = universes.values().iterator();
@@ -65,18 +65,18 @@ public class InsertSystemOperation implements Runnable {
 
 	private static XdStarSystem generateSystem(int countPlanets) {
 		final XdStarSystem system = new XdStarSystem();
-		system.setId(nextStringId());
+		system.setDataStoreId(nextStringId());
 		system.setStars(new LinkedList<XdStar>());
 		system.setPlanets(new ArrayList<XdPlanet>());
 
 		final XdStar star = new XdStar();
-		star.setId(nextStringId());
+		star.setDataStoreId(nextStringId());
 
 		system.addStar(star);
 
 		for (int k = 0; k < countPlanets; ++k) {
 			final XdPlanet planet = new XdPlanet();
-			planet.setId(nextStringId());
+			planet.setDataStoreId(nextStringId());
 
 			system.addPlanet(planet);
 		}

@@ -13,12 +13,12 @@ public class XdUniverse implements IXmlDataStoreIdentifiable {
 	private Collection<XdGalaxy> galaxies;
 
 	@Override
-	public String getId() {
+	public String getDataStoreId() {
 		return id;
 	}
 
 	@Override
-	public void setId(final String id) {
+	public void setDataStoreId(final String id) {
 		this.id = id;
 	}
 
@@ -59,7 +59,7 @@ public class XdUniverse implements IXmlDataStoreIdentifiable {
 	@Override
 	public IXmlDataStoreIdentifiable clone() {
 		XdUniverse copy = new XdUniverse();
-		copy.setId(id);
+		copy.setDataStoreId(id);
 		if (galaxies != null) {
 			copy.galaxies = new ArrayList<XdGalaxy>(galaxies.size());
 			for (final XdGalaxy star : galaxies) {

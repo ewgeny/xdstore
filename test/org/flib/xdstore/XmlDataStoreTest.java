@@ -43,7 +43,7 @@ public class XmlDataStoreTest {
 		final XdUniverse universe = generateBigUniverse(10, 10, 10);
 		XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			store.saveRoot(universe);
+			store.saveObject(universe);
 			store.saveObjects(universe.getGalaxies());
 			for (final XdGalaxy galaxy : universe.getGalaxies()) {
 				store.saveObjects(galaxy.getSystems());
@@ -63,7 +63,7 @@ public class XmlDataStoreTest {
 		XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
 			int i = 0;
-			final Map<String, XdUniverse> roots = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> roots = store.loadObjects(XdUniverse.class);
 			for (final XdUniverse root : roots.values()) {
 				final Collection<XdGalaxy> galaxies = root.getGalaxies();
 				store.loadObjects(galaxies);
@@ -90,7 +90,7 @@ public class XmlDataStoreTest {
 		XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
 			int i = 0;
-			final Map<String, XdUniverse> roots = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> roots = store.loadObjects(XdUniverse.class);
 			for (final XdUniverse root : roots.values()) {
 				final Collection<XdGalaxy> galaxies = root.getGalaxies();
 				store.loadObjects(galaxies);
@@ -99,7 +99,7 @@ public class XmlDataStoreTest {
 					store.deleteObjects(galaxy.getSystems());
 				}
 				store.deleteObjects(galaxies);
-				store.deleteRoot(root);
+				store.deleteObject(root);
 
 				System.out.println(i);
 				++i;
@@ -115,37 +115,37 @@ public class XmlDataStoreTest {
 
 	private static XdUniverse generateBigUniverse(int countGalaxies, int countStarSystems, int countPlanets) {
 		final XdUniverse universe = new XdUniverse();
-		universe.setId(nextStringId());
+		universe.setDataStoreId(nextStringId());
 		universe.setGalaxies(new ArrayList<XdGalaxy>());
 
 		for (int i = 0; i < countGalaxies; ++i) {
 			final XdGalaxy galaxy = new XdGalaxy();
-			galaxy.setId(nextStringId());
+			galaxy.setDataStoreId(nextStringId());
 			galaxy.setSystems(new LinkedList<XdStarSystem>());
 
 			universe.addGalaxy(galaxy);
 
 			final XdBlackHole hole = new XdBlackHole();
-			hole.setId(nextStringId());
+			hole.setDataStoreId(nextStringId());
 
 			galaxy.setHole(hole);
 
 			for (int j = 0; j < countStarSystems; ++j) {
 				final XdStarSystem system = new XdStarSystem();
-				system.setId(nextStringId());
+				system.setDataStoreId(nextStringId());
 				system.setStars(new LinkedList<XdStar>());
 				system.setPlanets(new ArrayList<XdPlanet>());
 
 				galaxy.addSystem(system);
 
 				final XdStar star = new XdStar();
-				star.setId(nextStringId());
+				star.setDataStoreId(nextStringId());
 
 				system.addStar(star);
 
 				for (int k = 0; k < countPlanets; ++k) {
 					final XdPlanet planet = new XdPlanet();
-					planet.setId(nextStringId());
+					planet.setDataStoreId(nextStringId());
 
 					system.addPlanet(planet);
 				}

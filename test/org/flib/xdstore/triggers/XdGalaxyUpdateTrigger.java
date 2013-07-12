@@ -19,7 +19,7 @@ public class XdGalaxyUpdateTrigger implements IXmlDataStoreTrigger<XdGalaxy> {
 
 	@Override
 	public void perform(final XdGalaxy object) {
-		System.out.println("UPDATED XdGalaxy " + object.getId());
+		System.out.println("UPDATED XdGalaxy " + object.getDataStoreId());
 	}
 
 }

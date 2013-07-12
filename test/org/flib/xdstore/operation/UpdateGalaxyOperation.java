@@ -24,7 +24,7 @@ public class UpdateGalaxyOperation implements Runnable {
 		System.out.println("UpdateGalaxyOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			final Map<String, XdUniverse> universes = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> universes = store.loadObjects(XdUniverse.class);
 			if (universes.size() > 0) {
 				int index = Math.abs(rand.nextInt()) % universes.size();
 				Iterator<XdUniverse> it = universes.values().iterator();

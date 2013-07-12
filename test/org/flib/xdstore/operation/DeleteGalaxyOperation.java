@@ -25,7 +25,7 @@ public class DeleteGalaxyOperation implements Runnable {
 		System.out.println("DeleteGalaxyOperation Started");
 		final XmlDataStoreTransaction tx = store.beginTransaction();
 		try {
-			final Map<String, XdUniverse> universes = store.loadRoots(XdUniverse.class);
+			final Map<String, XdUniverse> universes = store.loadObjects(XdUniverse.class);
 			if (universes.size() > 0) {
 				int index = Math.abs(rand.nextInt()) % universes.size();
 				Iterator<XdUniverse> it = universes.values().iterator();
@@ -38,7 +38,7 @@ public class DeleteGalaxyOperation implements Runnable {
 
 							store.loadObject(galaxy);
 
-							store.updateRoot(universe);
+							store.updateObject(universe);
 							store.deleteObject(galaxy);
 							store.deleteObjects(galaxy.getSystems());
 						}

@@ -19,7 +19,7 @@ public class XdUniverseInsertTrigger implements IXmlDataStoreTrigger<XdUniverse>
 
 	@Override
 	public void perform(final XdUniverse object) {
-		System.out.println("INSERTED XdUnivere " + object.getId());
+		System.out.println("INSERTED XdUnivere " + object.getDataStoreId());
 	}
 
 }

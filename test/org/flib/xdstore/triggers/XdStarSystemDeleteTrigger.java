@@ -19,7 +19,7 @@ public class XdStarSystemDeleteTrigger implements IXmlDataStoreTrigger<XdStarSys
 
 	@Override
 	public void perform(final XdStarSystem object) {
-		System.out.println("DELETED XdStarSystem " + object.getId());
+		System.out.println("DELETED XdStarSystem " + object.getDataStoreId());
 	}
 
 }

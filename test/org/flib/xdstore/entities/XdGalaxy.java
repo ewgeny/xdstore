@@ -15,12 +15,12 @@ public class XdGalaxy implements IXmlDataStoreIdentifiable {
 	private Collection<XdStarSystem> systems;
 
 	@Override
-	public String getId() {
+	public String getDataStoreId() {
 		return id;
 	}
 
 	@Override
-	public void setId(String id) {
+	public void setDataStoreId(String id) {
 		this.id = id;
 	}
 
@@ -69,7 +69,7 @@ public class XdGalaxy implements IXmlDataStoreIdentifiable {
 	@Override
 	public IXmlDataStoreIdentifiable clone() {
 		XdGalaxy copy = new XdGalaxy();
-		copy.setId(id);
+		copy.setDataStoreId(id);
 		copy.setHole((XdBlackHole) hole.clone());
 		if (systems != null) {
 			copy.systems = new ArrayList<XdStarSystem>(systems.size());

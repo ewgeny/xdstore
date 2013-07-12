@@ -19,7 +19,7 @@ public class XdUniverseDeleteTrigger implements IXmlDataStoreTrigger<XdUniverse>
 
 	@Override
 	public void perform(final XdUniverse object) {
-		System.out.println("DELETED XdUniverse " + object.getId());
+		System.out.println("DELETED XdUniverse " + object.getDataStoreId());
 	}
 
 }

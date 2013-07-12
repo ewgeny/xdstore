@@ -19,7 +19,7 @@ public class XdGalaxyInsertTrigger implements IXmlDataStoreTrigger<XdGalaxy> {
 
 	@Override
 	public void perform(final XdGalaxy object) {
-		System.out.println("INSERTED XdGalaxy" + object.getId());
+		System.out.println("INSERTED XdGalaxy" + object.getDataStoreId());
 	}
 
 }

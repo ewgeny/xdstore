@@ -14,12 +14,12 @@ public class XdStarSystem implements IXmlDataStoreIdentifiable {
 	private Collection<XdPlanet> planets;
 
 	@Override
-	public String getId() {
+	public String getDataStoreId() {
 		return id;
 	}
 
 	@Override
-	public void setId(String id) {
+	public void setDataStoreId(String id) {
 		this.id = id;
 	}
 
@@ -50,7 +50,7 @@ public class XdStarSystem implements IXmlDataStoreIdentifiable {
 	@Override
 	public IXmlDataStoreIdentifiable clone() {
 		XdStarSystem copy = new XdStarSystem();
-		copy.setId(id);
+		copy.setDataStoreId(id);
 		if (stars != null) {
 			copy.stars = new ArrayList<XdStar>(stars.size());
 			for (final XdStar star : stars) {

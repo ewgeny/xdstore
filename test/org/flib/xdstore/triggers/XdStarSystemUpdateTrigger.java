@@ -19,7 +19,7 @@ public class XdStarSystemUpdateTrigger implements IXmlDataStoreTrigger<XdStarSys
 
 	@Override
 	public void perform(final XdStarSystem object) {
-		System.out.println("UPDATED XdStarSystem " + object.getId());
+		System.out.println("UPDATED XdStarSystem " + object.getDataStoreId());
 	}
 
 }

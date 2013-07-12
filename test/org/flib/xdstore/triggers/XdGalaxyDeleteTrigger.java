@@ -19,7 +19,7 @@ public class XdGalaxyDeleteTrigger implements IXmlDataStoreTrigger<XdGalaxy> {
 
 	@Override
 	public void perform(final XdGalaxy object) {
-		System.out.println("DELETED XdGalaxy " + object.getId());
+		System.out.println("DELETED XdGalaxy " + object.getDataStoreId());
 	}
 
 }
