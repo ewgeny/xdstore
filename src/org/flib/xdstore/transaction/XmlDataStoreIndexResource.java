@@ -122,12 +122,6 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 		for (final IXmlDataStoreIdentifiable tmp : indexObjects.values()) {
 			XmlDataStoreIndexObject indexObject = (XmlDataStoreIndexObject) tmp;
 			if (indexObject.getCountReferences() < fragmentSize) {
-				try {
-					indexObject = (XmlDataStoreIndexObject) super.readObject(indexObject.getDataStoreId(), transaction);
-				} catch (final XmlDataStoreReadException e) {
-					throw new XmlDataStoreInsertException(e);
-				}
-
 				final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
 				resource.insertObject(object, transaction); // will be
 				                                            // rolled back
