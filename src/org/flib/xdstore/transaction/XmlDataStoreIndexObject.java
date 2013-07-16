@@ -1,7 +1,7 @@
 package org.flib.xdstore.transaction;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.flib.xdstore.IXmlDataStoreIdentifiable;
 
@@ -10,7 +10,7 @@ public class XmlDataStoreIndexObject implements IXmlDataStoreIdentifiable {
 	
 	private String	id;	// this field contains resource identifier
 	
-	private Map<String, IXmlDataStoreIdentifiable>	references	=	new HashMap<String, IXmlDataStoreIdentifiable>();
+	private Map<String, IXmlDataStoreIdentifiable>	references	=	new ConcurrentHashMap<String, IXmlDataStoreIdentifiable>();
 
 	@Override
 	public String getDataStoreId() {
