@@ -1,5 +1,6 @@
 package org.flib.xdstore.transaction;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Stack;
@@ -13,33 +14,25 @@ import org.flib.xdstore.trigger.XmlDataStoreTriggerManager;
 
 public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
-	private int                                             fragmentSize;
+	private XmlDataStoreIndexResourceCache                  index;
 
-	/**
-	 * objectId, resourceId
-	 */
-	private Map<String, String>                             index        = new ConcurrentHashMap<String, String>();
+	private Map<String, Stack<IXmlDataStoreChangeRollback>> rollbacks = new ConcurrentHashMap<String, Stack<IXmlDataStoreChangeRollback>>();
 
-	private Map<String, Stack<IXmlDataStoreChangeRollback>> rollbacks    = new ConcurrentHashMap<String, Stack<IXmlDataStoreChangeRollback>>();
-
-	XmlDataStoreIndexResource(final XmlDataStoreResourcesManager manager, final XmlDataStoreTriggerManager triggersManager,
-			final String resourceId,
+	XmlDataStoreIndexResource(final XmlDataStoreResourcesManager manager,
+	        final XmlDataStoreTriggerManager triggersManager, final String resourceId,
 	        final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies,
 	        final IXmlDataStoreIOFactory factory, final int fragmentSize) {
 		super(manager, triggersManager, resourceId, policies, factory);
-		this.fragmentSize = fragmentSize;
+		this.index = new XmlDataStoreIndexResourceCache(fragmentSize);
 	}
 
 	@Override
 	void postPrepare(final XmlDataStoreTransaction transaction) {
-		if (index.size() == 0) {
-			final Map<String, IXmlDataStoreIdentifiable> indexObjects = super.readObjects(transaction);
-			for (final IXmlDataStoreIdentifiable indexObject : indexObjects.values()) {
-				final Map<String, IXmlDataStoreIdentifiable> objects = ((XmlDataStoreIndexObject) indexObject)
-				        .getReferences();
-				for (final IXmlDataStoreIdentifiable object : objects.values()) {
-					index.put(object.getDataStoreId(), indexObject.getDataStoreId());
-				}
+		if (index.isClear()) {
+			final Map<String, IXmlDataStoreIdentifiable> objects = super.readObjects(transaction);
+			for (final IXmlDataStoreIdentifiable object : objects.values()) {
+				final XmlDataStoreIndexRecord record = (XmlDataStoreIndexRecord)object;
+				index.insertRecord(record.getDataStoreId(), record.getResourceId());
 			}
 		}
 	}
@@ -69,28 +62,28 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	public Map<String, IXmlDataStoreIdentifiable> readObjects(final XmlDataStoreTransaction transaction) {
 		final Map<String, IXmlDataStoreIdentifiable> result = new HashMap<String, IXmlDataStoreIdentifiable>();
-		final Map<String, IXmlDataStoreIdentifiable> indexObjects = super.readObjects(transaction);
-		for (final IXmlDataStoreIdentifiable indexObject : indexObjects.values()) {
-			final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
+		final Collection<String> ids = index.getResourcesIds();
+		for (final String resourceId : ids) {
+			final XmlDataStoreResource resource = manager.lockResource(resourceId, transaction);
 			result.putAll(resource.readObjects(transaction));
-		}
+        }
 		return result;
 	}
 
 	public <T extends IXmlDataStoreIdentifiable> Map<String, T> readObjects(final XmlDataStoreTransaction transaction,
 	        final IXmlDataStorePredicate<T> predicate) {
 		final Map<String, T> result = new HashMap<String, T>();
-		final Map<String, IXmlDataStoreIdentifiable> indexObjects = super.readObjects(transaction);
-		for (final IXmlDataStoreIdentifiable indexObject : indexObjects.values()) {
-			final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
+		final Collection<String> ids = index.getResourcesIds();
+		for (final String resourceId : ids) {
+			final XmlDataStoreResource resource = manager.lockResource(resourceId, transaction);
 			result.putAll(resource.readObjects(transaction, predicate));
-		}
+        }
 		return result;
 	}
 
 	public void readObjectByReference(final IXmlDataStoreIdentifiable reference,
 	        final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
-		final String resourceId = index.get(reference.getDataStoreId());
+		final String resourceId = index.getResourceId(reference.getDataStoreId());
 		if (resourceId == null) {
 			throw new XmlDataStoreReadException("cannot load by reference object of class " + reference.getClass()
 			        + " with id " + reference.getDataStoreId());
@@ -101,7 +94,7 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	public IXmlDataStoreIdentifiable readObject(final String id, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreReadException {
-		final String resourceId = index.get(id);
+		final String resourceId = index.getResourceId(id);
 		if (resourceId == null) {
 			throw new XmlDataStoreReadException("cannot read object with id " + id);
 		}
@@ -112,69 +105,54 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 	public void insertObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreInsertException {
 		final String objectId = object.getDataStoreId();
-		final String resourceId = index.get(objectId);
+		final String resourceId = index.getResourceId(objectId);
 		if (resourceId != null) {
 			throw new XmlDataStoreInsertException("object of class " + object.getClass() + " with id " + objectId
 			        + " is exists");
 		}
 		boolean isInserted = false;
-		final Map<String, IXmlDataStoreIdentifiable> indexObjects = super.readObjects(transaction);
-		for (final IXmlDataStoreIdentifiable tmp : indexObjects.values()) {
-			XmlDataStoreIndexObject indexObject = (XmlDataStoreIndexObject) tmp;
-			if (indexObject.getCountReferences() < fragmentSize) {
-				final XmlDataStoreResource resource = manager.lockResource(indexObject.getDataStoreId(), transaction);
-				resource.insertObject(object, transaction); // will be
-				                                            // rolled back
-				index.put(objectId, indexObject.getDataStoreId());
-				indexObject.addReference(object);
-				try {
-					super.updateObject(indexObject, transaction);
-					registerRollback(transaction, new IXmlDataStoreChangeRollback() {
-
-						@Override
-						public void rollback() {
-							index.remove(objectId);
-						}
-					});
-				} catch (final XmlDataStoreUpdateException e) {
-					index.remove(objectId);
-					throw new XmlDataStoreInsertException(e);
+		final String freeResourceId = index.getFreeResourceId();
+		if(freeResourceId != null) {
+			final XmlDataStoreResource resource = manager.lockResource(freeResourceId, transaction);
+			resource.insertObject(object, transaction);
+			
+			final XmlDataStoreIndexRecord record = new XmlDataStoreIndexRecord(objectId, resource.getResourceId());
+			super.insertObject(record, transaction);
+			
+			index.insertRecord(objectId, resource.getResourceId());
+			registerRollback(transaction, new IXmlDataStoreChangeRollback() {
+				
+				@Override
+				public void rollback() {
+					index.deleteRecord(objectId);
 				}
-				isInserted = true;
-				break;
-			}
+			});
+			isInserted = true;
 		}
-		if (!isInserted) {
+		if(!isInserted) {
 			final XmlDataStoreResource resource = manager.lockResource(object.getClass(), objectId, transaction);
-			final XmlDataStoreIndexObject indexObject = new XmlDataStoreIndexObject();
-			indexObject.setDataStoreId(resource.getResourceId());
-
-			resource.insertObject(object, transaction); // will be rolled
-			                                            // back
-			index.put(objectId, indexObject.getDataStoreId());
-			indexObject.addReference(object);
-			try {
-				super.insertObject(indexObject, transaction);
-				registerRollback(transaction, new IXmlDataStoreChangeRollback() {
-
-					@Override
-					public void rollback() {
-						index.remove(objectId);
-					}
-				});
-			} catch (final XmlDataStoreInsertException e) {
-				index.remove(objectId);
-				throw e;
-			}
+			resource.insertObject(object, transaction);
+			
+			final XmlDataStoreIndexRecord record = new XmlDataStoreIndexRecord(objectId, resource.getResourceId());
+			super.insertObject(record, transaction);
+			
+			index.insertRecord(objectId, resource.getResourceId());
+			registerRollback(transaction, new IXmlDataStoreChangeRollback() {
+				
+				@Override
+				public void rollback() {
+					index.deleteRecord(objectId);
+				}
+			});
 		}
 	}
 
 	public void updateObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreUpdateException {
-		final String resourceId = index.get(object.getDataStoreId());
+		final String resourceId = index.getResourceId(object.getDataStoreId());
 		if (resourceId == null) {
-			throw new XmlDataStoreUpdateException("object of class " + object.getClass() + " with id " + object.getDataStoreId()
-			        + " does not exists");
+			throw new XmlDataStoreUpdateException("object of class " + object.getClass() + " with id "
+			        + object.getDataStoreId() + " does not exists");
 		}
 		final XmlDataStoreResource resource = manager.lockResource(resourceId, transaction);
 		resource.updateObject(object, transaction);
@@ -183,42 +161,29 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 	public void deleteObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction)
 	        throws XmlDataStoreDeleteException {
 		final String objectId = object.getDataStoreId();
-		final String resourceId = index.get(objectId);
+		final String resourceId = index.getResourceId(objectId);
 		if (resourceId == null) {
 			throw new XmlDataStoreDeleteException("object of class " + object.getClass() + " with id " + objectId
 			        + " does not exists");
 		}
-		final XmlDataStoreIndexObject indexObject;
-		try {
-			indexObject = (XmlDataStoreIndexObject) super.readObject(resourceId, transaction);
-		} catch (final XmlDataStoreReadException e) {
-			throw new XmlDataStoreDeleteException(e);
-		}
 
 		final XmlDataStoreResource resource = manager.lockResource(resourceId, transaction);
 		resource.deleteObject(object, transaction); // will be rolled back
-
-		index.remove(objectId);
-		indexObject.removeReference(object);
+		
 		try {
-			if (indexObject.getCountReferences() == 0) {
-				super.deleteObject(indexObject, transaction);
-			} else {
-				super.updateObject(indexObject, transaction);
-			}
-			registerRollback(transaction, new IXmlDataStoreChangeRollback() {
-
-				@Override
-				public void rollback() {
-					index.put(objectId, resourceId);
-				}
-			});
-		} catch (final XmlDataStoreDeleteException e) {
-			index.put(objectId, resourceId);
-			throw e;
-		} catch (final XmlDataStoreUpdateException e) {
-			index.put(objectId, resourceId);
+			final XmlDataStoreIndexRecord record = (XmlDataStoreIndexRecord) super.readObject(objectId, transaction);
+			super.deleteObject(record, transaction);
+		} catch(final XmlDataStoreReadException e) {
 			throw new XmlDataStoreDeleteException(e);
 		}
+
+		index.deleteRecord(objectId);
+		registerRollback(transaction, new IXmlDataStoreChangeRollback() {
+
+			@Override
+			public void rollback() {
+				index.insertRecord(objectId, resourceId);
+			}
+		});
 	}
 }
