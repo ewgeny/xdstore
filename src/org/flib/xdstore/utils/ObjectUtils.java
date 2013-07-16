@@ -241,11 +241,13 @@ public final class ObjectUtils {
 	
 	private static Method[] getPublicMethods(final Class<?> cl) {
 		final List<Method> result = new ArrayList<Method>();
-		final Method[] tmp = cl.getDeclaredMethods();
-		for(final Method method : tmp) {
-			if( (method.getModifiers() & Modifier.PUBLIC) > 0) {
-				result.add(method);
-			}
+		for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {
+    		final Method[] tmp = clazz.getDeclaredMethods();
+    		for(final Method method : tmp) {
+    			if( (method.getModifiers() & Modifier.PUBLIC) > 0) {
+    				result.add(method);
+    			}
+    		}
 		}
 		return result.toArray(new Method[result.size()]);
 	}
