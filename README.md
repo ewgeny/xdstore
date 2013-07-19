@@ -1,4 +1,3 @@
-
 xdstore-1.5
 ===========
 
@@ -13,3 +12,7 @@ Changes Java XML store for JavaBeans
 * Added abstract class AbstractXmlDataStoreIdentifiable
 * Deleted methods for a work with roots
 * Changed default xml reader and writer
+
+Bugs
+===========
+Not all public getters/setters used by serialization. (fixed xdstore-1.6)
