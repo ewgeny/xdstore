@@ -146,9 +146,6 @@ public class XmlDataStoreResource {
 				}
 			}
 		}
-		if (locks == 1) {
-			cache.clearCache();
-		}
 		--locks;
 		postCommit(transaction);
 	}
@@ -159,9 +156,6 @@ public class XmlDataStoreResource {
 
 	synchronized void rollback(final XmlDataStoreTransaction transaction) {
 		cache.rollback(transaction);
-		if (locks == 1) {
-			cache.clearCache();
-		}
 		--locks;
 		postRollback(transaction);
 	}

@@ -1,6 +1,5 @@
 package org.flib.xdstore.entities;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
@@ -55,18 +54,4 @@ public class XdUniverse implements IXmlDataStoreIdentifiable {
 		}
 		return null;
 	}
-
-	@Override
-	public IXmlDataStoreIdentifiable clone() {
-		XdUniverse copy = new XdUniverse();
-		copy.setDataStoreId(id);
-		if (galaxies != null) {
-			copy.galaxies = new ArrayList<XdGalaxy>(galaxies.size());
-			for (final XdGalaxy star : galaxies) {
-				copy.galaxies.add((XdGalaxy) star.clone());
-			}
-		}
-		return copy;
-	}
-
 }

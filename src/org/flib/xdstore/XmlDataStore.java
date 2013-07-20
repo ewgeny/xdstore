@@ -417,6 +417,8 @@ public class XmlDataStore {
 	        throws XmlDataStoreReadException {
 		if (cl == null)
 			throw new XmlDataStoreRuntimeException("class cannot be null");
+		if (!checkIsInTransaction())
+			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
 
 		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
 		final XmlDataStorePolicy policy = policies.get(cl);
@@ -466,6 +468,8 @@ public class XmlDataStore {
 			throw new XmlDataStoreRuntimeException("class cannot be null");
 		if (predicate == null)
 			throw new XmlDataStoreRuntimeException("predicate cannot be null");
+		if (!checkIsInTransaction())
+			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
 
 		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
 		final XmlDataStorePolicy policy = policies.get(cl);

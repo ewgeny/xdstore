@@ -1,6 +1,5 @@
 package org.flib.xdstore.entities;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
@@ -65,19 +64,4 @@ public class XdGalaxy implements IXmlDataStoreIdentifiable {
 		}
 		return null;
 	}
-
-	@Override
-	public IXmlDataStoreIdentifiable clone() {
-		XdGalaxy copy = new XdGalaxy();
-		copy.setDataStoreId(id);
-		copy.setHole((XdBlackHole) hole.clone());
-		if (systems != null) {
-			copy.systems = new ArrayList<XdStarSystem>(systems.size());
-			for (final XdStarSystem system : systems) {
-				copy.systems.add((XdStarSystem) system.clone());
-			}
-		}
-		return copy;
-	}
-
 }

@@ -1,27 +1,14 @@
 package org.flib.xdstore.entities;
 
-import java.util.ArrayList;
 import java.util.Collection;
 
-import org.flib.xdstore.IXmlDataStoreIdentifiable;
+import org.flib.xdstore.AbstractXmlDataStoreIdentifiable;
 
-public class XdStarSystem implements IXmlDataStoreIdentifiable {
-
-	private String               id;
+public class XdStarSystem extends AbstractXmlDataStoreIdentifiable {
 
 	private Collection<XdStar>   stars;
 
 	private Collection<XdPlanet> planets;
-
-	@Override
-	public String getDataStoreId() {
-		return id;
-	}
-
-	@Override
-	public void setDataStoreId(String id) {
-		this.id = id;
-	}
 
 	public Collection<XdStar> getStars() {
 		return stars;
@@ -47,22 +34,4 @@ public class XdStarSystem implements IXmlDataStoreIdentifiable {
 		planets.add(planet);
 	}
 
-	@Override
-	public IXmlDataStoreIdentifiable clone() {
-		XdStarSystem copy = new XdStarSystem();
-		copy.setDataStoreId(id);
-		if (stars != null) {
-			copy.stars = new ArrayList<XdStar>(stars.size());
-			for (final XdStar star : stars) {
-				copy.stars.add((XdStar) star.clone());
-			}
-		}
-		if (planets != null) {
-			copy.planets = new ArrayList<XdPlanet>(planets.size());
-			for (final XdPlanet planet : planets) {
-				copy.planets.add((XdPlanet) planet.clone());
-			}
-		}
-		return copy;
-	}
 }

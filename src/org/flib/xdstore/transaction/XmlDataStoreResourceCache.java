@@ -30,11 +30,6 @@ public class XmlDataStoreResourceCache {
 		}
 	}
 
-	public synchronized void clearCache() {
-		cache.clear();
-		changes.clear();
-	}
-
 	public synchronized Map<String, IXmlDataStoreIdentifiable> read(final XmlDataStoreTransaction transaction,
 	        final IXmlDataStorePredicate<IXmlDataStoreIdentifiable> predicate) {
 		final Map<String, IXmlDataStoreIdentifiable> result = new TreeMap<String, IXmlDataStoreIdentifiable>();
