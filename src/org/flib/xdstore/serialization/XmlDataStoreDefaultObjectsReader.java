@@ -109,7 +109,10 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 				value = attValue;
 			}
 		}
-		if(className == null) return null;
+		if(className == null) {
+			xmlReader.nextTag();
+			return null;
+		}
 
 		final Class<?> cl = Class.forName(className);
 		if (value != null) {
