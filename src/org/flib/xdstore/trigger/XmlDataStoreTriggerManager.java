@@ -7,84 +7,86 @@ import java.util.Map;
 
 import org.flib.xdstore.IXmlDataStoreIdentifiable;
 
-
 public class XmlDataStoreTriggerManager {
 
-	private Map<Class<IXmlDataStoreIdentifiable>, List<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>>>	triggers;
-	
+	private Map<Class<?>, List<IXmlDataStoreTrigger<?>>> triggers;
+
 	public XmlDataStoreTriggerManager() {
-		triggers = new HashMap<Class<IXmlDataStoreIdentifiable>, List<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>>>();
+		triggers = new HashMap<Class<?>, List<IXmlDataStoreTrigger<?>>>();
 	}
-	
+
 	@SuppressWarnings("unchecked")
-    public <T extends IXmlDataStoreIdentifiable> void registerTrigger(final IXmlDataStoreTrigger<T> trigger) {
-		List<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>> list;
-		synchronized(this) {
-    		list = triggers.get(trigger.getClazz());
-    		if(list == null) {
-    			triggers.put((Class<IXmlDataStoreIdentifiable>) trigger.getClazz(), list = new ArrayList<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>>());
-    		}
+	public <T> void registerTrigger(final IXmlDataStoreTrigger<T> trigger) {
+		List<IXmlDataStoreTrigger<?>> list;
+		synchronized (this) {
+			list = triggers.get(trigger.getClazz());
+			if (list == null) {
+				triggers.put((Class<?>) trigger.getClazz(), list = new ArrayList<IXmlDataStoreTrigger<?>>());
+			}
 		}
 		synchronized (list) {
 			list.add((IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>) trigger);
-        }
+		}
 	}
-	
-	public <T extends IXmlDataStoreIdentifiable> void performTriggers(final XmlDataStoreTriggerType type, final T object) {
-		if(type == XmlDataStoreTriggerType.Insert) {
+
+	public <T> void performTriggers(final XmlDataStoreTriggerType type, final T object) {
+		if (type == XmlDataStoreTriggerType.Insert) {
 			performInsertTriggers(object);
-		} else if(type == XmlDataStoreTriggerType.Update) {
+		} else if (type == XmlDataStoreTriggerType.Update) {
 			performUpdateTriggers(object);
-		} else if(type == XmlDataStoreTriggerType.Delete) {
+		} else if (type == XmlDataStoreTriggerType.Delete) {
 			performDeleteTriggers(object);
 		}
 	}
-	
-	public <T extends IXmlDataStoreIdentifiable> void performInsertTriggers(final T object) {
-		List<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>> list;
+
+	@SuppressWarnings("unchecked")
+    public <T> void performInsertTriggers(final T object) {
+		List<IXmlDataStoreTrigger<?>> list;
 		synchronized (this) {
-	        list = triggers.get(object.getClass());
-        }
-		if(list != null) {
+			list = triggers.get(object.getClass());
+		}
+		if (list != null) {
 			synchronized (list) {
-	            for (final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger : list) {
-	                if(trigger.getType() == XmlDataStoreTriggerType.Insert) {
-	                	trigger.perform(object);
-	                }
-                }
-            }
+				for (final IXmlDataStoreTrigger<?> trigger : list) {
+					if (trigger.getType() == XmlDataStoreTriggerType.Insert) {
+						((IXmlDataStoreTrigger<T>)trigger).perform(object);
+					}
+				}
+			}
 		}
 	}
-	
-	public <T extends IXmlDataStoreIdentifiable> void performUpdateTriggers(final T object) {
-		List<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>> list;
+
+	@SuppressWarnings("unchecked")
+    public <T> void performUpdateTriggers(final T object) {
+		List<IXmlDataStoreTrigger<?>> list;
 		synchronized (this) {
-	        list = triggers.get(object.getClass());
-        }
-		if(list != null) {
+			list = triggers.get(object.getClass());
+		}
+		if (list != null) {
 			synchronized (list) {
-	            for (final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger : list) {
-	                if(trigger.getType() == XmlDataStoreTriggerType.Update) {
-	                	trigger.perform(object);
-	                }
-                }
-            }
+				for (final IXmlDataStoreTrigger<?> trigger : list) {
+					if (trigger.getType() == XmlDataStoreTriggerType.Update) {
+						((IXmlDataStoreTrigger<T>)trigger).perform(object);
+					}
+				}
+			}
 		}
 	}
-	
-	public <T extends IXmlDataStoreIdentifiable> void performDeleteTriggers(final T object) {
-		List<IXmlDataStoreTrigger<IXmlDataStoreIdentifiable>> list;
+
+	@SuppressWarnings("unchecked")
+    public <T> void performDeleteTriggers(final T object) {
+		List<IXmlDataStoreTrigger<?>> list;
 		synchronized (this) {
-	        list = triggers.get(object.getClass());
-        }
-		if(list != null) {
+			list = triggers.get(object.getClass());
+		}
+		if (list != null) {
 			synchronized (list) {
-	            for (final IXmlDataStoreTrigger<IXmlDataStoreIdentifiable> trigger : list) {
-	                if(trigger.getType() == XmlDataStoreTriggerType.Delete) {
-	                	trigger.perform(object);
-	                }
-                }
-            }
+				for (final IXmlDataStoreTrigger<?> trigger : list) {
+					if (trigger.getType() == XmlDataStoreTriggerType.Delete) {
+						((IXmlDataStoreTrigger<T>)trigger).perform(object);
+					}
+				}
+			}
 		}
 	}
 }

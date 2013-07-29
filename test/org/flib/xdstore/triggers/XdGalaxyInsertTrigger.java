@@ -4,7 +4,6 @@ import org.flib.xdstore.entities.XdGalaxy;
 import org.flib.xdstore.trigger.IXmlDataStoreTrigger;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerType;
 
-
 public class XdGalaxyInsertTrigger implements IXmlDataStoreTrigger<XdGalaxy> {
 
 	@Override

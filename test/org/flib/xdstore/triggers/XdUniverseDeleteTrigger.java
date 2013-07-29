@@ -4,7 +4,6 @@ import org.flib.xdstore.entities.XdUniverse;
 import org.flib.xdstore.trigger.IXmlDataStoreTrigger;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerType;
 
-
 public class XdUniverseDeleteTrigger implements IXmlDataStoreTrigger<XdUniverse> {
 
 	@Override

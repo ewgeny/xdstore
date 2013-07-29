@@ -8,8 +8,8 @@ import java.io.Writer;
 import java.util.Collection;
 import java.util.Map;
 
-import org.flib.xdstore.IXmlDataStoreIdentifiable;
-import org.flib.xdstore.IXmlDataStorePredicate;
+import org.flib.xdstore.IXmlDataStoreAnnotatedPredicate;
+import org.flib.xdstore.XmlDataStoreObjectIdField;
 import org.flib.xdstore.XmlDataStorePolicy;
 import org.flib.xdstore.XmlDataStoreRuntimeException;
 import org.flib.xdstore.serialization.IXmlDataStoreIOFactory;
@@ -18,38 +18,41 @@ import org.flib.xdstore.serialization.IXmlDataStoreObjectsWriter;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerManager;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerType;
 
-public class XmlDataStoreResource implements IXmlDataStoreResource {
+public class XmlDataStoreAnnotatedResource implements IXmlDataStoreResource {
 
-	protected final XmlDataStoreResourcesManager manager;
+	protected final XmlDataStoreResourcesManager     manager;
 
-	private final XmlDataStoreTriggerManager     triggersManager;
+	private final XmlDataStoreTriggerManager         triggersManager;
 
-	private final String                         resourceId;
+	private final String                             resourceId;
 
-	private final boolean                        isReferences;
+	private final XmlDataStoreObjectIdField          field;
 
-	private int                                  locks = 0;
+	private final boolean                            isReferences;
 
-	private final IXmlDataStoreObjectsReader     reader;
+	private int                                      locks = 0;
 
-	private final IXmlDataStoreObjectsWriter     writer;
+	private final IXmlDataStoreObjectsReader         reader;
 
-	private final XmlDataStoreResourceCache      cache;
+	private final IXmlDataStoreObjectsWriter         writer;
 
-	XmlDataStoreResource(final XmlDataStoreResourcesManager manager, final XmlDataStoreTriggerManager triggersManager, final String resourceId,
-	        final Map<Class<?>, XmlDataStorePolicy> policies, final IXmlDataStoreIOFactory factory) {
-		this(manager, triggersManager, resourceId, policies, false, factory);
+	private final XmlDataStoreAnnotatedResourceCache cache;
+
+	XmlDataStoreAnnotatedResource(final XmlDataStoreResourcesManager manager, final XmlDataStoreTriggerManager triggersManager, final String resourceId,
+	        final XmlDataStoreObjectIdField field, final Map<Class<?>, XmlDataStorePolicy> policies, final IXmlDataStoreIOFactory factory) {
+		this(manager, triggersManager, resourceId, field, policies, false, factory);
 	}
 
-	XmlDataStoreResource(final XmlDataStoreResourcesManager manager, final XmlDataStoreTriggerManager triggersManager, final String resourceId,
-	        final Map<Class<?>, XmlDataStorePolicy> policies, final boolean isReferences, final IXmlDataStoreIOFactory factory) {
+	XmlDataStoreAnnotatedResource(final XmlDataStoreResourcesManager manager, final XmlDataStoreTriggerManager triggersManager, final String resourceId,
+	        final XmlDataStoreObjectIdField field, final Map<Class<?>, XmlDataStorePolicy> policies, final boolean isReferences, final IXmlDataStoreIOFactory factory) {
 		this.manager = manager;
 		this.triggersManager = triggersManager;
 		this.resourceId = resourceId;
+		this.field = field;
 		this.isReferences = isReferences;
 		this.reader = factory.newInstanceReader(policies);
 		this.writer = factory.newInstanceWriter(policies);
-		this.cache = new XmlDataStoreResourceCache(this);
+		this.cache = new XmlDataStoreAnnotatedResourceCache(this, field);
 	}
 
 	public String getResourceId() {
@@ -60,7 +63,7 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 		return resourceId + ".xml";
 	}
 
-	void performTriggers(final XmlDataStoreTriggerType type, final IXmlDataStoreIdentifiable object) {
+	void performTriggers(final XmlDataStoreTriggerType type, final Object object) {
 		if (!isReferences) {
 			triggersManager.performTriggers(type, object);
 		}
@@ -69,16 +72,16 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 	public synchronized void prepare(final XmlDataStoreTransaction transaction) {
 		++locks;
 		if (locks == 1) {
-			Collection<IXmlDataStoreIdentifiable> objects = null;
+			Collection<Object> objects = null;
 			try {
 				final File file = new File(getFileName());
 				if (file.exists()) {
 					Reader xmlReader = new FileReader(file);
 					try {
 						if (isReferences) {
-							objects = reader.readReferences(xmlReader);
+							objects = reader.readAnnotatedReferences(xmlReader, field);
 						} else {
-							objects = reader.readObjects(xmlReader);
+							objects = reader.readAnnotatedObjects(xmlReader);
 						}
 					} finally {
 						xmlReader.close();
@@ -100,7 +103,7 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 	public synchronized void commit(final XmlDataStoreTransaction transaction) {
 		final boolean hasChanges = cache.hasChanges(transaction);
 
-		Map<String, IXmlDataStoreIdentifiable> objects = null;
+		Map<Object, Object> objects = null;
 		if (hasChanges)
 			objects = cache.read(transaction);
 
@@ -128,9 +131,9 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 					try {
 						xmlWriter = new FileWriter(file);
 						if (isReferences) {
-							writer.writeReferences(xmlWriter, objects.values());
+							writer.writeAnnotatedReferences(xmlWriter, field, objects.values());
 						} else {
-							writer.writeObjects(xmlWriter, objects.values());
+							writer.writeAnnotatedObjects(xmlWriter, objects.values());
 						}
 					} finally {
 						xmlWriter.close();
@@ -162,48 +165,47 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 		manager.releaseResource(this);
 	}
 
-	public Map<String, IXmlDataStoreIdentifiable> readReferences(final XmlDataStoreTransaction transaction) {
+	public Map<Object, Object> readReferences(final XmlDataStoreTransaction transaction) {
 		return cache.read(transaction);
 	}
 
-	public IXmlDataStoreIdentifiable readReference(final String id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
+	public Object readReference(final String id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
 		return cache.read(id, transaction);
 	}
 
-	public void insertReference(final IXmlDataStoreIdentifiable reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreInsertException {
+	public void insertReference(final Object reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreInsertException {
 		cache.insert(reference, transaction);
 	}
 
-	public void deleteReference(final IXmlDataStoreIdentifiable reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
+	public void deleteReference(final Object reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
 		cache.delete(reference, transaction);
 	}
 
-	public Map<String, IXmlDataStoreIdentifiable> readObjects(final XmlDataStoreTransaction transaction) {
+	public Map<Object, Object> readObjects(final XmlDataStoreTransaction transaction) {
 		return cache.read(transaction);
 	}
 
-	@SuppressWarnings("unchecked")
-	public <T extends IXmlDataStoreIdentifiable> Map<String, T> readObjects(final XmlDataStoreTransaction transaction, final IXmlDataStorePredicate<T> predicate) {
-		return (Map<String, T>) cache.read(transaction, (IXmlDataStorePredicate<IXmlDataStoreIdentifiable>) predicate);
+	public <T> Map<Object, T> readObjects(final XmlDataStoreTransaction transaction, final IXmlDataStoreAnnotatedPredicate<T> predicate) {
+		return (Map<Object, T>) cache.read(transaction, (IXmlDataStoreAnnotatedPredicate<T>) predicate);
 	}
 
-	public void readObjectByReference(final IXmlDataStoreIdentifiable reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
+	public void readObjectByReference(final Object reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
 		cache.readByReference(reference, transaction);
 	}
 
-	public IXmlDataStoreIdentifiable readObject(final String id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
+	public Object readObject(final Object id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
 		return cache.read(id, transaction);
 	}
 
-	public void insertObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction) throws XmlDataStoreInsertException {
+	public void insertObject(final Object object, final XmlDataStoreTransaction transaction) throws XmlDataStoreInsertException {
 		cache.insert(object, transaction);
 	}
 
-	public void updateObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction) throws XmlDataStoreUpdateException {
+	public void updateObject(final Object object, final XmlDataStoreTransaction transaction) throws XmlDataStoreUpdateException {
 		cache.update(object, transaction);
 	}
 
-	public void deleteObject(final IXmlDataStoreIdentifiable object, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
+	public void deleteObject(final Object object, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
 		cache.delete(object, transaction);
 	}
 }

@@ -24,27 +24,27 @@ public class XmlDataStoreTransactionsManager {
 	}
 
 	public void commitTransaction(final XmlDataStoreTransaction transaction) {
-		final Collection<XmlDataStoreResource> resources;
+		final Collection<IXmlDataStoreResource> resources;
 		synchronized (this) {
 			transactions.remove(transaction.getTransactionId());
 			resources = transaction.getResources();
 			transaction.commitInternal();
 		}
 
-		for (final XmlDataStoreResource resource : resources) {
+		for (final IXmlDataStoreResource resource : resources) {
 			resource.release();
 		}
 	}
 
 	public void rollbackTransaction(final XmlDataStoreTransaction transaction) {
-		final Collection<XmlDataStoreResource> resources;
+		final Collection<IXmlDataStoreResource> resources;
 		synchronized (this) {
 			transactions.remove(transaction.getTransactionId());
 			resources = transaction.getResources();
 			transaction.rollbackInternal();
 		}
 
-		for (final XmlDataStoreResource resource : resources) {
+		for (final IXmlDataStoreResource resource : resources) {
 			resource.release();
 		}
 	}

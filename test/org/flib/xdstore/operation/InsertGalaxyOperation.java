@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import org.flib.xdstore.XmlDataStore;
 import org.flib.xdstore.XmlDataStoreException;
+import org.flib.xdstore.entities.XdAnnotatedObject;
 import org.flib.xdstore.entities.XdBlackHole;
 import org.flib.xdstore.entities.XdGalaxy;
 import org.flib.xdstore.entities.XdStarSystem;
@@ -40,6 +41,7 @@ public class InsertGalaxyOperation implements Runnable {
 
 						store.updateObject(universe);
 						store.saveObject(galaxy);
+						if(galaxy.getObject() != null) store.saveAnnotatedObject(galaxy.getObject());
 						break;
 					}
 				}
@@ -62,7 +64,11 @@ public class InsertGalaxyOperation implements Runnable {
 		final XdBlackHole hole = new XdBlackHole();
 		hole.setDataStoreId(nextStringId());
 
+		final XdAnnotatedObject object = new XdAnnotatedObject();
+		object.setObjectId(Math.abs(new Random(System.currentTimeMillis()).nextLong()));
+		
 		galaxy.setHole(hole);
+		galaxy.setObject(object);
 
 		return galaxy;
 	}

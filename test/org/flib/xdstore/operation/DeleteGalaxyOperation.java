@@ -6,6 +6,7 @@ import java.util.Random;
 
 import org.flib.xdstore.XmlDataStore;
 import org.flib.xdstore.XmlDataStoreException;
+import org.flib.xdstore.entities.XdAnnotatedObject;
 import org.flib.xdstore.entities.XdGalaxy;
 import org.flib.xdstore.entities.XdUniverse;
 import org.flib.xdstore.transaction.XmlDataStoreTransaction;
@@ -37,10 +38,17 @@ public class DeleteGalaxyOperation implements Runnable {
 							final XdGalaxy galaxy = universe.removeGalaxy(index);
 
 							store.loadObject(galaxy);
+							final XdAnnotatedObject object = galaxy.getObject();
+							if(object != null) {
+								store.loadAnnotatedObject(object);
+							}
 
 							store.updateObject(universe);
 							store.deleteObject(galaxy);
 							store.deleteObjects(galaxy.getSystems());
+							if(object != null) {
+								store.deleteAnnotatedObject(object);
+							}
 						}
 						break;
 					}

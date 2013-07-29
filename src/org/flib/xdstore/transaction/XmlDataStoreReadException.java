@@ -13,8 +13,7 @@ public class XmlDataStoreReadException extends XmlDataStoreException {
 		super();
 	}
 
-	protected XmlDataStoreReadException(String message, Throwable cause, boolean enableSuppression,
-	        boolean writableStackTrace) {
+	protected XmlDataStoreReadException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
 		super(message, cause, enableSuppression, writableStackTrace);
 	}
 

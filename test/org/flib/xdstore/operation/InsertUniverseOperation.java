@@ -31,7 +31,7 @@ public class InsertUniverseOperation implements Runnable {
 			store.saveObject(universe);
 			store.saveObjects(universe.getGalaxies());
 			for (final XdGalaxy galaxy : universe.getGalaxies()) {
-				store.saveObjects(galaxy.getSystems());
+				if(galaxy.getSystems().size() > 0) store.saveObjects(galaxy.getSystems());
 			}
 
 			tx.commit();

@@ -11,8 +11,7 @@ public class XmlDataStoreException extends Exception {
 		super();
 	}
 
-	protected XmlDataStoreException(final String message, final Throwable cause, final boolean enableSuppression,
-	        final boolean writableStackTrace) {
+	protected XmlDataStoreException(final String message, final Throwable cause, final boolean enableSuppression, final boolean writableStackTrace) {
 		super(message, cause, enableSuppression, writableStackTrace);
 	}
 

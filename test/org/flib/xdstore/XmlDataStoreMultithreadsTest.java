@@ -1,22 +1,27 @@
 package org.flib.xdstore;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.Random;
 import java.util.UUID;
 
+import org.flib.xdstore.entities.XdAnnotatedObject;
 import org.flib.xdstore.entities.XdBlackHole;
 import org.flib.xdstore.entities.XdGalaxy;
 import org.flib.xdstore.entities.XdPlanet;
 import org.flib.xdstore.entities.XdStar;
 import org.flib.xdstore.entities.XdStarSystem;
 import org.flib.xdstore.entities.XdUniverse;
+import org.flib.xdstore.operation.DeleteAnnotatedObject;
 import org.flib.xdstore.operation.DeleteGalaxyOperation;
 import org.flib.xdstore.operation.DeleteSystemOperation;
 import org.flib.xdstore.operation.DeleteUniverseOperation;
+import org.flib.xdstore.operation.InsertAnnotatedObject;
 import org.flib.xdstore.operation.InsertGalaxyOperation;
 import org.flib.xdstore.operation.InsertSystemOperation;
 import org.flib.xdstore.operation.InsertUniverseOperation;
+import org.flib.xdstore.operation.UpdateAnnotatedObject;
 import org.flib.xdstore.operation.UpdateGalaxyOperation;
 import org.flib.xdstore.operation.UpdateSystemOperation;
 import org.flib.xdstore.operation.UpdateUniverseOperation;
@@ -47,6 +52,8 @@ public class XmlDataStoreMultithreadsTest {
 				for (final XdGalaxy galaxy : universe.getGalaxies()) {
 					store.saveObjects(galaxy.getSystems());
 				}
+				
+//				store.saveAnnotatedObjects(generateAnnotatedObjects(50));
 
 				tx.commit();
 			} catch (final XmlDataStoreException e) {
@@ -111,15 +118,16 @@ public class XmlDataStoreMultithreadsTest {
 		store.setStorePolicy(XdStarSystem.class, XmlDataStorePolicy.SingleObjectFile);
 		store.setStorePolicy(XdStar.class, XmlDataStorePolicy.ParentObjectFile);
 		store.setStorePolicy(XdPlanet.class, XmlDataStorePolicy.ParentObjectFile);
-		
+		store.setStorePolicy(XdAnnotatedObject.class, XmlDataStorePolicy.SingleObjectFile);
+
 		store.registerTrigger(new XdUniverseInsertTrigger());
 		store.registerTrigger(new XdUniverseUpdateTrigger());
 		store.registerTrigger(new XdUniverseDeleteTrigger());
-		
+
 		store.registerTrigger(new XdGalaxyInsertTrigger());
 		store.registerTrigger(new XdGalaxyUpdateTrigger());
 		store.registerTrigger(new XdGalaxyDeleteTrigger());
-		
+
 		store.registerTrigger(new XdStarSystemInsertTrigger());
 		store.registerTrigger(new XdStarSystemUpdateTrigger());
 		store.registerTrigger(new XdStarSystemDeleteTrigger());
@@ -167,6 +175,18 @@ public class XmlDataStoreMultithreadsTest {
 
 		return universe;
 	}
+	
+	private static Collection<XdAnnotatedObject> generateAnnotatedObjects(int count) {
+		final Random rand = new Random();
+		final Collection<XdAnnotatedObject> result = new ArrayList<XdAnnotatedObject>(count);
+		
+		for(int i = 0; i < count; ++i) {
+			final XdAnnotatedObject object = new XdAnnotatedObject();
+			object.setObjectId(Math.abs(rand.nextLong()));
+			result.add(object);
+		}
+		return result;
+	}
 
 	private static String nextStringId() {
 		return UUID.randomUUID().toString();
@@ -186,10 +206,14 @@ public class XmlDataStoreMultithreadsTest {
 		operations.add(new InsertSystemOperation(store));
 		operations.add(new UpdateSystemOperation(store));
 		operations.add(new DeleteSystemOperation(store));
-		//
+		
 		// operations.add(new InsertPlanetOperation(store));
 		// operations.add(new UpdatePlanetOperation(store));
 		// operations.add(new DeletePlanetOperation(store));
+		
+//		operations.add(new InsertAnnotatedObject(store));
+//		operations.add(new UpdateAnnotatedObject(store));
+//		operations.add(new DeleteAnnotatedObject(store));
 
 		return operations.toArray(new Runnable[operations.size()]);
 	}

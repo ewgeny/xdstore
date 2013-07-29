@@ -4,7 +4,6 @@ import org.flib.xdstore.entities.XdStarSystem;
 import org.flib.xdstore.trigger.IXmlDataStoreTrigger;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerType;
 
-
 public class XdStarSystemDeleteTrigger implements IXmlDataStoreTrigger<XdStarSystem> {
 
 	@Override

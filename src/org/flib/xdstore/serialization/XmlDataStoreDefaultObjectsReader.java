@@ -16,6 +16,7 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import org.flib.xdstore.IXmlDataStoreIdentifiable;
+import org.flib.xdstore.XmlDataStoreObjectIdField;
 import org.flib.xdstore.XmlDataStorePolicy;
 import org.flib.xdstore.serialization.IXmlDataStoreObjectsReader;
 import org.flib.xdstore.serialization.XmlDataStoreClassProperty;
@@ -24,11 +25,11 @@ import org.flib.xdstore.utils.ObjectUtils;
 
 public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsReader {
 
-	private Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies   = new HashMap<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy>();
+	private Map<Class<?>, XmlDataStorePolicy>                     policies   = new HashMap<Class<?>, XmlDataStorePolicy>();
 
-	private Map<Class<?>, Map<String, XmlDataStoreClassProperty>>               properties = new HashMap<Class<?>, Map<String, XmlDataStoreClassProperty>>();
+	private Map<Class<?>, Map<String, XmlDataStoreClassProperty>> properties = new HashMap<Class<?>, Map<String, XmlDataStoreClassProperty>>();
 
-	public XmlDataStoreDefaultObjectsReader(final Map<Class<? extends IXmlDataStoreIdentifiable>, XmlDataStorePolicy> policies) {
+	public XmlDataStoreDefaultObjectsReader(final Map<Class<?>, XmlDataStorePolicy> policies) {
 		this.policies.putAll(policies);
 	}
 
@@ -43,6 +44,29 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 					case XMLStreamConstants.START_ELEMENT:
 						if (xmlReader.getLocalName().equals("object") || xmlReader.getLocalName().equals("reference")) {
 							tmp = readElement(xmlReader);
+						}
+						break;
+				}
+				if (tmp != null)
+					result.add(tmp);
+			}
+		} catch (final Throwable cause) { // stupid quick solution
+			throw new XmlDataStoreIOException(cause);
+		}
+		return result;
+	}
+
+	@Override
+	public Collection<Object> readAnnotatedReferences(final Reader reader, final XmlDataStoreObjectIdField field) throws XmlDataStoreIOException {
+		Collection<Object> result = new ArrayList<Object>();
+		try {
+			XMLStreamReader xmlReader = XMLInputFactory.newInstance().createXMLStreamReader(reader);
+			Object tmp = null;
+			while (xmlReader.hasNext()) {
+				switch (xmlReader.next()) {
+					case XMLStreamConstants.START_ELEMENT:
+						if (xmlReader.getLocalName().equals("object") || xmlReader.getLocalName().equals("reference")) {
+							tmp = readAnnotatedElement(xmlReader, field);
 						}
 						break;
 				}
@@ -78,23 +102,66 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 		return result;
 	}
 
-	private IXmlDataStoreIdentifiable readElement(final XMLStreamReader xmlReader) throws InstantiationException,
-	        IllegalAccessException, ClassNotFoundException, NoSuchMethodException, SecurityException,
-	        IllegalArgumentException, InvocationTargetException, XMLStreamException {
+	@Override
+	public Collection<Object> readAnnotatedObjects(final Reader reader) throws XmlDataStoreIOException {
+		Collection<Object> result = new ArrayList<Object>();
+		try {
+			XMLStreamReader xmlReader = XMLInputFactory.newInstance().createXMLStreamReader(reader);
+			Object tmp = null;
+			while (xmlReader.hasNext()) {
+				switch (xmlReader.next()) {
+					case XMLStreamConstants.START_ELEMENT:
+						if (xmlReader.getLocalName().equals("object") || xmlReader.getLocalName().equals("reference")) {
+							tmp = readAnnotatedElement(xmlReader);
+						}
+						break;
+				}
+				if (tmp != null)
+					result.add(tmp);
+			}
+		} catch (final Throwable cause) { // stupid quick solution
+			throw new XmlDataStoreIOException(cause);
+		}
+		return result;
+	}
+
+	private IXmlDataStoreIdentifiable readElement(final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException, ClassNotFoundException,
+	        NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException, XMLStreamException {
 		IXmlDataStoreIdentifiable result = null;
 		final String[] fn = new String[] { null };
 		final String name = xmlReader.getLocalName();
 		if (name.equals("object")) {
 			result = (IXmlDataStoreIdentifiable) readObject(fn, xmlReader);
 		} else if (name.equals("reference")) {
-			result = readReference(fn, xmlReader);
+			result = (IXmlDataStoreIdentifiable) readReference(fn, xmlReader);
 		}
 		return result;
 	}
 
-	private Object readObject(final String fieldName[], final XMLStreamReader xmlReader) throws ClassNotFoundException,
-	        InstantiationException, IllegalAccessException, NoSuchMethodException, SecurityException,
-	        IllegalArgumentException, InvocationTargetException, XMLStreamException {
+	private Object readAnnotatedElement(final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException, ClassNotFoundException, NoSuchMethodException,
+	        SecurityException, IllegalArgumentException, InvocationTargetException, XMLStreamException {
+		Object result = null;
+		final String[] fn = new String[] { null };
+		final String name = xmlReader.getLocalName();
+		if (name.equals("object")) {
+			result = readObject(fn, xmlReader);
+		}
+		return result;
+	}
+
+	private Object readAnnotatedElement(final XMLStreamReader xmlReader, final XmlDataStoreObjectIdField field) throws InstantiationException, IllegalAccessException,
+	        ClassNotFoundException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException, XMLStreamException {
+		Object result = null;
+		final String[] fn = new String[] { null };
+		final String name = xmlReader.getLocalName();
+		if (name.equals("reference")) {
+			result = readReference(fn, xmlReader, field);
+		}
+		return result;
+	}
+
+	private Object readObject(final String fieldName[], final XMLStreamReader xmlReader) throws ClassNotFoundException, InstantiationException, IllegalAccessException,
+	        NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException, XMLStreamException {
 		final int count = xmlReader.getAttributeCount();
 		String className = null, value = null;
 		for (int i = 0; i < count; ++i) {
@@ -109,7 +176,7 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 				value = attValue;
 			}
 		}
-		if(className == null) {
+		if (className == null) {
 			xmlReader.nextTag();
 			return null;
 		}
@@ -156,9 +223,8 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 		return result;
 	}
 
-	private Object buildSimpleObject(final Class<?> cl, final String value) throws NoSuchMethodException,
-	        SecurityException, InstantiationException, IllegalAccessException, IllegalArgumentException,
-	        InvocationTargetException {
+	private Object buildSimpleObject(final Class<?> cl, final String value) throws NoSuchMethodException, SecurityException, InstantiationException, IllegalAccessException,
+	        IllegalArgumentException, InvocationTargetException {
 		if (cl == Boolean.class)
 			return Boolean.valueOf(value);
 		if (cl == Character.class)
@@ -169,9 +235,8 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 		return c.newInstance(value);
 	}
 
-	private Object readArray(final String[] fieldName, final XMLStreamReader xmlReader) throws ClassNotFoundException,
-	        InstantiationException, IllegalAccessException, XMLStreamException, NoSuchMethodException,
-	        SecurityException, IllegalArgumentException, InvocationTargetException {
+	private Object readArray(final String[] fieldName, final XMLStreamReader xmlReader) throws ClassNotFoundException, InstantiationException, IllegalAccessException,
+	        XMLStreamException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
 		final int count = xmlReader.getAttributeCount();
 		String className = null, length = null;
 		for (int i = 0; i < count; ++i) {
@@ -291,9 +356,8 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 		return result;
 	}
 
-	private Object readEnum(final String[] fieldName, final XMLStreamReader xmlReader) throws ClassNotFoundException,
-	        NoSuchMethodException, SecurityException, IllegalAccessException, IllegalArgumentException,
-	        InvocationTargetException {
+	private Object readEnum(final String[] fieldName, final XMLStreamReader xmlReader) throws ClassNotFoundException, NoSuchMethodException, SecurityException,
+	        IllegalAccessException, IllegalArgumentException, InvocationTargetException {
 		final int count = xmlReader.getAttributeCount();
 		String className = null, value = null;
 		for (int i = 0; i < count; ++i) {
@@ -315,9 +379,8 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 	}
 
 	@SuppressWarnings("unchecked")
-	private Object readCollection(final String[] fieldName, final XMLStreamReader xmlReader)
-	        throws ClassNotFoundException, InstantiationException, IllegalAccessException, XMLStreamException,
-	        NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
+	private Object readCollection(final String[] fieldName, final XMLStreamReader xmlReader) throws ClassNotFoundException, InstantiationException, IllegalAccessException,
+	        XMLStreamException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
 		final int count = xmlReader.getAttributeCount();
 		String className = null;
 		for (int i = 0; i < count; ++i) {
@@ -362,9 +425,8 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 	}
 
 	@SuppressWarnings("unchecked")
-	private Object readMap(final String[] fieldName, final XMLStreamReader xmlReader) throws InstantiationException,
-	        IllegalAccessException, ClassNotFoundException, XMLStreamException, NoSuchMethodException,
-	        SecurityException, IllegalArgumentException, InvocationTargetException {
+	private Object readMap(final String[] fieldName, final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException, ClassNotFoundException,
+	        XMLStreamException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
 		final int count = xmlReader.getAttributeCount();
 		String className = null;
 		for (int i = 0; i < count; ++i) {
@@ -426,10 +488,10 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 		return map;
 	}
 
-	private IXmlDataStoreIdentifiable readReference(final String fieldName[], final XMLStreamReader xmlReader)
-	        throws InstantiationException, IllegalAccessException, ClassNotFoundException {
+	private Object readReference(final String fieldName[], final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException,
+	        ClassNotFoundException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
 		final int count = xmlReader.getAttributeCount();
-		String className = null, idValue = null;
+		String className = null, idValue = null, classObjectId = null;
 		for (int i = 0; i < count; ++i) {
 			final String attName = xmlReader.getAttributeLocalName(i);
 			final String attValue = xmlReader.getAttributeValue(i);
@@ -439,11 +501,53 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 				className = attValue;
 			} else if (attName.equals("dataStoreId")) {
 				idValue = attValue;
+			} else if (attName.equals("classObjectId")) {
+				classObjectId = attValue;
+			} else if (attName.equals("objectId")) {
+				idValue = attValue;
 			}
 		}
 
-		final IXmlDataStoreIdentifiable result = (IXmlDataStoreIdentifiable) Class.forName(className).newInstance();
-		result.setDataStoreId(idValue);
+		if(classObjectId == null) {
+    		final IXmlDataStoreIdentifiable result = (IXmlDataStoreIdentifiable) Class.forName(className).newInstance();
+    		result.setDataStoreId(idValue);
+    		return result;
+		} else {
+			final Class<?> idClass = Class.forName(classObjectId);
+			final Constructor<?> constructor = idClass.getConstructor(new Class<?>[] { String.class });
+			final Object objectId = constructor.newInstance(new Object[] { idValue });
+
+			final Object result = Class.forName(className).newInstance();
+			final XmlDataStoreObjectIdField field = ObjectUtils.getAnnotatedObjectIdField(result.getClass());
+			field.setObjectId(result, objectId);
+			return result;
+		}
+	}
+
+	private Object readReference(final String fieldName[], final XMLStreamReader xmlReader, final XmlDataStoreObjectIdField field) throws InstantiationException,
+	        IllegalAccessException, ClassNotFoundException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
+		final int count = xmlReader.getAttributeCount();
+		String className = null, classIdName = null, idValue = null;
+		for (int i = 0; i < count; ++i) {
+			final String attName = xmlReader.getAttributeLocalName(i);
+			final String attValue = xmlReader.getAttributeValue(i);
+			if (attName.equals("name")) {
+				fieldName[0] = attValue;
+			} else if (attName.equals("class")) {
+				className = attValue;
+			} else if (attName.equals("classObjectId")) {
+				classIdName = attValue;
+			} else if (attName.equals("objectId")) {
+				idValue = attValue;
+			}
+		}
+
+		final Class<?> idClass = Class.forName(classIdName);
+		final Constructor<?> constructor = idClass.getConstructor(new Class<?>[] { String.class });
+		final Object objectId = constructor.newInstance(new Object[] { idValue });
+
+		final Object result = Class.forName(className).newInstance();
+		field.setObjectId(result, objectId);
 		return result;
 	}
 }

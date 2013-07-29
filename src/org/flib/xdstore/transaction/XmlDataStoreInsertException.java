@@ -13,8 +13,7 @@ public class XmlDataStoreInsertException extends XmlDataStoreException {
 		super();
 	}
 
-	protected XmlDataStoreInsertException(String message, Throwable cause, boolean enableSuppression,
-	        boolean writableStackTrace) {
+	protected XmlDataStoreInsertException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
 		super(message, cause, enableSuppression, writableStackTrace);
 	}
 

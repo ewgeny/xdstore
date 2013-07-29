@@ -13,6 +13,8 @@ public class XdGalaxy implements IXmlDataStoreIdentifiable {
 
 	private Collection<XdStarSystem> systems;
 
+	private XdAnnotatedObject        object;
+
 	@Override
 	public String getDataStoreId() {
 		return id;
@@ -64,4 +66,13 @@ public class XdGalaxy implements IXmlDataStoreIdentifiable {
 		}
 		return null;
 	}
+	
+    public XdAnnotatedObject getObject() {
+    	return object;
+    }
+
+    public void setObject(final XdAnnotatedObject object) {
+    	this.object = object;
+    }
+	
 }

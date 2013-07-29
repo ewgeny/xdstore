@@ -2,39 +2,43 @@ package org.flib.xdstore.transaction;
 
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.TreeMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.Map.Entry;
 
-import org.flib.xdstore.IXmlDataStoreIdentifiable;
-import org.flib.xdstore.IXmlDataStorePredicate;
+import org.flib.xdstore.IXmlDataStoreAnnotatedPredicate;
+import org.flib.xdstore.XmlDataStoreObjectIdField;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerType;
 import org.flib.xdstore.utils.ObjectUtils;
 
-public class XmlDataStoreResourceCache {
+public class XmlDataStoreAnnotatedResourceCache {
 
-	private final XmlDataStoreResource                  resource;
+	private final XmlDataStoreObjectIdField             field;
 
-	private final Map<String, CacheRecord>              cache   = new TreeMap<String, CacheRecord>();
+	private final XmlDataStoreAnnotatedResource         resource;
 
-	private final Map<String, Map<String, CacheRecord>> changes = new TreeMap<String, Map<String, CacheRecord>>();
+	private final Map<Object, CacheRecord>              cache   = new TreeMap<Object, CacheRecord>();
 
-	XmlDataStoreResourceCache(final XmlDataStoreResource resource) {
+	private final Map<String, Map<Object, CacheRecord>> changes = new TreeMap<String, Map<Object, CacheRecord>>();
+
+	XmlDataStoreAnnotatedResourceCache(final XmlDataStoreAnnotatedResource resource, final XmlDataStoreObjectIdField field) {
 		this.resource = resource;
+		this.field = field;
 	}
 
-	public synchronized void fillCache(final Collection<IXmlDataStoreIdentifiable> objects) {
-		for (final IXmlDataStoreIdentifiable object : objects) {
-			cache.put(object.getDataStoreId(), createReadRecord(object));
+	public synchronized void fillCache(final Collection<Object> objects) {
+		for (final Object object : objects) {
+			cache.put(field.getObjectId(object), createReadRecord(object));
 		}
 	}
 
-	public synchronized Map<String, IXmlDataStoreIdentifiable> read(final XmlDataStoreTransaction transaction, final IXmlDataStorePredicate<IXmlDataStoreIdentifiable> predicate) {
-		final Map<String, IXmlDataStoreIdentifiable> result = new TreeMap<String, IXmlDataStoreIdentifiable>();
+	@SuppressWarnings("unchecked")
+	public synchronized <T> Map<Object, T> read(final XmlDataStoreTransaction transaction, final IXmlDataStoreAnnotatedPredicate<T> predicate) {
+		final Map<Object, T> result = new TreeMap<Object, T>();
 		for (final CacheRecord record : cache.values()) {
 
-			IXmlDataStoreIdentifiable object = null;
+			Object object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
 					object = record.getObject();
@@ -57,18 +61,18 @@ public class XmlDataStoreResourceCache {
 				object = record.getObject();
 			}
 
-			if (object != null && predicate.passed(object)) {
-				result.put(object.getDataStoreId(), (IXmlDataStoreIdentifiable) ObjectUtils.clone(object));
+			if (object != null && predicate.passed((T) object)) {
+				result.put(field.getObjectId(object), (T) ObjectUtils.clone(object));
 			}
 		}
 		return result;
 	}
 
-	public synchronized Map<String, IXmlDataStoreIdentifiable> read(final XmlDataStoreTransaction transaction) {
-		final Map<String, IXmlDataStoreIdentifiable> result = new TreeMap<String, IXmlDataStoreIdentifiable>();
+	public synchronized Map<Object, Object> read(final XmlDataStoreTransaction transaction) {
+		final Map<Object, Object> result = new TreeMap<Object, Object>();
 		for (final CacheRecord record : cache.values()) {
 
-			IXmlDataStoreIdentifiable object = null;
+			Object object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
 					object = record.getObject();
@@ -92,16 +96,16 @@ public class XmlDataStoreResourceCache {
 			}
 
 			if (object != null) {
-				result.put(object.getDataStoreId(), (IXmlDataStoreIdentifiable) ObjectUtils.clone(object));
+				result.put(field.getObjectId(object), ObjectUtils.clone(object));
 			}
 		}
 		return result;
 	}
 
-	public synchronized IXmlDataStoreIdentifiable read(final String id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
+	public synchronized Object read(final Object id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
 		CacheRecord record = cache.get(id);
 		if (record != null) {
-			IXmlDataStoreIdentifiable object = null;
+			Object object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
 					object = record.getObject();
@@ -125,17 +129,17 @@ public class XmlDataStoreResourceCache {
 			}
 
 			if (object != null) {
-				return (IXmlDataStoreIdentifiable) ObjectUtils.clone(object);
+				return ObjectUtils.clone(object);
 			}
 		}
 		// ARCH ?
 		throw new XmlDataStoreReadException("cannot read object with id " + record.getId());
 	}
 
-	public synchronized void readByReference(final IXmlDataStoreIdentifiable reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
-		CacheRecord record = cache.get(reference.getDataStoreId());
+	public synchronized void readByReference(final Object reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
+		CacheRecord record = cache.get(field.getObjectId(reference));
 		if (record != null) {
-			IXmlDataStoreIdentifiable object = null;
+			Object object = null;
 			if (record.isUpdateChange()) {
 				if (record.isCommitedState()) {
 					object = record.getObject();
@@ -164,45 +168,47 @@ public class XmlDataStoreResourceCache {
 			}
 		}
 		// ARCH ?
-		throw new XmlDataStoreReadException("cannot load by reference object of class " + reference.getClass() + " with id " + reference.getDataStoreId());
+		throw new XmlDataStoreReadException("cannot load by reference object of class " + reference.getClass() + " with id " + field.getObjectId(reference));
 	}
 
-	public synchronized void update(final IXmlDataStoreIdentifiable newObject, final XmlDataStoreTransaction transaction) throws XmlDataStoreUpdateException {
-		CacheRecord record = cache.get(newObject.getDataStoreId());
+	public synchronized void update(final Object newObject, final XmlDataStoreTransaction transaction) throws XmlDataStoreUpdateException {
+		final Object objectId = field.getObjectId(newObject);
+		CacheRecord record = cache.get(objectId);
 		if (record == null) {
-			throw new XmlDataStoreUpdateException("object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId() + " does not exists");
+			throw new XmlDataStoreUpdateException("object of class " + newObject.getClass() + " with id " + objectId + " does not exists");
 		} else {
 			if (record.isReadChange()) {
 				record.lock(transaction);
-				record.setNewObject((IXmlDataStoreIdentifiable) ObjectUtils.clone(newObject));
+				record.setNewObject(ObjectUtils.clone(newObject));
 				record.markUpdate();
 			} else if (!record.isCommitedState() && record.changedByTransaction(transaction)) {
 				if (record.isUpdateChange() || record.isInsertChange()) {
-					record.setNewObject((IXmlDataStoreIdentifiable) ObjectUtils.clone(newObject));
+					record.setNewObject(ObjectUtils.clone(newObject));
 				} else {
-					throw new XmlDataStoreUpdateException("object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId() + " was deleted this transaction");
+					throw new XmlDataStoreUpdateException("object of class " + newObject.getClass() + " with id " + objectId + " was deleted this transaction");
 				}
 			} else if (record.canBeChangedByTransaction(transaction)) {
 				record.lock(transaction);
-				record.setNewObject((IXmlDataStoreIdentifiable) ObjectUtils.clone(newObject));
+				record.setNewObject(ObjectUtils.clone(newObject));
 				record.markUpdate();
 			} else {
-				throw new XmlDataStoreUpdateException("concurrent modification one object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId());
+				throw new XmlDataStoreUpdateException("concurrent modification one object of class " + newObject.getClass() + " with id " + objectId);
 			}
 		}
 
-		Map<String, CacheRecord> map = changes.get(transaction.getTransactionId());
+		Map<Object, CacheRecord> map = changes.get(transaction.getTransactionId());
 		if (map == null) {
-			changes.put(transaction.getTransactionId(), map = new HashMap<String, CacheRecord>());
+			changes.put(transaction.getTransactionId(), map = new HashMap<Object, CacheRecord>());
 		}
-		if (!map.containsKey(newObject.getDataStoreId()))
-			map.put(newObject.getDataStoreId(), record);
+		if (!map.containsKey(objectId))
+			map.put(objectId, record);
 	}
 
-	public synchronized void delete(final IXmlDataStoreIdentifiable oldObject, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
-		CacheRecord record = cache.get(oldObject.getDataStoreId());
+	public synchronized void delete(final Object oldObject, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
+		final Object objectId = field.getObjectId(oldObject);
+		CacheRecord record = cache.get(objectId);
 		if (record == null) {
-			throw new XmlDataStoreDeleteException("object of class " + oldObject.getClass() + " with id " + oldObject.getDataStoreId() + " does not exists");
+			throw new XmlDataStoreDeleteException("object of class " + oldObject.getClass() + " with id " + objectId + " does not exists");
 		} else {
 			if (record.isReadChange()) {
 				record.lock(transaction);
@@ -210,53 +216,54 @@ public class XmlDataStoreResourceCache {
 				record.markDelete();
 			} else if (!record.isCommitedState() && record.changedByTransaction(transaction)) {
 				if (record.isInsertChange()) {
-					cache.remove(oldObject.getDataStoreId());
+					cache.remove(objectId);
 				} else if (record.isUpdateChange()) {
 					record.setNewObject(null);
 					record.markDelete();
 				} else {
-					throw new XmlDataStoreDeleteException("trying to double delete one object of class " + oldObject.getClass() + " with id " + oldObject.getDataStoreId());
+					throw new XmlDataStoreDeleteException("trying to double delete one object of class " + oldObject.getClass() + " with id " + objectId);
 				}
 			} else if (record.canBeChangedByTransaction(transaction)) {
 				record.lock(transaction);
 				record.setNewObject(null);
 				record.markDelete();
 			} else {
-				throw new XmlDataStoreDeleteException("concurrent modification one object of class " + oldObject.getClass() + " with id " + oldObject.getDataStoreId());
+				throw new XmlDataStoreDeleteException("concurrent modification one object of class " + oldObject.getClass() + " with id " + objectId);
 			}
 		}
 
-		Map<String, CacheRecord> map = changes.get(transaction.getTransactionId());
+		Map<Object, CacheRecord> map = changes.get(transaction.getTransactionId());
 		if (map == null) {
-			changes.put(transaction.getTransactionId(), map = new HashMap<String, CacheRecord>());
+			changes.put(transaction.getTransactionId(), map = new HashMap<Object, CacheRecord>());
 		}
-		if (!map.containsKey(oldObject.getDataStoreId()))
-			map.put(oldObject.getDataStoreId(), record);
+		if (!map.containsKey(objectId))
+			map.put(objectId, record);
 	}
 
-	public synchronized void insert(final IXmlDataStoreIdentifiable newObject, final XmlDataStoreTransaction transaction) throws XmlDataStoreInsertException {
-		CacheRecord record = cache.get(newObject.getDataStoreId());
+	public synchronized void insert(final Object newObject, final XmlDataStoreTransaction transaction) throws XmlDataStoreInsertException {
+		final Object objectId = field.getObjectId(newObject);
+		CacheRecord record = cache.get(objectId);
 		if (record == null) {
-			cache.put(newObject.getDataStoreId(), record = createInsertRecord((IXmlDataStoreIdentifiable) ObjectUtils.clone(newObject), transaction));
+			cache.put(objectId, record = createInsertRecord(ObjectUtils.clone(newObject), transaction));
 		} else {
 			if (record.changedByTransaction(transaction)) {
 				if (record.isDeleteChange()) {
-					throw new XmlDataStoreInsertException("trying to insert deleted object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId());
+					throw new XmlDataStoreInsertException("trying to insert deleted object of class " + newObject.getClass() + " with id " + objectId);
 				} else if (record.isInsertChange()) {
-					throw new XmlDataStoreInsertException("trying to double insert one object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId());
+					throw new XmlDataStoreInsertException("trying to double insert one object of class " + newObject.getClass() + " with id " + objectId);
 				} else {
-					throw new XmlDataStoreInsertException("object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId() + " is exists");
+					throw new XmlDataStoreInsertException("object of class " + newObject.getClass() + " with id " + objectId + " is exists");
 				}
 			} else {
-				throw new XmlDataStoreInsertException("concurrent modification one object of class " + newObject.getClass() + " with id " + newObject.getDataStoreId());
+				throw new XmlDataStoreInsertException("concurrent modification one object of class " + newObject.getClass() + " with id " + objectId);
 			}
 		}
-		Map<String, CacheRecord> map = changes.get(transaction.getTransactionId());
+		Map<Object, CacheRecord> map = changes.get(transaction.getTransactionId());
 		if (map == null) {
-			changes.put(transaction.getTransactionId(), map = new HashMap<String, CacheRecord>());
+			changes.put(transaction.getTransactionId(), map = new HashMap<Object, CacheRecord>());
 		}
-		if (!map.containsKey(newObject.getDataStoreId()))
-			map.put(newObject.getDataStoreId(), record);
+		if (!map.containsKey(objectId))
+			map.put(objectId, record);
 	}
 
 	public synchronized boolean hasChanges(final XmlDataStoreTransaction transaction) {
@@ -264,12 +271,12 @@ public class XmlDataStoreResourceCache {
 	}
 
 	public synchronized void commit(final XmlDataStoreTransaction transaction) {
-		final Map<String, CacheRecord> map = changes.remove(transaction.getTransactionId());
+		final Map<Object, CacheRecord> map = changes.remove(transaction.getTransactionId());
 		if (map != null) {
-			final Iterator<Entry<String, CacheRecord>> it = map.entrySet().iterator();
+			final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
 			while (it.hasNext()) {
 				final CacheRecord record = it.next().getValue();
-				IXmlDataStoreIdentifiable object = null;
+				Object object = null;
 				XmlDataStoreTriggerType type = null;
 				if (record.isInsertChange()) {
 					object = record.getNewObject();
@@ -293,9 +300,9 @@ public class XmlDataStoreResourceCache {
 	}
 
 	public synchronized void rollback(final XmlDataStoreTransaction transaction) {
-		final Map<String, CacheRecord> map = changes.remove(transaction.getTransactionId());
+		final Map<Object, CacheRecord> map = changes.remove(transaction.getTransactionId());
 		if (map != null) {
-			final Iterator<Entry<String, CacheRecord>> it = map.entrySet().iterator();
+			final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
 			while (it.hasNext()) {
 				final CacheRecord record = it.next().getValue();
 				record.rollback();
@@ -306,9 +313,9 @@ public class XmlDataStoreResourceCache {
 		}
 	}
 
-	private CacheRecord createReadRecord(final IXmlDataStoreIdentifiable object) {
+	private CacheRecord createReadRecord(final Object object) {
 		CacheRecord record = new CacheRecord();
-		record.id = object.getDataStoreId();
+		record.id = field.getObjectId(object);
 		record.object = object;
 		record.newObject = null;
 		record.transaction = null;
@@ -317,9 +324,9 @@ public class XmlDataStoreResourceCache {
 		return record;
 	}
 
-	private CacheRecord createInsertRecord(final IXmlDataStoreIdentifiable newObject, final XmlDataStoreTransaction transaction) {
+	private CacheRecord createInsertRecord(final Object newObject, final XmlDataStoreTransaction transaction) {
 		CacheRecord record = new CacheRecord();
-		record.id = newObject.getDataStoreId();
+		record.id = field.getObjectId(newObject);
 		record.object = null;
 		record.newObject = newObject;
 		record.transaction = transaction;
@@ -338,29 +345,29 @@ public class XmlDataStoreResourceCache {
 
 	private class CacheRecord {
 
-		private String                    id;
+		private Object                  id;
 
-		private IXmlDataStoreIdentifiable object;
+		private Object                  object;
 
-		private IXmlDataStoreIdentifiable newObject;
+		private Object                  newObject;
 
-		private XmlDataStoreTransaction   transaction;
+		private XmlDataStoreTransaction transaction;
 
-		private long                      commitTimestamp = Long.MIN_VALUE;
+		private long                    commitTimestamp = Long.MIN_VALUE;
 
-		private Change                    change;
+		private Change                  change;
 
-		private Change                    previousChange;
+		private Change                  previousChange;
 
-		private State                     state;
+		private State                   state;
 
-		private State                     previousState;
+		private State                   previousState;
 
 		private CacheRecord() {
 			// do nothing
 		}
 
-		public String getId() {
+		public Object getId() {
 			return this.id;
 		}
 
@@ -372,15 +379,15 @@ public class XmlDataStoreResourceCache {
 			return this.change != Change.read && this.transaction != null && this.transaction.isTransaction(transaction);
 		}
 
-		public IXmlDataStoreIdentifiable getObject() {
+		public Object getObject() {
 			return this.object;
 		}
 
-		public IXmlDataStoreIdentifiable getNewObject() {
+		public Object getNewObject() {
 			return this.newObject;
 		}
 
-		public void setNewObject(final IXmlDataStoreIdentifiable newObject) {
+		public void setNewObject(final Object newObject) {
 			this.newObject = newObject;
 		}
 

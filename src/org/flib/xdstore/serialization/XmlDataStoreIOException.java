@@ -11,8 +11,7 @@ public class XmlDataStoreIOException extends RuntimeException {
 		super();
 	}
 
-	protected XmlDataStoreIOException(String message, Throwable cause, boolean enableSuppression,
-	        boolean writableStackTrace) {
+	protected XmlDataStoreIOException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
 		super(message, cause, enableSuppression, writableStackTrace);
 	}
 

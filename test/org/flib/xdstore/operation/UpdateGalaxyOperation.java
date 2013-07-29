@@ -37,6 +37,7 @@ public class UpdateGalaxyOperation implements Runnable {
 
 							store.loadObject(galaxy);
 							store.updateObject(galaxy);
+							if(galaxy.getObject() != null) store.updateAnnotatedObject(galaxy.getObject());
 						}
 						break;
 					}

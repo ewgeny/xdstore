@@ -1,9 +1,8 @@
 package org.flib.xdstore;
 
-
 public abstract class AbstractXmlDataStoreIdentifiable implements IXmlDataStoreIdentifiable {
-	
-	private String	dataStoreId;
+
+	private String dataStoreId;
 
 	@Override
 	public String getDataStoreId() {

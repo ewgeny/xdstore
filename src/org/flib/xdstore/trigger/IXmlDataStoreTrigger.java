@@ -1,8 +1,6 @@
 package org.flib.xdstore.trigger;
 
-import org.flib.xdstore.IXmlDataStoreIdentifiable;
-
-public interface IXmlDataStoreTrigger<T extends IXmlDataStoreIdentifiable> {
+public interface IXmlDataStoreTrigger<T> {
 
 	XmlDataStoreTriggerType getType();
 

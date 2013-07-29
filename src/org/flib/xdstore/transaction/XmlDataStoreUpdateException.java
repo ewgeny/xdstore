@@ -13,8 +13,7 @@ public class XmlDataStoreUpdateException extends XmlDataStoreException {
 		super();
 	}
 
-	protected XmlDataStoreUpdateException(String message, Throwable cause, boolean enableSuppression,
-	        boolean writableStackTrace) {
+	protected XmlDataStoreUpdateException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
 		super(message, cause, enableSuppression, writableStackTrace);
 	}
 

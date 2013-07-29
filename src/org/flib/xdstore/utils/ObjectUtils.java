@@ -13,20 +13,23 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.flib.xdstore.IXmlDataStoreIdentifiable;
+import org.flib.xdstore.XmlDataStoreObjectId;
+import org.flib.xdstore.XmlDataStoreObjectIdField;
 import org.flib.xdstore.serialization.XmlDataStoreClassProperty;
 
 public final class ObjectUtils {
-	
+
+	private static final Map<Class<?>, Set<XmlDataStoreClassProperty>> classesProperties = new ConcurrentHashMap<Class<?>, Set<XmlDataStoreClassProperty>>();
+
+	private static final Map<Class<?>, XmlDataStoreObjectIdField>      annotatedFields   = new HashMap<Class<?>, XmlDataStoreObjectIdField>();
+
 	private ObjectUtils() {
 		// do nothing
 	}
 
-	private static final Map<Class<?>, Set<XmlDataStoreClassProperty>> classesProperties = new ConcurrentHashMap<Class<?>, Set<XmlDataStoreClassProperty>>();
-
-	public static IXmlDataStoreIdentifiable clone(final IXmlDataStoreIdentifiable object) {
+	public static Object clone(final Object object) {
 		try {
-			IXmlDataStoreIdentifiable result;
+			Object result;
 			fillObject(result = object.getClass().newInstance(), object);
 			return result;
 		} catch (InstantiationException | IllegalAccessException e) {
@@ -35,7 +38,7 @@ public final class ObjectUtils {
 		return null;
 	}
 
-	public static void fillObject(final IXmlDataStoreIdentifiable reference, final IXmlDataStoreIdentifiable object) {
+	public static void fillObject(final Object reference, final Object object) {
 		final Set<XmlDataStoreClassProperty> properties = getProperties(object.getClass());
 		for (final XmlDataStoreClassProperty property : properties) {
 			final Object tmp = property.get(object);
@@ -238,17 +241,37 @@ public final class ObjectUtils {
 		}
 		return properties;
 	}
-	
+
 	private static Method[] getPublicMethods(final Class<?> cl) {
 		final List<Method> result = new ArrayList<Method>();
 		for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {
-    		final Method[] tmp = clazz.getDeclaredMethods();
-    		for(final Method method : tmp) {
-    			if( (method.getModifiers() & Modifier.PUBLIC) > 0) {
-    				result.add(method);
-    			}
-    		}
+			final Method[] tmp = clazz.getDeclaredMethods();
+			for (final Method method : tmp) {
+				if ((method.getModifiers() & Modifier.PUBLIC) > 0) {
+					result.add(method);
+				}
+			}
 		}
 		return result.toArray(new Method[result.size()]);
+	}
+
+	public static XmlDataStoreObjectIdField getAnnotatedObjectIdField(final Class<?> cl) {
+		synchronized (annotatedFields) {
+			if(annotatedFields.containsKey(cl)) {
+				return annotatedFields.get(cl);
+			}
+			for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {
+				final Field[] fields = clazz.getDeclaredFields();
+				for (final Field field : fields) {
+					if (field.isAnnotationPresent(XmlDataStoreObjectId.class)) {
+						XmlDataStoreObjectIdField result = null;
+						annotatedFields.put(cl, result = new XmlDataStoreObjectIdField(field));
+						return result;
+					}
+				}
+			}
+			annotatedFields.put(cl, null);
+			return null;
+		}
 	}
 }

@@ -31,10 +31,10 @@ public class DeleteUniverseOperation implements Runnable {
 				store.deleteObject(uni);
 				store.deleteObjects(galaxies);
 				for (final XdGalaxy galaxy : galaxies) {
-					store.deleteObjects(galaxy.getSystems()); // deleting by
-					                                          // collection
-					                                          // objects'
-					                                          // references
+					if (galaxy.getSystems().size() > 0)
+						store.deleteObjects(galaxy.getSystems()); // deleting by collection objects' references
+					if (galaxy.getObject() != null)
+						store.deleteAnnotatedObject(galaxy.getObject());
 				}
 
 				break;

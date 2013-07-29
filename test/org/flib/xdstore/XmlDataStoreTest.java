@@ -6,6 +6,7 @@ import java.util.LinkedList;
 import java.util.Map;
 import java.util.UUID;
 
+import org.flib.xdstore.entities.XdAnnotatedObject;
 import org.flib.xdstore.entities.XdBlackHole;
 import org.flib.xdstore.entities.XdGalaxy;
 import org.flib.xdstore.entities.XdPlanet;
@@ -34,6 +35,7 @@ public class XmlDataStoreTest {
 		store.setStorePolicy(XdStarSystem.class, XmlDataStorePolicy.SingleObjectFile);
 		store.setStorePolicy(XdStar.class, XmlDataStorePolicy.ParentObjectFile);
 		store.setStorePolicy(XdPlanet.class, XmlDataStorePolicy.ParentObjectFile);
+		store.setStorePolicy(XdAnnotatedObject.class, XmlDataStorePolicy.SingleObjectFile);
 		return store;
 	}
 
@@ -97,6 +99,8 @@ public class XmlDataStoreTest {
 
 				for (final XdGalaxy galaxy : galaxies) {
 					store.deleteObjects(galaxy.getSystems());
+					if(galaxy.getObject() != null)
+						store.deleteAnnotatedObject(galaxy.getObject());
 				}
 				store.deleteObjects(galaxies);
 				store.deleteObject(root);
@@ -104,6 +108,11 @@ public class XmlDataStoreTest {
 				System.out.println(i);
 				++i;
 			}
+			
+//			Map<Object, XdAnnotatedObject> annotatedObject = store.loadAnnotatedObjects(XdAnnotatedObject.class);
+//			if(annotatedObject.size() > 0) {
+//				store.deleteAnnotatedObjects(annotatedObject.values());
+//			}
 
 			tx.commit();
 		} catch (XmlDataStoreException e) {

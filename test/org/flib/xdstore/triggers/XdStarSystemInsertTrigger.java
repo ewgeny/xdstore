@@ -4,7 +4,6 @@ import org.flib.xdstore.entities.XdStarSystem;
 import org.flib.xdstore.trigger.IXmlDataStoreTrigger;
 import org.flib.xdstore.trigger.XmlDataStoreTriggerType;
 
-
 public class XdStarSystemInsertTrigger implements IXmlDataStoreTrigger<XdStarSystem> {
 
 	@Override
