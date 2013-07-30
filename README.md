@@ -12,7 +12,13 @@ Changes Java XML store for JavaBeans
 * Added abstract class AbstractXmlDataStoreIdentifiable
 * Deleted methods for a work with roots
 * Changed default xml reader and writer
+* Added annotation @XmlDataStoreObjectId to tell about field is identifier
+	- Mark your field (this type must have constructor with one parameter java.lang.String)
+	- Make getter and setter for this field
+	- Implement methods equals() and hashCode()
+* Added group methods for a work with 'Annotated' classes
 
 Fixed bugs
 ===========
-Not all public getters/setters used by serialization.
+* Not all public getters/setters used by serialization.
+* Fixed bug in the default XML reader of this tool
