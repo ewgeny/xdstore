@@ -97,14 +97,14 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 		// do nothing
 	}
 
-	public synchronized void commit(final XmlDataStoreTransaction transaction) {
+	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord record) {
 		final boolean hasChanges = cache.hasChanges(transaction);
 
 		Map<String, IXmlDataStoreIdentifiable> objects = null;
 		if (hasChanges)
 			objects = cache.read(transaction);
 
-		cache.commit(transaction);
+		cache.commit(transaction, record);
 		if (hasChanges) {
 			// TODO : REVIEW file deleting and creation
 			// ! and think about backup file
@@ -155,6 +155,56 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 	}
 
 	void postRollback(final XmlDataStoreTransaction transaction) {
+		// do nothing
+	}
+
+	public synchronized void rollbackFailedCommit(final XmlDataStoreTransaction transaction, final Map<Object, Object> changes) {
+		// TODO implement roll back failed commit
+		final boolean hasChanges = changes.size() > 0;
+
+		cache.rollbackFailedCommit(transaction, changes);
+
+		Map<String, IXmlDataStoreIdentifiable> objects = cache.read(transaction);
+		if (hasChanges) {
+			// TODO : REVIEW file deleting and creation
+			// ! and think about backup file
+			File file = new File(getFileName());
+			if (file.exists())
+				file.delete();
+
+			if (objects.size() > 0) {
+				try {
+					// TODO : REVIEW file deleting and creation
+					// ! and think about backup file
+					file = new File(getFileName());
+					if (!file.exists()) {
+						final File parentFile = file.getParentFile();
+						if (parentFile != null && !parentFile.exists())
+							parentFile.mkdirs();
+						file.createNewFile();
+					}
+
+					Writer xmlWriter = null;
+					try {
+						xmlWriter = new FileWriter(file);
+						if (isReferences) {
+							writer.writeReferences(xmlWriter, objects.values());
+						} else {
+							writer.writeObjects(xmlWriter, objects.values());
+						}
+					} finally {
+						xmlWriter.close();
+					}
+				} catch (final Throwable e) {
+					throw new XmlDataStoreRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
+				}
+			}
+		}
+		--locks;
+		postRollbackFailedCommit(transaction);
+	}
+
+	void postRollbackFailedCommit(final XmlDataStoreTransaction transaction) {
 		// do nothing
 	}
 

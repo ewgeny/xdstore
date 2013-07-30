@@ -263,7 +263,7 @@ public class XmlDataStoreResourceCache {
 		return changes.containsKey(transaction.getTransactionId());
 	}
 
-	public synchronized void commit(final XmlDataStoreTransaction transaction) {
+	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord collector) {
 		final Map<String, CacheRecord> map = changes.remove(transaction.getTransactionId());
 		if (map != null) {
 			final Iterator<Entry<String, CacheRecord>> it = map.entrySet().iterator();
@@ -281,6 +281,9 @@ public class XmlDataStoreResourceCache {
 					object = record.getObject();
 					type = XmlDataStoreTriggerType.Delete;
 				}
+
+				collector.addChangeObject(record.getId(), record.getObject());
+
 				record.commit();
 				if (record.getObject() == null)
 					cache.remove(record.getId());
@@ -302,6 +305,21 @@ public class XmlDataStoreResourceCache {
 				if (record.getObject() == null)
 					cache.remove(record.getId());
 				record.unlock(transaction);
+			}
+		}
+	}
+
+	public synchronized void rollbackFailedCommit(final XmlDataStoreTransaction transaction, final Map<Object, Object> committed) {
+		for (final Map.Entry<Object, Object> entry : committed.entrySet()) {
+			final String id = (String) entry.getKey();
+			final Object object = entry.getValue();
+			CacheRecord record = cache.get(id);
+			if (record == null) { // was deleted by this transaction
+				cache.put(id, record = createReadRecord((IXmlDataStoreIdentifiable) object));
+			} else if (object == null) { // was inserted by this transaction
+				cache.remove(id);
+			} else { // was updated by this transaction
+				cache.put(id, record = createReadRecord((IXmlDataStoreIdentifiable) object));
 			}
 		}
 	}

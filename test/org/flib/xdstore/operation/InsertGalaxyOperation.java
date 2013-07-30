@@ -41,7 +41,8 @@ public class InsertGalaxyOperation implements Runnable {
 
 						store.updateObject(universe);
 						store.saveObject(galaxy);
-						if(galaxy.getObject() != null) store.saveAnnotatedObject(galaxy.getObject());
+						if (galaxy.getObject() != null)
+							store.saveAnnotatedObject(galaxy.getObject());
 						break;
 					}
 				}
@@ -66,7 +67,7 @@ public class InsertGalaxyOperation implements Runnable {
 
 		final XdAnnotatedObject object = new XdAnnotatedObject();
 		object.setObjectId(Math.abs(new Random(System.currentTimeMillis()).nextLong()));
-		
+
 		galaxy.setHole(hole);
 		galaxy.setObject(object);
 

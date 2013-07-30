@@ -40,7 +40,7 @@ public class XmlDataStoreTriggerManager {
 	}
 
 	@SuppressWarnings("unchecked")
-    public <T> void performInsertTriggers(final T object) {
+	public <T> void performInsertTriggers(final T object) {
 		List<IXmlDataStoreTrigger<?>> list;
 		synchronized (this) {
 			list = triggers.get(object.getClass());
@@ -49,7 +49,7 @@ public class XmlDataStoreTriggerManager {
 			synchronized (list) {
 				for (final IXmlDataStoreTrigger<?> trigger : list) {
 					if (trigger.getType() == XmlDataStoreTriggerType.Insert) {
-						((IXmlDataStoreTrigger<T>)trigger).perform(object);
+						((IXmlDataStoreTrigger<T>) trigger).perform(object);
 					}
 				}
 			}
@@ -57,7 +57,7 @@ public class XmlDataStoreTriggerManager {
 	}
 
 	@SuppressWarnings("unchecked")
-    public <T> void performUpdateTriggers(final T object) {
+	public <T> void performUpdateTriggers(final T object) {
 		List<IXmlDataStoreTrigger<?>> list;
 		synchronized (this) {
 			list = triggers.get(object.getClass());
@@ -66,7 +66,7 @@ public class XmlDataStoreTriggerManager {
 			synchronized (list) {
 				for (final IXmlDataStoreTrigger<?> trigger : list) {
 					if (trigger.getType() == XmlDataStoreTriggerType.Update) {
-						((IXmlDataStoreTrigger<T>)trigger).perform(object);
+						((IXmlDataStoreTrigger<T>) trigger).perform(object);
 					}
 				}
 			}
@@ -74,7 +74,7 @@ public class XmlDataStoreTriggerManager {
 	}
 
 	@SuppressWarnings("unchecked")
-    public <T> void performDeleteTriggers(final T object) {
+	public <T> void performDeleteTriggers(final T object) {
 		List<IXmlDataStoreTrigger<?>> list;
 		synchronized (this) {
 			list = triggers.get(object.getClass());
@@ -83,7 +83,7 @@ public class XmlDataStoreTriggerManager {
 			synchronized (list) {
 				for (final IXmlDataStoreTrigger<?> trigger : list) {
 					if (trigger.getType() == XmlDataStoreTriggerType.Delete) {
-						((IXmlDataStoreTrigger<T>)trigger).perform(object);
+						((IXmlDataStoreTrigger<T>) trigger).perform(object);
 					}
 				}
 			}

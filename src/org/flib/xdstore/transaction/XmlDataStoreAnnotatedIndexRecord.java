@@ -8,7 +8,7 @@ public class XmlDataStoreAnnotatedIndexRecord {
 	private Object objectId;
 
 	private String resourceId;
-	
+
 	public XmlDataStoreAnnotatedIndexRecord() {
 		// do nothing
 	}

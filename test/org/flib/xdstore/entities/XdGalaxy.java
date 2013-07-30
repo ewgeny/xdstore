@@ -66,13 +66,13 @@ public class XdGalaxy implements IXmlDataStoreIdentifiable {
 		}
 		return null;
 	}
-	
-    public XdAnnotatedObject getObject() {
-    	return object;
-    }
 
-    public void setObject(final XdAnnotatedObject object) {
-    	this.object = object;
-    }
-	
+	public XdAnnotatedObject getObject() {
+		return object;
+	}
+
+	public void setObject(final XdAnnotatedObject object) {
+		this.object = object;
+	}
+
 }

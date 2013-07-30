@@ -19,8 +19,8 @@ public class XmlDataStoreAnnotatedIndexResource extends XmlDataStoreAnnotatedRes
 	private XmlDataStoreAnnotatedIndexResourceCache         index;
 
 	private Map<String, Stack<IXmlDataStoreChangeRollback>> rollbacks = new ConcurrentHashMap<String, Stack<IXmlDataStoreChangeRollback>>();
-	
-	private final XmlDataStoreObjectIdField					objectField;
+
+	private final XmlDataStoreObjectIdField                 objectField;
 
 	XmlDataStoreAnnotatedIndexResource(final XmlDataStoreResourcesManager manager, final XmlDataStoreTriggerManager triggersManager, final String resourceId,
 	        final XmlDataStoreObjectIdField field, final Map<Class<?>, XmlDataStorePolicy> policies, final IXmlDataStoreIOFactory factory, final int fragmentSize) {
@@ -28,7 +28,7 @@ public class XmlDataStoreAnnotatedIndexResource extends XmlDataStoreAnnotatedRes
 		this.index = new XmlDataStoreAnnotatedIndexResourceCache(fragmentSize);
 		this.objectField = field;
 	}
-	
+
 	private static XmlDataStoreObjectIdField getIndexRecordObjectIdField() {
 		final Class<?> cl = XmlDataStoreAnnotatedIndexRecord.class;
 		final Field[] fields = cl.getDeclaredFields();
@@ -64,6 +64,11 @@ public class XmlDataStoreAnnotatedIndexResource extends XmlDataStoreAnnotatedRes
 				stack.pop().rollback();
 			}
 		}
+	}
+
+	@Override
+	void postRollbackFailedCommit(final XmlDataStoreTransaction transaction) {
+		rollbacks.remove(transaction.getTransactionId());
 	}
 
 	private void registerRollback(final XmlDataStoreTransaction transaction, final IXmlDataStoreChangeRollback rb) {

@@ -28,7 +28,7 @@ public class XmlDataStoreTest {
 	}
 
 	private static XmlDataStore initStore(final String storedir) {
-		final XmlDataStore store = new XmlDataStore(storedir, 20);
+		final XmlDataStore store = new XmlDataStore(storedir, 50);
 		store.setStorePolicy(XdUniverse.class, XmlDataStorePolicy.ClassObjectsFile);
 		store.setStorePolicy(XdGalaxy.class, XmlDataStorePolicy.ClassObjectsFile);
 		store.setStorePolicy(XdBlackHole.class, XmlDataStorePolicy.ParentObjectFile);
@@ -99,7 +99,7 @@ public class XmlDataStoreTest {
 
 				for (final XdGalaxy galaxy : galaxies) {
 					store.deleteObjects(galaxy.getSystems());
-					if(galaxy.getObject() != null)
+					if (galaxy.getObject() != null)
 						store.deleteAnnotatedObject(galaxy.getObject());
 				}
 				store.deleteObjects(galaxies);
@@ -108,11 +108,12 @@ public class XmlDataStoreTest {
 				System.out.println(i);
 				++i;
 			}
-			
-//			Map<Object, XdAnnotatedObject> annotatedObject = store.loadAnnotatedObjects(XdAnnotatedObject.class);
-//			if(annotatedObject.size() > 0) {
-//				store.deleteAnnotatedObjects(annotatedObject.values());
-//			}
+
+			// Map<Object, XdAnnotatedObject> annotatedObject =
+			// store.loadAnnotatedObjects(XdAnnotatedObject.class);
+			// if(annotatedObject.size() > 0) {
+			// store.deleteAnnotatedObjects(annotatedObject.values());
+			// }
 
 			tx.commit();
 		} catch (XmlDataStoreException e) {

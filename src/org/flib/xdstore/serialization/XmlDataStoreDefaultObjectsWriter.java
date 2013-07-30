@@ -441,7 +441,7 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 			writeReference(name, object, writer, level);
 		}
 	}
-	
+
 	private void writeAnnotatedObject(final String name, final Class<?> cl, final Object object, final Writer writer, int level) throws IOException {
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == null || policy == XmlDataStorePolicy.ParentObjectFile) {
@@ -460,9 +460,8 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 			writeReference(object, writer, level);
 		}
 	}
-	
-	private void writeAnnotatedObject(final Class<?> cl, final Object object, final Writer writer, int level)
-	        throws IOException {
+
+	private void writeAnnotatedObject(final Class<?> cl, final Object object, final Writer writer, int level) throws IOException {
 		final XmlDataStorePolicy policy = policies.get(cl);
 		if (policy == null || policy == XmlDataStorePolicy.ParentObjectFile) {
 			writeObject(cl, object, writer, level);
@@ -551,7 +550,7 @@ public class XmlDataStoreDefaultObjectsWriter implements IXmlDataStoreObjectsWri
 		writer.append(object.getDataStoreId());
 		writer.append("\"/>");
 	}
-	
+
 	private void writeAnnotatedReference(final String name, final Object object, final Writer writer, int level) throws IOException {
 		final XmlDataStoreObjectIdField field = ObjectUtils.getAnnotatedObjectIdField(object.getClass());
 		writeNewLevelAndTabulations(writer, level);

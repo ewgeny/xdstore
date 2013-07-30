@@ -52,8 +52,8 @@ public class XmlDataStoreMultithreadsTest {
 				for (final XdGalaxy galaxy : universe.getGalaxies()) {
 					store.saveObjects(galaxy.getSystems());
 				}
-				
-//				store.saveAnnotatedObjects(generateAnnotatedObjects(50));
+
+				// store.saveAnnotatedObjects(generateAnnotatedObjects(50));
 
 				tx.commit();
 			} catch (final XmlDataStoreException e) {
@@ -111,7 +111,7 @@ public class XmlDataStoreMultithreadsTest {
 	}
 
 	private static XmlDataStore initStore(final String storedir) {
-		final XmlDataStore store = new XmlDataStore(storedir, 20);
+		final XmlDataStore store = new XmlDataStore(storedir, 50);
 		store.setStorePolicy(XdUniverse.class, XmlDataStorePolicy.ClassObjectsFile);
 		store.setStorePolicy(XdGalaxy.class, XmlDataStorePolicy.ClassObjectsFile);
 		store.setStorePolicy(XdBlackHole.class, XmlDataStorePolicy.ParentObjectFile);
@@ -175,12 +175,12 @@ public class XmlDataStoreMultithreadsTest {
 
 		return universe;
 	}
-	
+
 	private static Collection<XdAnnotatedObject> generateAnnotatedObjects(int count) {
 		final Random rand = new Random();
 		final Collection<XdAnnotatedObject> result = new ArrayList<XdAnnotatedObject>(count);
-		
-		for(int i = 0; i < count; ++i) {
+
+		for (int i = 0; i < count; ++i) {
 			final XdAnnotatedObject object = new XdAnnotatedObject();
 			object.setObjectId(Math.abs(rand.nextLong()));
 			result.add(object);
@@ -206,14 +206,14 @@ public class XmlDataStoreMultithreadsTest {
 		operations.add(new InsertSystemOperation(store));
 		operations.add(new UpdateSystemOperation(store));
 		operations.add(new DeleteSystemOperation(store));
-		
+
 		// operations.add(new InsertPlanetOperation(store));
 		// operations.add(new UpdatePlanetOperation(store));
 		// operations.add(new DeletePlanetOperation(store));
-		
-//		operations.add(new InsertAnnotatedObject(store));
-//		operations.add(new UpdateAnnotatedObject(store));
-//		operations.add(new DeleteAnnotatedObject(store));
+
+		// operations.add(new InsertAnnotatedObject(store));
+		// operations.add(new UpdateAnnotatedObject(store));
+		// operations.add(new DeleteAnnotatedObject(store));
 
 		return operations.toArray(new Runnable[operations.size()]);
 	}

@@ -53,9 +53,10 @@ public class XmlDataStoreTransaction {
 		}
 	}
 
-	void commitInternal() {
+	void commitInternal(final Collection<XmlDatStoreCommittedResourceRecord> committedResourcesCollector) {
 		for (final IXmlDataStoreResource resource : resources.values()) {
-			resource.commit(this);
+			final XmlDatStoreCommittedResourceRecord record = new XmlDatStoreCommittedResourceRecord(resource);
+			resource.commit(this, record);
 		}
 		resources.clear();
 	}

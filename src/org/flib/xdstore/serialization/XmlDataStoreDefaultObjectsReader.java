@@ -488,8 +488,8 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 		return map;
 	}
 
-	private Object readReference(final String fieldName[], final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException,
-	        ClassNotFoundException, NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
+	private Object readReference(final String fieldName[], final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException, ClassNotFoundException,
+	        NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
 		final int count = xmlReader.getAttributeCount();
 		String className = null, idValue = null, classObjectId = null;
 		for (int i = 0; i < count; ++i) {
@@ -508,10 +508,10 @@ public class XmlDataStoreDefaultObjectsReader implements IXmlDataStoreObjectsRea
 			}
 		}
 
-		if(classObjectId == null) {
-    		final IXmlDataStoreIdentifiable result = (IXmlDataStoreIdentifiable) Class.forName(className).newInstance();
-    		result.setDataStoreId(idValue);
-    		return result;
+		if (classObjectId == null) {
+			final IXmlDataStoreIdentifiable result = (IXmlDataStoreIdentifiable) Class.forName(className).newInstance();
+			result.setDataStoreId(idValue);
+			return result;
 		} else {
 			final Class<?> idClass = Class.forName(classObjectId);
 			final Constructor<?> constructor = idClass.getConstructor(new Class<?>[] { String.class });

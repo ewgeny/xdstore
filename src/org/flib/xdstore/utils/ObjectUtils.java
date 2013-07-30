@@ -257,7 +257,7 @@ public final class ObjectUtils {
 
 	public static XmlDataStoreObjectIdField getAnnotatedObjectIdField(final Class<?> cl) {
 		synchronized (annotatedFields) {
-			if(annotatedFields.containsKey(cl)) {
+			if (annotatedFields.containsKey(cl)) {
 				return annotatedFields.get(cl);
 			}
 			for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {

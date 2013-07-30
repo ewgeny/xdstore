@@ -30,17 +30,17 @@ import org.flib.xdstore.utils.StringUtils;
  */
 public class XmlDataStore {
 
-	private final String                                   folder;
+	private final String                            folder;
 
-	private final Map<Class<?>, XmlDataStorePolicy>        policies;
+	private final Map<Class<?>, XmlDataStorePolicy> policies;
 
-	private final XmlDataStoreTransactionsManager          transactionsManager;
+	private final XmlDataStoreTransactionsManager   transactionsManager;
 
-	private final XmlDataStoreTriggerManager               triggersManager;
+	private final XmlDataStoreTriggerManager        triggersManager;
 
-	private final XmlDataStoreResourcesManager             resourcesManager;
+	private final XmlDataStoreResourcesManager      resourcesManager;
 
-	private boolean                                        useFragmentation;
+	private boolean                                 useFragmentation;
 
 	/**
 	 * This constructor initialize store for specified folder. All files will be

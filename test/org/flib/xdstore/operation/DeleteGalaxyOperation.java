@@ -39,14 +39,14 @@ public class DeleteGalaxyOperation implements Runnable {
 
 							store.loadObject(galaxy);
 							final XdAnnotatedObject object = galaxy.getObject();
-							if(object != null) {
+							if (object != null) {
 								store.loadAnnotatedObject(object);
 							}
 
 							store.updateObject(universe);
 							store.deleteObject(galaxy);
 							store.deleteObjects(galaxy.getSystems());
-							if(object != null) {
+							if (object != null) {
 								store.deleteAnnotatedObject(object);
 							}
 						}
