@@ -96,7 +96,7 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 	void postPrepare(final XmlDataStoreTransaction transaction) {
 		// do nothing
 	}
-
+	
 	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord record) {
 		final boolean hasChanges = cache.hasChanges(transaction);
 

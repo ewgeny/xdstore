@@ -52,7 +52,12 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 
 	@Override
 	void postRollbackFailedCommit(final XmlDataStoreTransaction transaction) {
-		rollbacks.remove(transaction.getTransactionId());
+		final Stack<IXmlDataStoreChangeRollback> stack = rollbacks.remove(transaction.getTransactionId());
+		if (stack != null) {
+			while (!stack.isEmpty()) {
+				stack.pop().rollback();
+			}
+		}
 	}
 
 	private void registerRollback(final XmlDataStoreTransaction transaction, final IXmlDataStoreChangeRollback rb) {

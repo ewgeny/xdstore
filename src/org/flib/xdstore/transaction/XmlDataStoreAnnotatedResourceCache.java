@@ -289,7 +289,7 @@ public class XmlDataStoreAnnotatedResourceCache {
 					type = XmlDataStoreTriggerType.Delete;
 				}
 
-				collector.addChangeObject(record.getId(), record.getObject());
+				collector.addChangeObject(record.getId(), record.getObject() != null ? ObjectUtils.clone(record.getObject()) : null);
 
 				record.commit();
 				if (record.getObject() == null)
