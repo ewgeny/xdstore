@@ -13,9 +13,9 @@ Changes Java XML store for JavaBeans
 * Deleted methods for a work with roots
 * Changed default xml reader and writer
 * Added annotation @XmlDataStoreObjectId to tell about field is identifier
-	- Mark your field (this type must have constructor with one parameter java.lang.String)
+	- Mark your field (type of the field must have constructor with one parameter java.lang.String)
 	- Make getter and setter for this field
-	- Implement methods equals() and hashCode()
+	- Type of the field must implement methods equals() and hashCode()
 * Added group methods for a work with 'Annotated' classes
 * Added rolling back for a failed commit (data base return back to valid state)
 
