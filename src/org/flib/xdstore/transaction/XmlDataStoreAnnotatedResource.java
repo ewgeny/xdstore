@@ -166,7 +166,7 @@ public class XmlDataStoreAnnotatedResource implements IXmlDataStoreResource {
 
 		cache.rollbackFailedCommit(transaction, changes);
 
-		Map<Object, Object> objects = cache.read(transaction);
+		final Map<Object, Object> objects = cache.read(transaction);
 		if (hasChanges) {
 			// TODO : REVIEW file deleting and creation
 			// ! and think about backup file

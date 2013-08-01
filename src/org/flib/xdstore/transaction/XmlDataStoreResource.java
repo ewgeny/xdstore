@@ -164,7 +164,7 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 
 		cache.rollbackFailedCommit(transaction, changes);
 
-		Map<String, IXmlDataStoreIdentifiable> objects = cache.read(transaction);
+		final Map<String, IXmlDataStoreIdentifiable> objects = cache.read(transaction);
 		if (hasChanges) {
 			// TODO : REVIEW file deleting and creation
 			// ! and think about backup file

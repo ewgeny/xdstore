@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.Map;
 
 import org.flib.xdstore.XmlDataStoreRuntimeException;
@@ -42,7 +41,7 @@ public class XmlDataStoreTransactionsManager {
 												// end of this method will throw
 												// exception
 			} else {
-				final Collection<XmlDatStoreCommittedResourceRecord> committedResources = new LinkedList<XmlDatStoreCommittedResourceRecord>();
+				final Map<String, XmlDatStoreCommittedResourceRecord> committedResources = new HashMap<String, XmlDatStoreCommittedResourceRecord>();
 				try {
 					transaction.commitInternal(committedResources);
 				} catch (final XmlDataStoreRuntimeException e) {
@@ -56,20 +55,17 @@ public class XmlDataStoreTransactionsManager {
 							e1.printStackTrace();
 						}
 					// roll back resources with committed changes
-					final Collection<IXmlDataStoreResource> notChangedResources = new ArrayList<IXmlDataStoreResource>(resources);
-					for (final XmlDatStoreCommittedResourceRecord committed : committedResources) {
+					for(final XmlDatStoreCommittedResourceRecord committed : committedResources.values()) {
 						committed.rollback(transaction);
-						final Iterator<IXmlDataStoreResource> it = notChangedResources.iterator();
-						while (it.hasNext()) {
-							if (it.next() == committed.getResource()) {
-								it.remove();
-								break;
-							}
-						}
 					}
 					// roll back resources with uncommitted changes
-					for (final IXmlDataStoreResource notChanged : notChangedResources) {
-						notChanged.rollback(transaction);
+					final Collection<IXmlDataStoreResource> notChangedResources = new ArrayList<IXmlDataStoreResource>(resources);
+					final Iterator<IXmlDataStoreResource> it = notChangedResources.iterator();
+					while(it.hasNext()) {
+						final IXmlDataStoreResource resource = it.next();
+						if(!committedResources.containsKey(resource.getResourceId())) {
+							resource.rollback(transaction);
+						}
 					}
 					// clear flag invalid state of data base
 					invalidState = false;
