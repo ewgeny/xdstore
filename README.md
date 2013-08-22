@@ -1,4 +1,4 @@
-xdstore-1.7.3
+xdstore-1.7.4
 =============
 
 Changes Java XML store for JavaBeans
