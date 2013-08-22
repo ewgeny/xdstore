@@ -10,7 +10,7 @@ import org.flib.xdstore.IXmlDataStoreIdentifiable;
 public class XmlDataStoreTriggerManager {
 
 	private Map<Class<?>, List<IXmlDataStoreTrigger<?>>> triggers;
-
+	
 	public XmlDataStoreTriggerManager() {
 		triggers = new HashMap<Class<?>, List<IXmlDataStoreTrigger<?>>>();
 	}

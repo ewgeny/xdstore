@@ -227,7 +227,8 @@ public class XmlDataStore {
 			referencesResource.insertReference(object, transaction);
 			resource.insertObject(object, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -272,7 +273,8 @@ public class XmlDataStore {
 				resource.insertObject(object, transaction);
 			}
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -307,7 +309,8 @@ public class XmlDataStore {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(reference, transaction);
 			resource.readObjectByReference(reference, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -346,7 +349,8 @@ public class XmlDataStore {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(cl, id, transaction);
 			return (T) resource.readObject(id, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -391,7 +395,8 @@ public class XmlDataStore {
 				resource.readObjectByReference(reference, transaction);
 			}
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 		return result;
 	}
@@ -439,7 +444,8 @@ public class XmlDataStore {
 			}
 			return result;
 		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -489,7 +495,8 @@ public class XmlDataStore {
 			}
 			return result;
 		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -524,7 +531,8 @@ public class XmlDataStore {
 			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(object, transaction);
 			resource.updateObject(object, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -562,7 +570,8 @@ public class XmlDataStore {
 			referencesResource.deleteReference(reference, transaction);
 			resource.deleteObject(reference, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -607,7 +616,8 @@ public class XmlDataStore {
 				resource.deleteObject(reference, transaction);
 			}
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -650,7 +660,8 @@ public class XmlDataStore {
 			referencesResource.insertReference(object, transaction);
 			resource.insertObject(object, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -698,7 +709,8 @@ public class XmlDataStore {
 				resource.insertObject(object, transaction);
 			}
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -737,7 +749,8 @@ public class XmlDataStore {
 			final XmlDataStoreAnnotatedResource resource = resourcesManager.lockAnnotatedObjectResource(reference, field, transaction);
 			resource.readObjectByReference(reference, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -779,7 +792,8 @@ public class XmlDataStore {
 			final XmlDataStoreAnnotatedResource resource = resourcesManager.lockAnnotatedObjectResource(cl, field, id, transaction);
 			return (T) resource.readObject(id, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -827,7 +841,8 @@ public class XmlDataStore {
 				resource.readObjectByReference(reference, transaction);
 			}
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 		return result;
 	}
@@ -879,7 +894,8 @@ public class XmlDataStore {
 			}
 			return result;
 		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -933,7 +949,8 @@ public class XmlDataStore {
 			}
 			return result;
 		} else {
-			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -971,7 +988,8 @@ public class XmlDataStore {
 			final XmlDataStoreAnnotatedResource resource = resourcesManager.lockAnnotatedObjectResource(object, field, transaction);
 			resource.updateObject(object, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + object.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -1012,7 +1030,8 @@ public class XmlDataStore {
 			referencesResource.deleteReference(reference, transaction);
 			resource.deleteObject(reference, transaction);
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + reference.getClass().getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 
@@ -1060,7 +1079,8 @@ public class XmlDataStore {
 				resource.deleteObject(reference, transaction);
 			}
 		} else {
-			throw new XmlDataStoreRuntimeException("object of class " + cl.getName() + " has store policy " + XmlDataStorePolicy.ParentObjectFile);
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
 		}
 	}
 

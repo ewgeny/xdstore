@@ -15,7 +15,7 @@ public class XmlDataStoreTransactionsManager {
 	private boolean                                    invalidState = false;
 
 	public XmlDataStoreTransactionsManager() {
-		transactions = new HashMap<String, XmlDataStoreTransaction>();
+		this.transactions = new HashMap<String, XmlDataStoreTransaction>();
 	}
 
 	public synchronized XmlDataStoreTransaction beginTransaction() {
@@ -37,9 +37,9 @@ public class XmlDataStoreTransactionsManager {
 			resources = transaction.getResources();
 			if (invalidState) {
 				transaction.rollbackInternal(); // roll back active transaction
-												// by invalid state, and at the
-												// end of this method will throw
-												// exception
+				                                // by invalid state, and at the
+				                                // end of this method will throw
+				                                // exception
 			} else {
 				final Map<String, XmlDatStoreCommittedResourceRecord> committedResources = new HashMap<String, XmlDatStoreCommittedResourceRecord>();
 				try {
@@ -50,20 +50,20 @@ public class XmlDataStoreTransactionsManager {
 					while (transactions.size() > 0)
 						try {
 							wait(); // waiting for a stop all active
-									// transactions
+							        // transactions
 						} catch (final InterruptedException e1) {
 							e1.printStackTrace();
 						}
 					// roll back resources with committed changes
-					for(final XmlDatStoreCommittedResourceRecord committed : committedResources.values()) {
+					for (final XmlDatStoreCommittedResourceRecord committed : committedResources.values()) {
 						committed.rollback(transaction);
 					}
 					// roll back resources with uncommitted changes
 					final Collection<IXmlDataStoreResource> notChangedResources = new ArrayList<IXmlDataStoreResource>(resources);
 					final Iterator<IXmlDataStoreResource> it = notChangedResources.iterator();
-					while(it.hasNext()) {
+					while (it.hasNext()) {
 						final IXmlDataStoreResource resource = it.next();
-						if(!committedResources.containsKey(resource.getResourceId())) {
+						if (!committedResources.containsKey(resource.getResourceId())) {
 							resource.rollback(transaction);
 						}
 					}
