@@ -97,6 +97,10 @@ public class XmlDataStoreResourceCache {
 		}
 		return result;
 	}
+	
+	public synchronized boolean has(final String id, final XmlDataStoreTransaction transaction) {
+		return cache.containsKey(id);
+	}
 
 	public synchronized IXmlDataStoreIdentifiable read(final String id, final XmlDataStoreTransaction transaction) throws XmlDataStoreReadException {
 		CacheRecord record = cache.get(id);
@@ -263,7 +267,7 @@ public class XmlDataStoreResourceCache {
 		return changes.containsKey(transaction.getTransactionId());
 	}
 
-	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord collector) {
+	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDataStoreCommittedResourceRecord collector) {
 		final Map<String, CacheRecord> map = changes.remove(transaction.getTransactionId());
 		if (map != null) {
 			final Iterator<Entry<String, CacheRecord>> it = map.entrySet().iterator();

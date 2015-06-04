@@ -41,7 +41,7 @@ public class XmlDataStoreTransactionsManager {
 				                                // end of this method will throw
 				                                // exception
 			} else {
-				final Map<String, XmlDatStoreCommittedResourceRecord> committedResources = new HashMap<String, XmlDatStoreCommittedResourceRecord>();
+				final Map<String, XmlDataStoreCommittedResourceRecord> committedResources = new HashMap<String, XmlDataStoreCommittedResourceRecord>();
 				try {
 					transaction.commitInternal(committedResources);
 				} catch (final XmlDataStoreRuntimeException e) {
@@ -55,7 +55,7 @@ public class XmlDataStoreTransactionsManager {
 							e1.printStackTrace();
 						}
 					// roll back resources with committed changes
-					for (final XmlDatStoreCommittedResourceRecord committed : committedResources.values()) {
+					for (final XmlDataStoreCommittedResourceRecord committed : committedResources.values()) {
 						committed.rollback(transaction);
 					}
 					// roll back resources with uncommitted changes

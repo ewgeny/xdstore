@@ -8,7 +8,7 @@ public interface IXmlDataStoreResource {
 
 	void prepare(XmlDataStoreTransaction transaction);
 
-	void commit(XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord record);
+	void commit(XmlDataStoreTransaction transaction, final XmlDataStoreCommittedResourceRecord record);
 
 	void rollback(XmlDataStoreTransaction transaction);
 

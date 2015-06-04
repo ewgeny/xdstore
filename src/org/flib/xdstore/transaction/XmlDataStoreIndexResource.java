@@ -67,6 +67,10 @@ public class XmlDataStoreIndexResource extends XmlDataStoreResource {
 		}
 		stack.push(rb);
 	}
+	
+	public boolean hasObject(final String id, final XmlDataStoreTransaction transaction) {
+		return index.getResourceId(id) != null;
+	}
 
 	public Map<String, IXmlDataStoreIdentifiable> readObjects(final XmlDataStoreTransaction transaction) {
 		final Map<String, IXmlDataStoreIdentifiable> result = new HashMap<String, IXmlDataStoreIdentifiable>();

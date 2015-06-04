@@ -18,8 +18,4 @@ Changes Java XML store for JavaBeans
 	- Type of the field must implement methods equals() and hashCode()
 * Added group methods for a work with 'Annotated' classes
 * Added rolling back for a failed commit (data base return back to valid state)
-
-Fixed bugs
-===========
-* Not all public getters/setters used by serialization.
-* Fixed bug in the default XML reader of this tool
+* Added checking existing object in the store

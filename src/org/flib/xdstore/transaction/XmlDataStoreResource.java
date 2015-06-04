@@ -97,7 +97,7 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 		// do nothing
 	}
 	
-	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord record) {
+	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDataStoreCommittedResourceRecord record) {
 		final boolean hasChanges = cache.hasChanges(transaction);
 
 		Map<String, IXmlDataStoreIdentifiable> objects = null;
@@ -226,6 +226,10 @@ public class XmlDataStoreResource implements IXmlDataStoreResource {
 
 	public void deleteReference(final IXmlDataStoreIdentifiable reference, final XmlDataStoreTransaction transaction) throws XmlDataStoreDeleteException {
 		cache.delete(reference, transaction);
+	}
+	
+	public boolean hasObject(final String id, final XmlDataStoreTransaction transaction) {
+		return cache.has(id, transaction);
 	}
 
 	public Map<String, IXmlDataStoreIdentifiable> readObjects(final XmlDataStoreTransaction transaction) {

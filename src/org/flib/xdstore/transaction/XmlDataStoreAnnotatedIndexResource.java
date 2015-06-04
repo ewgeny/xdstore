@@ -83,6 +83,10 @@ public class XmlDataStoreAnnotatedIndexResource extends XmlDataStoreAnnotatedRes
 		}
 		stack.push(rb);
 	}
+	
+	public boolean hasObject(final Object id, final XmlDataStoreTransaction transaction) {
+	    return index.getResourceId(id) != null;
+    }
 
 	public Map<Object, Object> readObjects(final XmlDataStoreTransaction transaction) {
 		final Map<Object, Object> result = new HashMap<Object, Object>();

@@ -33,6 +33,10 @@ public class XmlDataStoreAnnotatedResourceCache {
 		}
 	}
 
+	public synchronized boolean has(Object id, XmlDataStoreTransaction transaction) {
+	    return cache.containsKey(id);
+    }
+
 	@SuppressWarnings("unchecked")
 	public synchronized <T> Map<Object, T> read(final XmlDataStoreTransaction transaction, final IXmlDataStoreAnnotatedPredicate<T> predicate) {
 		final Map<Object, T> result = new TreeMap<Object, T>();
@@ -270,7 +274,7 @@ public class XmlDataStoreAnnotatedResourceCache {
 		return changes.containsKey(transaction.getTransactionId());
 	}
 
-	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDatStoreCommittedResourceRecord collector) {
+	public synchronized void commit(final XmlDataStoreTransaction transaction, final XmlDataStoreCommittedResourceRecord collector) {
 		final Map<Object, CacheRecord> map = changes.remove(transaction.getTransactionId());
 		if (map != null) {
 			final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
@@ -468,5 +472,4 @@ public class XmlDataStoreAnnotatedResourceCache {
 		}
 
 	}
-
 }

@@ -192,7 +192,7 @@ public class XmlDataStore {
 	private boolean checkIsInTransaction() {
 		return transactionsManager.getTransaction() != null;
 	}
-
+	
 	/**
 	 * This method saves specified object.
 	 * 
@@ -272,6 +272,40 @@ public class XmlDataStore {
 				referencesResource.insertReference(object, transaction);
 				resource.insertObject(object, transaction);
 			}
+		} else {
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
+		}
+	}
+	
+	/**
+	 * This check existing object by specified identifier.
+	 * 
+	 * @param cl Specified class
+	 * @param id Specified identifier
+	 * @return Return true if and only if this object contains in the store.
+	 */
+	public <T extends IXmlDataStoreIdentifiable> boolean hasObject(final Class<T> cl, final String id) {
+		if (cl == null)
+			throw new XmlDataStoreRuntimeException("class cannot be null");
+		if (StringUtils.isBlank(id))
+			throw new XmlDataStoreRuntimeException("id cannot be blank");
+		if (!checkIsInTransaction())
+			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
+		
+		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
+		final XmlDataStorePolicy policy = policies.get(cl);
+		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
+			if (useFragmentation) {
+				final XmlDataStoreIndexResource resource = resourcesManager.lockIndexResource(cl, transaction);
+				return resource.hasObject(id, transaction);
+			} else {
+				final XmlDataStoreResource resource = resourcesManager.lockClassResource(cl, transaction);
+				return resource.hasObject(id, transaction);
+			}
+		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final XmlDataStoreResource resource = resourcesManager.lockObjectResource(cl, id, transaction);
+			return resource.hasObject(id, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
 			        + XmlDataStorePolicy.SingleObjectFile);
@@ -708,6 +742,46 @@ public class XmlDataStore {
 				referencesResource.insertReference(object, transaction);
 				resource.insertObject(object, transaction);
 			}
+		} else {
+			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
+			        + XmlDataStorePolicy.SingleObjectFile);
+		}
+	}
+	
+	/**
+	 * This check existing object by specified identifier.
+	 * 
+	 * @param cl
+	 *            Specified class
+	 * @param id
+	 *            Specified identifier
+	 * @return Return true if and only if object contains in the store
+	 */
+	public <T> boolean hasAnnotatedObject(final Class<T> cl, final Object id) throws XmlDataStoreReadException {
+		if (cl == null)
+			throw new XmlDataStoreRuntimeException("class cannot be null");
+		if (id == null)
+			throw new XmlDataStoreRuntimeException("id cannot be null");
+
+		if (!checkIsInTransaction())
+			throw new XmlDataStoreRuntimeException("method must be execute in transaction");
+		if (!checkHasAnnotatedObjectIdField(cl))
+			throw new XmlDataStoreRuntimeException("the class " + cl + " must have annotated identifier field @XmlDataStoreObjectId");
+
+		final XmlDataStoreTransaction transaction = transactionsManager.getTransaction();
+		final XmlDataStorePolicy policy = policies.get(cl);
+		final XmlDataStoreObjectIdField field = ObjectUtils.getAnnotatedObjectIdField(cl);
+		if (policy == XmlDataStorePolicy.ClassObjectsFile) {
+			if (useFragmentation) {
+				final XmlDataStoreAnnotatedIndexResource resource = resourcesManager.lockAnnotatedIndexResource(cl, field, transaction);
+				return resource.hasObject(id, transaction);
+			} else {
+				final XmlDataStoreAnnotatedResource resource = resourcesManager.lockAnnotatedClassResource(cl, field, transaction);
+				return resource.hasObject(id, transaction);
+			}
+		} else if (policy == XmlDataStorePolicy.SingleObjectFile) {
+			final XmlDataStoreAnnotatedResource resource = resourcesManager.lockAnnotatedObjectResource(cl, field, id, transaction);
+			return resource.hasObject(id, transaction);
 		} else {
 			throw new XmlDataStoreRuntimeException("class " + cl.getName() + " must have policy " + XmlDataStorePolicy.ClassObjectsFile + " or "
 			        + XmlDataStorePolicy.SingleObjectFile);
