@@ -23,6 +23,8 @@ public class XdStorageObjectFieldInfo {
         this.valueClass = valueClass;
     }
 
+
+
     public Class<?> getClazz() {
         return clazz;
     }

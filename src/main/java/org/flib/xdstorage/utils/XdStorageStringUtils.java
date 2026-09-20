@@ -9,4 +9,6 @@ public final class XdStorageStringUtils {
     public static boolean isBlank(final String str) {
         return str == null || str.trim().length() == 0;
     }
+
+    public static boolean isEmpty(final String str) { return  str == null || str.isEmpty(); }
 }

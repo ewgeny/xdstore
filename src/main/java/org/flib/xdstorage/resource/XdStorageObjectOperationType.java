@@ -18,6 +18,6 @@ public enum XdStorageObjectOperationType {
      * Trigger with this type will performed then object was deleted by commit
      * transaction.
      */
-    Delete;
+    Delete, UPDATE, INSERT, DELETE;
 
 }

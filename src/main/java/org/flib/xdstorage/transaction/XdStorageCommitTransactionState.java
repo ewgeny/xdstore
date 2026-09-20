@@ -5,5 +5,5 @@ public enum XdStorageCommitTransactionState {
     PREPARING,
     PREPARED,
     ROLLEDBACK,
-    FINISHED;
+    FINISHED, ACTIVE;
 }

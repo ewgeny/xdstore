@@ -24,6 +24,13 @@ public class XdStorageClassInfo {
 
     private Map<String, XdStorageSearchIndex> indexes = new HashMap<>();
 
+    public XdStorageClassInfo() {
+    }
+
+    public XdStorageClassInfo(Class<?> clazz) {
+        this.clazz = clazz;
+    }
+
     public Class<?> getClazz() {
         return clazz;
     }

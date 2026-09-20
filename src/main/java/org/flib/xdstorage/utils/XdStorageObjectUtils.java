@@ -238,6 +238,30 @@ public final class XdStorageObjectUtils {
         return IXdStorageSimpleWrapper.class.isAssignableFrom(cl);
     }
 
+    /**
+     * Проверяет, является ли переданный объект простой ссылкой на сущность СУБД.
+     * Используется ядром для выявления связей между таблицами/объектами
+     * и каскадного захвата блокировок.
+     */
+    public static boolean isSimpleReference(final Object obj) {
+        if (obj == null) {
+            return false;
+        }
+
+        // Если объект является динамической прокси-оберткой (например, ленивой ссылкой),
+        // или он имплементирует маркерные интерфейсы идентифицируемых сущностей СУБД —
+        // это простая ссылка на другую запись в базе данных.
+        if (obj instanceof org.flib.xdstorage.object.XdStorageIdentifiableObject ||
+                obj instanceof org.flib.xdstorage.code.IXdStorageSimpleWrapper) {
+            return true;
+        }
+
+        // Во всех остальных случаях (примитивы, строки, даты, встроенные POJO без ID)
+        // объект считается плоским значением текущей сущности, а не ссылкой на другую.
+        return false;
+    }
+
+
     private static Class<?> getClassSimpleWrapper(final Class<?> cl) throws IOException {
         if (classesSimpleWrappers.containsKey(cl))
             return classesSimpleWrappers.get((cl));

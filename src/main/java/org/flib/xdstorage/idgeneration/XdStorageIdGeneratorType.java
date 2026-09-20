@@ -4,5 +4,5 @@ public enum XdStorageIdGeneratorType {
 
     CUSTOM_GENERATOR,
 
-    DATABASE_GENERATOR;
+    DATABASE_GENERATOR, UUID_GENERATOR;
 }

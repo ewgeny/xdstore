@@ -13,6 +13,14 @@ public class XdStoragePair<A, B> {
         this.b = b;
     }
 
+    public A getKey() {
+        return a;
+    }
+
+    public B getValue() {
+        return b;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
