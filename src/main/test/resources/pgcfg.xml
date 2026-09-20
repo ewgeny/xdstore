@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <dataSources>
+        <dataSource name="central" type="CENTRAL">
+            <server>localhost</server>
+            <port>5432</port>
+            <database>central</database>
+            <user>postgres</user>
+            <password>admin</password>
+            <initialConnections>3</initialConnections>
+            <maxConnections>10</maxConnections>
+        </dataSource>
+        <dataSource name="dsource1" type="ADDITIONAL">
+            <server>localhost</server>
+            <port>5432</port>
+            <database>dsource1</database>
+            <user>postgres</user>
+            <password>admin</password>
+            <initialConnections>3</initialConnections>
+            <maxConnections>10</maxConnections>
+        </dataSource>
+        <dataSource name="dsource2" type="ADDITIONAL">
+            <server>localhost</server>
+            <port>5432</port>
+            <database>dsource2</database>
+            <user>postgres</user>
+            <password>admin</password>
+            <initialConnections>3</initialConnections>
+            <maxConnections>10</maxConnections>
+        </dataSource>
+    </dataSources>
+    <classesPolicies>
+        <!-- system's entities -->
+        <class name="org.flib.xdstorage.idgeneration.XdStorageLongIdCounterRecord" dataSource="central" table="XdLongCounter"/>
+        <class name="org.flib.xdstorage.idgeneration.XdStorageIntegerIdCounterRecord" dataSource="central" table="XdIntegerCounter"/>
+        <class name="org.flib.xdstorage.sqlstorage.fkresource.XdStorageSQLCrossDatasourceFk" dataSource="" table="XdForeignKey"/>
+        <!-- user's entities -->
+        <class name="org.flib.xdstorage.entities.XdUniverse" dataSource="central" table="XdUniverse"/>
+        <class name="org.flib.xdstorage.entities.XdGalaxy" dataSource="central" table="XdGalaxy"/>
+        <class name="org.flib.xdstorage.entities.XdBlackHole" dataSource="central" table="XdBlackHole"/>
+        <class name="org.flib.xdstorage.entities.XdObject" dataSource="central" table="XdObject"/>
+        <class name="org.flib.xdstorage.entities.XdStarSystem" dataSource="central" table="XdStarSystem"/>
+        <class name="org.flib.xdstorage.entities.XdStar" dataSource="central" table="XdStar"/>
+        <class name="org.flib.xdstorage.entities.XdPlanet" multiple="true" table="XdPlanet">
+            <rule type="ADDITIONAL" class="org.flib.xdstorage.rules.XdDataSourceRule1" dataSource="dsource1"/>
+            <rule type="ADDITIONAL" class="org.flib.xdstorage.rules.XdDataSourceRule2" dataSource="dsource2"/>
+            <rule type="DEFAULT" dataSource="central"/>
+        </class>
+        <class name="org.flib.xdstorage.entities.XdSatellite" parentDataSource="true" table="XdSatellite"/>
+    </classesPolicies>
+</configuration>
