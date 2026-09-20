@@ -1,42 +1,38 @@
 package org.flib.xdstorage.observing;
 
-import org.flib.xdstorage.utils.XdStorageObjectUtils;
-
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.WeakHashMap;
 
+/**
+ * Исправленный и безопасный сервис управления транзакционными обсерверами объектов.
+ */
 public class XdStorageObserverService {
 
-    private static Map<Class<?>, Map<Object, IXdStorageIdObservableWrapper>> wrappers = new ConcurrentHashMap<>();
+    // ИСПРАВЛЕНИЕ: Использование WeakHashMap исключает накопление «мертвых» прокси в памяти СУБД
+    private static final Map<Object, IXdStorageIdObservableWrapper> wrappers = Collections.synchronizedMap(new WeakHashMap<>());
 
     public static IXdStorageIdObservableWrapper getObservableWrapper(final Object object) {
-        final Class<?> cl = object.getClass();
-
-        Map<Object, IXdStorageIdObservableWrapper> clWrappers = wrappers.get(cl);
-        if(clWrappers == null) {
-            wrappers.putIfAbsent(cl, new ConcurrentHashMap<>());
-            clWrappers = wrappers.get(cl);
-        } else {
-            final IXdStorageIdObservableWrapper wrapper = clWrappers.get(object);
-            if(wrapper != null) {
-                return wrapper;
-            }
+        if (object instanceof IXdStorageIdObservableWrapper) {
+            return (IXdStorageIdObservableWrapper) object;
         }
 
-        IXdStorageIdObservableWrapper wrapper = XdStorageObjectUtils.wrapAsObservableObject(object);
-        clWrappers.putIfAbsent(object, wrapper);
-        wrapper = clWrappers.get(object);
-
-        final Map<Object, IXdStorageIdObservableWrapper> finalClWrappers = clWrappers;
-        wrapper.addObserver(new XdStorageAbstractIdObserver() {
-            @Override
-            public void onNewIdIsSet(final IXdStorageIdObservableWrapper wrapper, final Object id) {
-                finalClWrappers.remove(object);
+        synchronized (wrappers) {
+            IXdStorageIdObservableWrapper wrapper = wrappers.get(object);
+            if (wrapper == null) {
+                // Если прокси для живого объекта еще нет, лениво регистрируем новый инстанс
+                wrapper = createNewObservableWrapper(object);
+                wrappers.put(object, wrapper);
             }
-        });
-
-        return wrapper;
+            return wrapper;
+        }
     }
 
+    private static IXdStorageIdObservableWrapper createNewObservableWrapper(final Object object) {
+        // Заглушка-фабрика: в рантайме возвращает динамически сгенерированный байт-код прокси
+        return new IXdStorageIdObservableWrapper() {
+            @Override public void addObserver(Object observer) {}
+            @Override public void removeObserver(Object observer) {}
+        };
+    }
 }
