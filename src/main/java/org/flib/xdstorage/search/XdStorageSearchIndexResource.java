@@ -183,11 +183,7 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
             throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");
         }
 
-        final List<Object> keyFindResult = keyTree.find((Comparable) record.getId(), storage, transaction);
-        if (keyFindResult.isEmpty()) {
-            throw new XdStorageException("object with idgeneration " + record.getId() + " is not found");
-        }
-        final XdStorageSearchKeyIndexRecord oldHashIndexRecord = (XdStorageSearchKeyIndexRecord) keyFindResult.get(0);
+        final XdStorageSearchKeyIndexRecord oldHashIndexRecord = (XdStorageSearchKeyIndexRecord) keyTree.find((Comparable) record.getId(), storage, transaction).get(0);
         final Object oldPrimaryFieldValue = oldHashIndexRecord.getValue(), newPrimaryFieldValue = record.getPrimaryIndexValue();
 
         final XdStorageBTreeId searchBTreeId = new XdStorageBTreeId(objectClInfo.getClazz(), indexName);
@@ -204,7 +200,7 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         } else {
             final XdStorageSearchKeyIndexRecord newHashIndexRecord = new XdStorageSearchKeyIndexRecord(record.getId(), record.getPrimaryIndexValue());
 
-            keyTree.update((Comparable) record.getId(), newHashIndexRecord, storage, transaction);
+            keyTree.update((XdStorageSearchIndexKey) record.getId(), newHashIndexRecord, storage, transaction);
 
             final XdStorageSearchIndexKey searchIndexKeyToDelete = new XdStorageSearchIndexKey(oldHashIndexRecord.getValue(), oldHashIndexRecord.getObjectId(), XdStorageSearchIndexOperationType.Delete);
             tree.delete(searchIndexKeyToDelete, storage, transaction);

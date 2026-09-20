@@ -13,20 +13,13 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Исправленный оркестратор компиляции динамического кода прокси СУБД.
- */
 public class XdStorageClassGenerator {
 
     private static final Logger log = LogManager.getLogger(XdStorageClassGenerator.class);
-    private static final String CODE_DIRECTORY = "gencode";
-    private static final String CLASSES_PACKAGE = "org.flib.xdstorage.code";
 
-    public static Map<Class<?>, Class<?>> generateSimpleWrapper(final Class<?> cl) throws IOException {
-        final Map<String, String> generatedCode = new HashMap<>();
-        new XdStorageSimpleWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
-        return compileGeneratedClassesCode(cl, generatedCode);
-    }
+    private static final String CODE_DIRECTORY = "gencode";
+
+    private static final String CLASSES_PACKAGE = "org.flib.xdstorage.code";
 
     public static Map<Class<?>, Class<?>> generateUnmodifiableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
@@ -38,15 +31,25 @@ public class XdStorageClassGenerator {
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
+    public static Map<Class<?>, Class<?>> generateSimpleWrapper(final Class<?> cl) throws IOException {
+        final Map<String, String> generatedCode = new HashMap<>();
+
+        new XdStorageSimpleWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
+
+        return compileGeneratedClassesCode(cl, generatedCode);
+    }
+
     public static Map<Class<?>, Class<?>> generateObservableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
+
         new XdStorageObservableWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
+
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
     private static Map<Class<?>, Class<?>> compileGeneratedClassesCode(final Class<?> cl, final Map<String, String> generatedCode) throws IOException {
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
 
         final XdStorageJavaSourceFromString[] files = new XdStorageJavaSourceFromString[generatedCode.size()];
         int i = 0;
@@ -56,31 +59,47 @@ public class XdStorageClassGenerator {
 
         final Iterable<? extends JavaFileObject> compilationUnits = Arrays.asList(files);
         final File path = new File(CODE_DIRECTORY, CLASSES_PACKAGE.replace('.', '/'));
-        if (!path.exists()) {
+        if (!path.exists())
             path.mkdirs();
-        }
-
-        final Iterable<String> options = Arrays.asList("-d", CODE_DIRECTORY);
+        final Iterable<String> options = Arrays.asList(new String[]{"-d", CODE_DIRECTORY});
         JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, options, null, compilationUnits);
 
         boolean success = task.call();
-        for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
+        for (Diagnostic diagnostic : diagnostics.getDiagnostics()) {
+//            System.out.println(diagnostic.getCode());
+//            System.out.println(diagnostic.getKind());
+//            System.out.println(diagnostic.getPosition());
+//            System.out.println(diagnostic.getStartPosition());
+//            System.out.println(diagnostic.getEndPosition());
+//            System.out.println(diagnostic.getSource());
             log.warn(diagnostic.getMessage(null));
         }
-
         if (success) {
-            // ИСПРАВЛЕНИЕ МЕТАСПЕЙСА: Используем try-with-resources для автоматического закрытия URLClassLoader
-            try (URLClassLoader classLoader = URLClassLoader.newInstance(new URL[]{new File(CODE_DIRECTORY).toURI().toURL()})) {
-                final Map<Class<?>, Class<?>> result = new HashMap<>();
-                for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
-                    Class<?> clazz = Class.forName(entry.getKey(), true, classLoader);
-                    result.put(cl, clazz);
+            for (final XdStorageJavaSourceFromString source : files) {
+                log.info("Generation class '" + source.getName() + "' success: " + success);
+            }
+
+            if (success) {
+                try {
+                    final URLClassLoader classLoader = URLClassLoader.newInstance(new URL[]{new File(CODE_DIRECTORY).toURI().toURL()});
+
+                    final Map<Class<?>, Class<?>> result = new HashMap<>();
+                    for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
+                        Class<?> clazz = Class.forName(entry.getKey(), true, classLoader);
+                        result.put(cl, clazz);
+                    }
+                    return result;
+                } catch (ClassNotFoundException e) {
+                    log.error("cannot load generated class", e);
                 }
-                return result;
-            } catch (ClassNotFoundException e) {
-                log.error("Ошибка ленивой загрузки скомпилированного прокси-класса", e);
+            }
+        } else {
+            for (final XdStorageJavaSourceFromString source : files) {
+                log.info("Generation class '" + source.getName() + "' success: " + success);
             }
         }
+
         return new HashMap<>();
     }
 }
+

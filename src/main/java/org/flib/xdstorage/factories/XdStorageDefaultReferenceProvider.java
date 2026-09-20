@@ -11,15 +11,11 @@ import org.flib.xdstorage.utils.XdStorageObjectUtils;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Исправленная и абсолютно потокобезопасная реализация транзакционного провайдера ссылок.
- */
 public class XdStorageDefaultReferenceProvider implements IXdStorageReferenceProvider {
 
     private final IXdStorage storage;
-
     /**
-     * Трехуровневая конкурентная карта: [transactionId -> [class -> [objectId -> objectReference]]]
+     * [transactionId, [class, [objectId, objectReference]]]
      */
     private final Map<String, Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>>> references = new ConcurrentHashMap<>();
 
@@ -29,45 +25,57 @@ public class XdStorageDefaultReferenceProvider implements IXdStorageReferencePro
 
     @Override
     public IXdStorageSimpleWrapper getReference(final Class<?> cl, final Object objectId, final IXdStorageTransaction transaction) {
-        final Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>> txMap = references.get(transaction.getTransactionId());
-        if (txMap == null) return null;
+        final String transactionId = transaction.getTransactionId();
 
-        final Map<Object, IXdStorageSimpleWrapper> classMap = txMap.get(cl);
-        if (classMap == null) return null;
+        Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>> transactionReferencesMap = references.get(transactionId);
+        if (transactionReferencesMap == null) {
+            return null;
+        }
 
-        return classMap.get(objectId);
+        Map<Object, IXdStorageSimpleWrapper> transactionClassReferences = transactionReferencesMap.get(cl);
+        if (transactionClassReferences == null) {
+            return null;
+        }
+
+        return transactionClassReferences.get(objectId);
     }
 
     @Override
     public IXdStorageSimpleWrapper createAndRegisterReference(final Class<?> cl, final XdStorageObjectIdField idField, final Object objectId, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException {
+        final String transactionId = transaction.getTransactionId();
 
-        // ИСПРАВЛЕНИЕ: Атомарное каскадное создание вложенных мап без риска Race Condition между транзакциями
-        final Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>> txMap = references.computeIfAbsent(
-                transaction.getTransactionId(), id -> new ConcurrentHashMap<>()
-        );
+        Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>> transactionReferencesMap = references.get(transactionId);
+        if (transactionReferencesMap == null) {
+            references.putIfAbsent(transactionId, new ConcurrentHashMap<>());
+            transactionReferencesMap = references.get(transactionId);
+        }
 
-        final Map<Object, IXdStorageSimpleWrapper> classMap = txMap.computeIfAbsent(
-                cl, clazz -> new ConcurrentHashMap<>()
-        );
+        Map<Object, IXdStorageSimpleWrapper> transactionClassReferences = transactionReferencesMap.get(cl);
+        if (transactionClassReferences == null) {
+            transactionReferencesMap.putIfAbsent(cl, new ConcurrentHashMap<>());
+            transactionClassReferences = transactionReferencesMap.get(cl);
+        }
 
-        // Атомарное создание и регистрация инстанса прокси
-        return classMap.computeIfAbsent(objectId, idKey -> {
+        IXdStorageSimpleWrapper result = transactionClassReferences.get(objectId);
+        if (result == null) {
+            final IXdStorageSimpleWrapper tmp;
             try {
-                // ИСПРАВЛЕНИЕ: Безопасный вызов конструктора для полной поддержки Java 17+
-                java.lang.reflect.Constructor<?> constructor = cl.getDeclaredConstructor();
-                constructor.setAccessible(true);
-
-                final IXdStorageSimpleWrapper wrapper = XdStorageObjectUtils.wrapAsSimpleObject(constructor.newInstance(), storage, transaction);
-                idField.set(wrapper, objectId);
-                return wrapper;
+                tmp = XdStorageObjectUtils.wrapAsSimpleObject(cl.newInstance(), storage, transaction);
             } catch (final Exception e) {
-                throw new RuntimeException("Критическая ошибка кодогенерации прокси-ссылки СУБД", e);
+                throw new XdStorageException(e);
             }
-        });
+            idField.set(tmp, objectId);
+            transactionClassReferences.putIfAbsent(objectId, tmp);
+            result = transactionClassReferences.get(objectId);
+        }
+
+        return result;
     }
 
     @Override
     public void release(final XdStorageTransaction transaction) {
-        references.remove(transaction.getTransactionId());
+        final String transactionId = transaction.getTransactionId();
+
+        references.remove(transactionId);
     }
 }

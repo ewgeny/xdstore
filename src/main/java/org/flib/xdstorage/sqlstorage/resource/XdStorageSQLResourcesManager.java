@@ -1,115 +1,152 @@
 package org.flib.xdstorage.sqlstorage.resource;
 
+import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
+import org.flib.xdstorage.index.IXdStorageIndexResourceObject;
+import org.flib.xdstorage.resource.XdStorageResourceCommitOrder;
+import org.flib.xdstorage.sqlstorage.configuration.IXdStorageSQLDataSourceConfiguration;
+import org.flib.xdstorage.sqlstorage.datasource.IXdStorageSQLDataSourceProvider;
+import org.flib.xdstorage.sqlstorage.fkresource.IXdStorageCrossDatasourceFkDaoResource;
+import org.flib.xdstorage.sqlstorage.fkresource.XdStorageSQLCrossDatasourceFkResource;
+import org.flib.xdstorage.sqlstorage.fkresource.XdStorageSQLDummyCrossDatasourceFkDaoResource;
+import org.flib.xdstorage.sqlstorage.index.XdStorageSQLHashIndexResource;
+import org.flib.xdstorage.sqlstorage.search.XdStorageSQLSearchIndexResource;
+import org.flib.xdstorage.sqlstorage.sql.IXdStorageSQLTypesHelper;
 import org.flib.xdstorage.resource.IXdStorageDaoResource;
 import org.flib.xdstorage.resource.IXdStorageResourceObject;
 import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
+import org.flib.xdstorage.search.IXdStorageSearchIndexResourceObject;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
-import org.flib.xdstorage.sqlstorage.configuration.IXdStorageSQLDataSourceConfiguration;
-import org.flib.xdstorage.sqlstorage.configuration.XdStorageSQLClassConfiguration;
-import org.flib.xdstorage.sqlstorage.configuration.XdStorageSQLConfiguration;
-import org.flib.xdstorage.sqlstorage.fkresource.XdStorageSQLCrossDatasourceFkResource;
-import org.flib.xdstorage.sqlstorage.index.XdStorageSQLHashIndexResource;
-import org.flib.xdstorage.sqlstorage.sql.IXdStorageSQLTypesHelper;
-import org.flib.xdstorage.sqlstorage.sql.XdStorageSQLBuilderFactory;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import javax.sql.DataSource;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Исправленная и потокобезопасная реализация менеджера реляционных ресурсов СУБД.
- */
 public class XdStorageSQLResourcesManager extends XdStorageAbstractResourcesManager {
 
-    private final XdStorageSQLConfiguration configuration;
-    private final IXdStorageSQLTypesHelper typesHelper;
-    private final XdStorageSQLBuilderFactory builderFactory;
-    private final XdStorageSQLResourceNamingService namingService;
-    private final Map<String, DataSource> dataSources = new ConcurrentHashMap<>();
+    final IXdStorageSQLTypesHelper typesHelper;
 
-    public XdStorageSQLResourcesManager(final XdStorageServicesLocator services,
-                                        final XdStorageSQLConfiguration configuration,
-                                        final IXdStorageSQLTypesHelper typesHelper,
-                                        final XdStorageSQLBuilderFactory builderFactory,
-                                        final XdStorageSQLResourceNamingService namingService) {
+    private final IXdStorageSQLDataSourceProvider dataSourceProvider;
+
+    public XdStorageSQLResourcesManager(final XdStorageServicesLocator services) {
         super(services);
-        this.configuration = configuration;
-        this.typesHelper = typesHelper;
-        this.builderFactory = builderFactory;
-        this.namingService = namingService;
+
+        this.typesHelper = services.getTypesHelper();
+        this.dataSourceProvider = services.getDataSourceProvider();
     }
 
-    public IXdStorageSQLTypesHelper getTypesHelper() { return typesHelper; }
-    public XdStorageSQLBuilderFactory getBuilderFactory() { return builderFactory; }
-    public XdStorageSQLResourceNamingService getNamingService() { return namingService; }
-    public XdStorageSQLConfiguration getConfiguration() { return configuration; }
+    public DataSource getDataSource(final IXdStorageSQLDataSourceConfiguration configuration) {
+        return dataSourceProvider.newIfNotExistAndGet(configuration);
+    }
 
-    public DataSource getDataSource(final IXdStorageSQLDataSourceConfiguration config) {
-        return dataSources.computeIfAbsent(config.getServer(), k -> {
-            // Ленивая инициализация пула соединений HikariCP/PostgreSQL
-            return null;
-        });
+    public IXdStorageSQLTypesHelper getTypesHelper() {
+        return typesHelper;
     }
 
     @Override
-    public synchronized IXdStorageResourceObject<?> lockClassResource(final XdStorageClassInfo clInfo, final XdStorageTransaction transaction) throws XdStorageException {
-        final XdStorageSQLClassConfiguration classConfig = configuration.getClassConfig(clInfo.getClazz());
-        final String dataSourceName = namingService.getCentralDataSourceName();
-        final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId(classConfig.getTable(), dataSourceName);
-
-        IXdStorageResourceObject<?> resource = (IXdStorageResourceObject<?>) activeResources.get(resourceId);
-        if (resource == null) {
-            resource = new XdStorageSQLResource(services, this, resourceId, clInfo);
-            activeResources.put(resourceId, resource);
-        }
-        transaction.registerResource(resource);
-        return resource;
+    protected IXdStorageIndexResourceObject createIndexResource(final Object resourceId, final String indexName,
+                                                                final XdStorageClassInfo clInfo) {
+        return new XdStorageSQLHashIndexResource(services, this, resourceId, indexName, clInfo, services.getIdGenerator(), 100);
     }
 
-    public synchronized IXdStorageDaoResource lockChildrenClassResource(final XdStorageClassInfo clInfo, final Object resId, final XdStorageTransaction transaction) throws XdStorageException {
-        final XdStorageSQLResourceId childResourceId = (XdStorageSQLResourceId) resId;
-        IXdStorageResourceObject<?> resource = (IXdStorageResourceObject<?>) activeResources.get(childResourceId);
-        if (resource == null) {
-            resource = new XdStorageSQLResource(services, this, childResourceId, clInfo);
-            activeResources.put(childResourceId, resource);
-        }
-        transaction.registerResource(resource);
-        return (IXdStorageDaoResource) resource.getDao();
-    }
+    public IXdStorageDaoResource lockClassResource(final Object object, final XdStorageClassInfo clInfo,
+                                                                final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        IXdStorageResourceObject<IXdStorageDaoResource> resource = null;
+        final XdStoragePolicy policy = clInfo.getPolicy();
+        if (policy == XdStoragePolicy.StoreAsClassObjects || policy == XdStoragePolicy.StoreAsSingleObject) {
+            final Object resourceId = getNamingService().getResourceId(policy, clInfo.getClazz(), object, null);
+            resource = internalLockResource(new IResourceFactory() {
+                @Override
+                public Object getResourceId() {
+                    return resourceId;
+                }
 
-    @Override
-    public synchronized IXdStorageResourceObject<?> lockIndexResource(final XdStorageClassInfo clInfo, final XdStorageTransaction transaction) throws XdStorageException {
-        final XdStorageSQLClassConfiguration classConfig = configuration.getClassConfig(clInfo.getClazz());
-        final String dataSourceName = namingService.getCentralDataSourceName();
-        final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId(classConfig.getTable() + "_idx", dataSourceName);
+                @Override
+                public IXdStorageResourceObject create() {
+                    return createResource(resourceId, clInfo);
+                }
 
-        IXdStorageResourceObject<?> resource = (IXdStorageResourceObject<?>) activeResources.get(resourceId);
-        if (resource == null) {
-            resource = new XdStorageSQLHashIndexResource(services, this, resourceId, clInfo);
-            activeResources.put(resourceId, resource);
+                @Override
+                public int getCommitOrder() {
+                    return XdStorageResourceCommitOrder.DATA_RESOURCE_ORDER;
+                }
+            }, transaction);
         }
-        transaction.registerResource(resource);
-        return resource;
+        return resource != null ? resource.getDao() : null;
     }
 
     @Override
-    public synchronized IXdStorageResourceObject<?> lockCrossDatasourceFkResource(final XdStorageClassInfo parentInfo, final XdStorageClassInfo childInfo, final XdStorageTransaction transaction) throws XdStorageException {
-        final XdStorageSQLClassConfiguration parentConfig = configuration.getClassConfig(parentInfo.getClazz());
-        final XdStorageSQLClassConfiguration childConfig = configuration.getClassConfig(childInfo.getClazz());
-        final String dataSourceName = namingService.getCentralDataSourceName();
-        final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId(parentConfig.getTable() + "_" + childConfig.getTable() + "_cfk", dataSourceName);
+    protected IXdStorageResourceObject<IXdStorageDaoResource> createResource(final Object resourceId, final XdStorageClassInfo clInfo) {
+        return new XdStorageSQLResource(services, this, resourceId, clInfo);
+    }
 
-        IXdStorageResourceObject<?> resource = (IXdStorageResourceObject<?>) activeResources.get(resourceId);
-        if (resource == null) {
-            resource = new XdStorageSQLCrossDatasourceFkResource(services, this, resourceId, parentInfo, childInfo);
-            activeResources.put(resourceId, resource);
+    @Override
+    protected IXdStorageResourceObject<IXdStorageDaoResource> createReferencesResource(final Object resourceId, final XdStorageClassInfo clInfo) {
+        return new XdStorageSQLResource(services,this, resourceId, clInfo, true);
+    }
+
+    @Override
+    protected IXdStorageSearchIndexResourceObject createSearchIndexResource(final Object resourceId, final String indexName, final XdStorageClassInfo clInfo) {
+        return new XdStorageSQLSearchIndexResource(services,this, resourceId, indexName, clInfo);
+    }
+
+    public IXdStorageDaoResource lockChildrenClassResource(final XdStorageClassInfo clInfo, final Object parentObjectResourceId,
+                                                           final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        IXdStorageResourceObject<IXdStorageDaoResource> resource = null;
+        final XdStoragePolicy policy = clInfo.getPolicy();
+        if (policy == XdStoragePolicy.StoreWithParentObject) {
+            final XdStorageSQLResourceNamingService namingService = (XdStorageSQLResourceNamingService) services.getNamingService();
+            final Object resourceId = namingService.getChildrenResourceId(policy, parentObjectResourceId, clInfo.getClazz(), null, null);
+            resource = internalLockResource(new IResourceFactory() {
+                @Override
+                public Object getResourceId() {
+                    return resourceId;
+                }
+
+                @Override
+                public IXdStorageResourceObject create() {
+                    return createResource(resourceId, clInfo);
+                }
+
+                @Override
+                public int getCommitOrder() {
+                    return XdStorageResourceCommitOrder.CHILDREN_DATA_RESOURCE_ORDER;
+                }
+            }, transaction);
         }
-        transaction.registerResource(resource);
-        return resource;
+        return resource != null ? resource.getDao() : null;
+    }
+
+    public IXdStorageCrossDatasourceFkDaoResource lockForeignKeyObjectsResource(final XdStorageSQLResourceId parentObjectResourceId, final XdStorageSQLResourceId childObjectResourceId,
+                                                                                final XdStorageTransaction transaction, final XdStorageClassInfo parentObjectClassInfo,
+                                                                                final XdStorageClassInfo childObjectClassInfo) throws XdStorageException, XdStorageConnectionException {
+        IXdStorageResourceObject<IXdStorageCrossDatasourceFkDaoResource> resource = null;
+        final String parentObjectDatasource = parentObjectResourceId.getDataSource();
+        final String childObjectDatasource = childObjectResourceId.getDataSource();
+        if (!childObjectDatasource.equals(parentObjectDatasource))
+        {
+            final XdStorageSQLResourceNamingService namingService = (XdStorageSQLResourceNamingService) services.getNamingService();
+            final Object resourceId = namingService.getCrossDatasourceFkResourceId(parentObjectResourceId, parentObjectClassInfo, childObjectResourceId, childObjectClassInfo);
+            resource = internalLockResource(new IResourceFactory() {
+                @Override
+                public Object getResourceId() {
+                    return resourceId;
+                }
+
+                @Override
+                public IXdStorageResourceObject create() {
+                    return new XdStorageSQLCrossDatasourceFkResource(services, XdStorageSQLResourcesManager.this, (XdStorageSQLResourceId) resourceId,
+                            parentObjectClassInfo, childObjectClassInfo);
+                }
+
+                @Override
+                public int getCommitOrder() {
+                    return XdStorageResourceCommitOrder.CROSS_DATASOURCE_FK_RESOURCE_ORDER;
+                }
+            }, transaction);
+        }
+        return resource != null ? resource.getDao() : XdStorageSQLDummyCrossDatasourceFkDaoResource.getInstance().getDao();
     }
 }

@@ -15,19 +15,22 @@ import org.flib.xdstorage.utils.XdStorageObjectIdField;
 
 import java.util.Collection;
 
-/**
- * Базовый абстрактный класс дискового ресурса СУБД.
- * Инкапсулирует общую логику DAO-взаимодействия с декомпозированным транзакционным MVCC-кэшем.
- */
 public abstract class XdStorageAbstractResource implements IXdStorageResourceObject<IXdStorageDaoResource>, IXdStorageDaoResource {
 
     protected final XdStorageServicesLocator services;
+
     protected final XdStorageAbstractResourcesManager manager;
+
     protected final Object resourceId;
+
     protected final IXdStorageIdGenerator idGenerator;
+
     protected final XdStorageClassInfo clInfo;
+
     protected final XdStorageObjectIdField idField;
+
     protected final boolean isReferences;
+
     protected final XdStorageResourceCache cache;
 
     protected XdStorageAbstractResource(final XdStorageServicesLocator services,
@@ -65,7 +68,6 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         return manager;
     }
 
-    @Override
     public Object getResourceId() {
         return resourceId;
     }
@@ -86,25 +88,25 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
     }
 
     protected void postPrepare(final XdStorageTransaction transaction) {
-        // Крюк жизненного цикла для расширения в конкретных файловых сегментах СУБД
+        // do nothing
     }
 
     protected void postCommit(final XdStorageTransaction transaction) {
-        // Крюк жизненного цикла для расширения в конкретных файловых сегментах СУБД
+        // do nothing
     }
 
     protected void postRollback(final XdStorageTransaction transaction) {
-        // Крюк жизненного цикла для расширения в конкретных файловых сегментах СУБД
+        // do nothing
     }
 
     @Override
     public void lockForCommit(final XdStorageTransaction transaction) {
-        // Управление блокировками вынесено в изолированный оркестратор XdStorageTransaction2PCEngine
+        // do nothing
     }
 
     @Override
     public void unlockAfterCommit(final XdStorageTransaction transaction) {
-        // Управление блокировками вынесено в изолированный оркестратор XdStorageTransaction2PCEngine
+        // do nothing
     }
 
     @Override
@@ -113,22 +115,18 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         manager.releaseResource(this);
     }
 
-    @Override
     public Collection<XdStorageIdentifiableObject> readAsData(final XdStorageTransaction transaction) throws XdStorageException {
-        throw new XdStorageRuntimeException("Метод readAsData обязан быть переопределен в конкретной файловой реализации ресурса.");
+        throw new XdStorageRuntimeException("unsupported operation exception");
     }
 
-    @Override
     public boolean hasObject(final Object objectId, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         return cache.hasObject(objectId);
     }
 
-    @Override
     public Collection<Object> readReferences(final XdStorageTransaction transaction) throws XdStorageException {
         return cache.read(transaction);
     }
 
-    @Override
     public void insertReference(final Object reference, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         Object objectId = idField.get(reference);
         if ((idField.getIdGeneretorType() == XdStorageIdGeneratorType.DATABASE_GENERATOR
@@ -140,54 +138,44 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         manager.updateCounterByObjectAdded(clInfo.getClazz(), this);
     }
 
-    @Override
     public void deleteReference(final Object reference, final XdStorageTransaction transaction) throws XdStorageException {
         cache.delete(idField.get(reference), transaction);
         manager.updateCounterByObjectRemoved(clInfo.getClazz(), this);
     }
 
-    @Override
     public <T> T find(final Object object, final XdStorageTransaction transaction) throws XdStorageException {
         return cache.findUnidentified(object, transaction);
     }
 
-    @Override
     public <T> Collection<T> read(final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         return cache.read(transaction);
     }
 
-    @Override
     public <T> Collection<T> read(final XdStorageTransaction transaction, final IXdStoragePredicate<T> predicate) throws XdStorageException, XdStorageConnectionException {
         return cache.read(transaction, predicate);
     }
 
-    @Override
     public <T> void watch(final XdStorageTransaction transaction, final IXdStorageWatcher<T> watcher) throws XdStorageException, XdStorageConnectionException {
         cache.watch(transaction, watcher);
     }
 
-    @Override
     public void readByReference(final Object reference, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         cache.readByReference(reference, transaction);
     }
 
-    @Override
     public Object read(final Object id, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         return cache.read(id, transaction);
     }
 
-    @Override
     public void insert(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         cache.insert(object, transaction);
         manager.updateCounterByObjectAdded(clInfo.getClazz(), this);
     }
 
-    @Override
     public void update(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         cache.update(object, transaction);
     }
 
-    @Override
     public void delete(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         cache.delete(idField.get(object), transaction);
         manager.updateCounterByObjectRemoved(clInfo.getClazz(), this);

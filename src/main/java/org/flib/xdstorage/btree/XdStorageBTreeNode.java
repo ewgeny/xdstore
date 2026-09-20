@@ -273,40 +273,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         });
     }
 
-    /**
-     * A node loaded from the storage keeps references to the tree and to the parent
-     * node as unloaded objects (only identifier is set). All tree algorithms read
-     * the tree parameters (t, multiple, root) and walk the parent chain, so these
-     * references must be loaded before use, otherwise getT() returns 0 and
-     * getRoot() returns null.
-     */
-    void materializeNodeReferences(final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        final XdStorageBTree tree = getTree();
-        if (XdStorageObjectUtils.isReference(tree)) {
-            tree.lockWrite(transaction);
-            try {
-                if (XdStorageObjectUtils.isReference(tree)) {
-                    storage.load(tree, transaction);
-                }
-            } finally {
-                tree.unlockWrite();
-            }
-        }
-        final XdStorageBTreeNode parent = getParent();
-        if (parent != null && XdStorageObjectUtils.isReference(parent)) {
-            parent.lockWrite(transaction);
-            try {
-                if (XdStorageObjectUtils.isReference(parent)) {
-                    storage.load(parent, transaction);
-                }
-            } finally {
-                parent.unlockWrite();
-            }
-        }
-    }
-
     private XdStorageBTreeNode loadThisNode(final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        materializeNodeReferences(storage, transaction);
         lockRead(transaction);
         try {
             final XdStorageBTreeNode nextTreeNode = getNextTreeNodeOnThisLevel();
@@ -343,7 +310,6 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     child.unlockWrite();
                 }
             }
-            child.materializeNodeReferences(storage, transaction);
             return child;
         } finally {
             unlockRead();
@@ -756,8 +722,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private void joinWithLeftNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode left = this.getParent().loadChildOfThisNode(currentNodeIndex - 1, storage, transaction);
-        left.lockAndAddToDeepLock(deepLockedNode, transaction);
-        {
+        if (left.tryLockAndAddToDeepLock(deepLockedNode, transaction)) {
             storage.delete(this, transaction);
 
             final ListIterator<Comparable> keyListIterator = this.getKeys().listIterator();
@@ -815,16 +780,22 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             final XdStorageBTreeNode child = parentChildren.get(i);
             final Object childId = child.getId();
             if ((childId != null && childId.equals(this.getId())) || child == this) {
+//                if (i == 0) {
                 if (i != countChildren - 1) {
                     if (tryToMoveKeyFromRightNeightbor(deepLockedNode, i, storage, transaction)) {
                         isMoved = true;
                     }
                 }
-                if (!isMoved && i > 0) {
-                    if (tryToMoveKeyFromLeftNeightbor(deepLockedNode, i, storage, transaction)) {
-                        isMoved = true;
-                    }
-                }
+//                else if (i == countChildren - 1) {
+//                    if (tryToMoveKeyFromLeftNeightbor(deepLockedNode, i, storage, transaction)) {
+//                        isMoved = true;
+//                    }
+//                } else {
+//                    if (tryToMoveKeyFromRightNeightbor(deepLockedNode, i, storage, transaction)
+//                            && tryToMoveKeyFromLeftNeightbor(deepLockedNode, i, storage, transaction)) {
+//                        isMoved = true;
+//                    }
+//                }
                 break;
             }
         }
@@ -835,7 +806,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     private boolean tryToMoveKeyFromRightNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode right = this.getParent().loadChildOfThisNode(currentNodeIndex + 1, storage, transaction);
         right.lockAndAddToDeepLock(deepLockedNode, transaction);
-        if (right.getKeys().size() > getTree().getT() - 1) {
+        if (right.getKeys().size() > getTree().getT()) {
             if (right.getChildren().isEmpty()) {
                 this.getKeys().add(right.getKeys().remove(0));
                 this.getObjects().add(right.getObjects().remove(0));
@@ -865,8 +836,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private boolean tryToMoveKeyFromLeftNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode left = this.getParent().loadChildOfThisNode(currentNodeIndex - 1, storage, transaction);
-        left.lockAndAddToDeepLock(deepLockedNode, transaction);
-        if (left.getKeys().size() > getTree().getT() - 1) {
+        if (left.tryLockAndAddToDeepLock(deepLockedNode, transaction)
+                && left.getKeys().size() > getTree().getT()) {
             final int lastKeyIndex = left.getKeys().size() - 1;
             if (left.getChildren().isEmpty()) {
                 final Comparable key = left.getKeys().remove(lastKeyIndex);
@@ -1023,16 +994,6 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             if (!stop) {
                 child = current.getNextTreeNodeOnThisLevel();
                 if (child != null) {
-                    if (XdStorageObjectUtils.isReference(child)) {
-                        child.lockWrite(transaction);
-                        try {
-                            if (XdStorageObjectUtils.isReference(child)) {
-                                storage.load(child, transaction);
-                            }
-                        } finally {
-                            child.unlockWrite();
-                        }
-                    }
                     final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
                     if (!retryFind.get()) {
                         result.addAll(tmp);

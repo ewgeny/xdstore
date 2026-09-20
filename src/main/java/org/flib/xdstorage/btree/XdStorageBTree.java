@@ -142,8 +142,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
     public void insert(final Comparable key, final Object object,
                        final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        storage.load(this, transaction);
-
         lockWrite(transaction);
         try {
             if (root == null) {
@@ -160,7 +158,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                     root.unlockWrite();
                 }
             }
-            root.materializeNodeReferences(storage, transaction);
         } finally {
             unlockWrite();
         }
@@ -180,17 +177,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryInsert.set(false);
             lockWrite(transaction);
-            try {
-                if (root == null) {
-                    createRoot(storage, transaction);
-                }
-                root.insert(this, key, object, storage, transaction, retryInsert);
-            } catch (final XdStorageException | XdStorageConnectionException | RuntimeException e) {
-                if (isWriteLocked()) {
-                    unlockWrite();
-                }
-                throw e;
+            if (root == null) {
+                createRoot(storage, transaction);
             }
+            root.insert(this, key, object, storage, transaction, retryInsert);
         } while (retryInsert.get());
     }
 
@@ -201,8 +191,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public void delete(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        storage.load(this, transaction);
-
         lockWrite(transaction);
         try {
             if (root != null) {
@@ -216,7 +204,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                         root.unlockWrite();
                     }
                 }
-                root.materializeNodeReferences(storage, transaction);
             } else {
                 throw new XdStorageException("object of " + id.getCl() + " with idgeneration " + key + " does not exists");
             }
@@ -239,23 +226,15 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryDelete.set(false);
             lockWrite(transaction);
-            try {
-                if (root == null) {
-                    throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
-                }
-                root.delete(this, key, storage, transaction, retryDelete);
-            } catch (final XdStorageException | XdStorageConnectionException | RuntimeException e) {
-                if (isWriteLocked()) {
-                    unlockWrite();
-                }
-                throw e;
+            if (root == null) {
+                unlockWrite();
+                throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
             }
+            root.delete(this, key, storage, transaction, retryDelete);
         } while (retryDelete.get());
     }
 
     public void update(final Comparable key, final Object value, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        storage.load(this, transaction);
-
         lockWrite(transaction);
         try {
             if (root == null) {
@@ -272,7 +251,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                     root.unlockWrite();
                 }
             }
-            root.materializeNodeReferences(storage, transaction);
         } finally {
             unlockWrite();
         }
@@ -292,23 +270,15 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryUpdate.set(false);
             lockWrite(transaction);
-            try {
-                if (root == null) {
-                    throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
-                }
-                root.update(this, key, value, storage, transaction, retryUpdate);
-            } catch (final XdStorageException | XdStorageConnectionException | RuntimeException e) {
-                if (isWriteLocked()) {
-                    unlockWrite();
-                }
-                throw e;
+            if (root == null) {
+                unlockWrite();
+                throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
             }
+            root.update(this, key, value, storage, transaction, retryUpdate);
         } while (retryUpdate.get());
     }
 
     public List<Object> find(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        storage.load(this, transaction);
-
         lockWrite(transaction);
         try {
             if (root == null) {
@@ -325,7 +295,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                     root.unlockWrite();
                 }
             }
-            root.materializeNodeReferences(storage, transaction);
         } finally {
             unlockWrite();
         }
@@ -345,8 +314,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public void read(final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
-        storage.load(this, transaction);
-
         lockWrite(transaction);
         try {
             if (firstLeaf == null) {
@@ -363,7 +330,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                     firstLeaf.unlockWrite();
                 }
             }
-            firstLeaf.materializeNodeReferences(storage, transaction);
         } finally {
             unlockWrite();
         }

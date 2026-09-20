@@ -5,26 +5,18 @@ import org.flib.xdstorage.resource.XdStorageObjectChange;
 import org.flib.xdstorage.resource.XdStorageObjectOperationType;
 import org.flib.xdstorage.trigger.XdStorageTriggerManager;
 
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * Потокобезопасный коллектор изменений транзакционных ресурсов.
- * Защищен от Race Conditions на фазе фиксации 2PC.
- */
 public class XdStorageTransactionResourceChanges {
 
     private final IXdStorageResourceObject resource;
 
-    /**
-     * ИСПРАВЛЕНИЕ: Перевод на ConcurrentLinkedQueue для безопасной конкурентной записи.
-     */
-    private final Queue<XdStorageObjectChange> changes;
+    private final Collection<XdStorageObjectChange> changes;
 
     public XdStorageTransactionResourceChanges(final IXdStorageResourceObject resource) {
         this.resource = resource;
-        this.changes = new ConcurrentLinkedQueue<>();
+        this.changes = new ArrayList<>();
     }
 
     public IXdStorageResourceObject getResource() {
