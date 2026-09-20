@@ -8,22 +8,14 @@ import org.flib.xdstorage.resource.IXdStorageResourceObject;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Изолированный движок протокола двухфазной фиксации (Two-Phase Commit Engine).
- * Управляет безопасным от дедлоков захватом блокировок ресурсов и координацией фаз коммита/отката.
- */
 public final class XdStorageTransaction2PCEngine {
 
     private static final Logger log = LogManager.getLogger(XdStorageTransaction2PCEngine.class);
 
-    private XdStorageTransaction2PCEngine() {
-        // Утилитный класс-оркестратор, запрет инстанцирования
-    }
+    private XdStorageTransaction2PCEngine() {}
 
-    /**
-     * Оркестрирует фазы PREPARE и COMMIT в рамках двухфазного коммита (2PC).
-     */
     public static void executeCommit(
             final XdStorageTransaction tx,
             final Queue<XdStorageTransaction.ComparableResourceObject> forCommit,
@@ -34,7 +26,6 @@ public final class XdStorageTransaction2PCEngine {
 
         state.setState(XdStorageCommitTransactionState.PREPARING);
 
-        // 1. Детерминированный захват блокировок (Защита от дедлоков)
         final Iterator<XdStorageTransaction.ComparableResourceObject> it = forCommit.iterator();
         while (it.hasNext()) {
             final IXdStorageResourceObject res = it.next().resource;
@@ -47,9 +38,8 @@ public final class XdStorageTransaction2PCEngine {
         }
 
         final AtomicBoolean hasError = new AtomicBoolean(false);
-        final XdStorageRuntimeException[] exceptions = new XdStorageRuntimeException[]{null};
+        final AtomicReference<XdStorageRuntimeException> exceptionRef = new AtomicReference<>(null);
 
-        // 2. Фаза 1: Prepare (Линейная прогонка)
         XdStorageTransaction.ComparableResourceObject resObject;
         while ((resObject = forCommit.poll()) != null) {
             if (hasError.get()) {
@@ -62,67 +52,42 @@ public final class XdStorageTransaction2PCEngine {
                 res.performFirstPhaseCommit(tx, record);
             } catch (final Throwable e) {
                 hasError.set(true);
-                exceptions[0] = new XdStorageRuntimeException("Сбой транзакции во время фазы Prepare ресурсов", e);
+                exceptionRef.set(new XdStorageRuntimeException("Сбой на фазе Prepare ресурса ID: " + resObject.resource.getResourceId(), e));
                 break;
             }
         }
 
-        if (exceptions[0] != null) {
-            throw exceptions[0];
+        if (exceptionRef.get() != null) {
+            throw exceptionRef.get();
         }
 
         state.setState(XdStorageCommitTransactionState.PREPARED);
 
-        // 3. Фаза 2: Commit (Безопасная параллельная запись на диск)
-        resources.values().parallelStream().forEach(resource -> {
-            if (hasError.get()) {
-                return;
-            }
-            try {
-                final XdStorageTransactionResourceChanges record = new XdStorageTransactionResourceChanges(resource);
-                resource.performSecondPhaseCommit(tx, record);
-            } catch (final Throwable e) {
-                if (!hasError.getAndSet(true)) {
-                    exceptions[0] = new XdStorageRuntimeException("Критический сбой СУБД во время фазы Commit ресурсов", e);
+        try {
+            resources.values().parallelStream().forEach(resource -> {
+                if (hasError.get()) {
+                    return;
                 }
+                try {
+                    final XdStorageTransactionResourceChanges record = new XdStorageTransactionResourceChanges(resource);
+                    resource.performSecondPhaseCommit(tx, record);
+                } catch (final Throwable e) {
+                    log.error("Критический сбой на фазе Commit ресурса " + resource.getResourceId(), e);
+                    if (!hasError.getAndSet(true)) {
+                        exceptionRef.set(new XdStorageRuntimeException("Сбой на фазе Commit: " + resource.getResourceId(), e));
+                    }
+                }
+            });
+
+            if (exceptionRef.get() != null) {
+                throw exceptionRef.get();
             }
-        });
 
-        if (exceptions[0] != null) {
-            throw exceptions[0];
+            state.setState(XdStorageCommitTransactionState.FINISHED);
+        } finally {
+            lockedResources.parallelStream().forEach(res -> {
+                res.unlockAfterCommit(tx);
+            });
         }
-
-        state.setState(XdStorageCommitTransactionState.FINISHED);
-
-        // 4. Безопасное параллельное снятие блокировок
-        lockedResources.parallelStream().forEach(res -> res.unlockAfterCommit(tx));
-    }
-
-    /**
-     * Выполняет параллельный аварийный откат ресурсов в случае падения первой фазы 2PC.
-     */
-    public static boolean executeFailedCommitRollback(
-            final XdStorageTransaction tx,
-            final Map<Object, IXdStorageResourceObject> resources,
-            final List<IXdStorageResourceObject> lockedResources,
-            final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources) {
-
-        final List<XdStorageRuntimeException> exceptions = Collections.synchronizedList(new ArrayList<>());
-
-        firstPhaseCommittedResources.entrySet().parallelStream().forEach(entry -> {
-            try {
-                resources.get(entry.getKey()).rollbackPerformingFirstPhaseCommit(tx, entry.getValue().getChangesObjects());
-            } catch (final Throwable e) {
-                exceptions.add(new XdStorageRuntimeException("Ошибка отката ресурсов на фазе 1", e));
-            }
-        });
-
-        lockedResources.parallelStream().forEach(res -> res.unlockAfterCommit(tx));
-
-        if (!exceptions.isEmpty()) {
-            exceptions.forEach(e -> log.error("Критический сбой компенсационного отката 2PC", e));
-        }
-
-        return exceptions.isEmpty();
     }
 }

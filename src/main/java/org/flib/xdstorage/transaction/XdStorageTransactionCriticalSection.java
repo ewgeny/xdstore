@@ -1,53 +1,38 @@
 package org.flib.xdstorage.transaction;
 
-import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Инкапсулирует управление критическими секциями и флагами rollback-only транзакции.
- */
-public class XdStorageTransactionCriticalSection {
+public final class XdStorageTransactionCriticalSection {
 
-    private final String transactionId;
+    private final AtomicInteger counter = new AtomicInteger(0);
     private final AtomicBoolean rollbackOnly = new AtomicBoolean(false);
-    private final AtomicLong criticalCounter = new AtomicLong(0);
 
-    public XdStorageTransactionCriticalSection(final String transactionId) {
-        this.transactionId = transactionId;
+    public void enter(final boolean requiresRollbackOnFailure) {
+        counter.incrementAndGet();
+        if (requiresRollbackOnFailure) {
+            rollbackOnly.set(true);
+        }
+    }
+
+    public boolean exit() {
+        return counter.decrementAndGet() == 0;
+    }
+
+    public boolean isInside() {
+        return counter.get() > 0;
     }
 
     public boolean isRollbackOnly() {
         return rollbackOnly.get();
     }
 
-    public void setRollbackOnly() {
-        synchronized (criticalCounter) {
-            while (criticalCounter.get() > 0) {
-                try {
-                    criticalCounter.wait();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-            rollbackOnly.set(true);
-        }
+    public void forceRollback() {
+        rollbackOnly.set(true);
     }
 
-    public void start(boolean rollback) {
-        synchronized (criticalCounter) {
-            if (!rollback && rollbackOnly.get()) {
-                throw new XdStorageRuntimeException("Транзакция " + transactionId + " помечена как rollback-only и будет отменена.");
-            }
-            criticalCounter.incrementAndGet();
-        }
-    }
-
-    public void finish() {
-        synchronized (criticalCounter) {
-            if (criticalCounter.decrementAndGet() == 0) {
-                criticalCounter.notifyAll();
-            }
-        }
+    public void reset() {
+        counter.set(0);
+        rollbackOnly.set(false);
     }
 }
