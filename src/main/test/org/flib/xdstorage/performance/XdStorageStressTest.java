@@ -1,6 +1,7 @@
 package org.flib.xdstorage.performance;
 
 import org.flib.xdstorage.*;
+import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -41,13 +42,60 @@ public class XdStorageStressTest {
         @Override
         public void run() {
             try {
-                latch.await();
+                latch.await(); // 1. Все 50 потоков одновременно просыпаются здесь
 
-                for (int j = 0; j == MAX_RETRIES; ++j) {
-                    rollbackCount.incrementAndGet();
-                }
-                    // Разогреваем паузу адаптивно в зависимости от номера попытки!
-                executeAdaptiveBackoffDelay(100);
+                // 2. Делаем небольшую случайную паузу, чтобы потоки не толкались
+                Thread.sleep(ThreadLocalRandom.current().nextInt(150));
+
+                // 3. ВНЕШНИЙ ЦИКЛ: Каждый поток должен успешно выполнить 100 операций записи
+                for (int j = 0; j < OPERATIONS_PER_THREAD; ++j) {
+                    // Создаем инстанс нашего тестового Java-класса (POJO).
+                    // Конструктор принимает сгенерированный уникальный ID и строку с полезными данными (payload).
+                    // Ядро СУБД считает это поле первичным ключом благодаря аннотации @XdStorageObjectId.
+                    BenchmarkEntity entity = new BenchmarkEntity(UUID.randomUUID().toString(), "Stress_Payload_Data");
+
+                    // Усыпляем поток на чуть-чуть, прежде чем повторить попытку в цикле while
+                    // Переменные-индикаторы для одной конкретной операции записи
+                    boolean txSuccess = false;
+                    int retries = 0;
+
+                    // Внутренний цикл будет крутиться, пока транзакция не завершится успехом
+                    // ИЛИ пока мы не исчерпаем лимит в 15 попыток (MAX_RETRIES)
+                    while (!txSuccess && retries < MAX_RETRIES) {
+                        // 1. Открываем изолированную транзакцию в СУБД с таймаутом ожидания локов в 3 секунды
+                        IXdStorageTransaction tx = storage.beginTransaction(3000L);
+
+                        try {
+                            // 2. Сама запись: Передаем наш POJO-объект и контекст текущей транзакции.
+                            // Ядро проверяет аннотацию @XdStorageObjectId и политику StoreAsClassObjects,
+                            // после чего резервирует место во фрагменте кэша индексов.
+                            storage.save(entity, tx);
+
+                            // 3. Фиксация: Даем команду на двухфазный коммит (2PC).
+                            // СУБД преобразует накопленные в памяти дельты изменений в реальные пакеты
+                            // команд PreparedStatement и надежно записывает их в базу данных.
+                            storage.commitTransaction(tx);
+
+                            // Если СУБД успешно сохранила данные без конфликтов блокировок — инкрементируем счетчик коммитов
+                            successCount.incrementAndGet();
+                            txSuccess = true; // Выходим из цикла повторов (while) к следующей операции
+
+                        } catch (Exception e) {
+                            // Если произошел конфликт MVCC-блокировок или таймаут — откатываем попытку
+                            storage.rollbackTransaction(tx);
+
+                            // Фиксируем отклонение ТОЛЬКО если это была последняя 15-я попытка
+                            if (retries + 1 >= MAX_RETRIES) {
+                                rollbackCount.incrementAndGet();
+                            }
+
+                            ++retries;
+
+                            // Адаптивно засыпаем, давая другим потокам завершить свои транзакции
+                            executeAdaptiveBackoffDelay(retries);
+                        }
+                    } // Конец цикла while (Retry Policy)
+                } // Конец цикла for (100 операций)
             } catch (Exception e) {
                 rollbackCount.incrementAndGet();
             }
