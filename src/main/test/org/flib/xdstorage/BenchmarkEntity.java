@@ -1,6 +1,8 @@
 package org.flib.xdstorage;
 import org.flib.xdstorage.annotations.XdStorageObjectId;
+import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 
+@XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
 public class BenchmarkEntity {
     @XdStorageObjectId
     private String id;

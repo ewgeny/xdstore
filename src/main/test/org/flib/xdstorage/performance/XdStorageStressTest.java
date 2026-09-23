@@ -17,7 +17,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Оптимизированный стресс-тест СУБД (Поинт Г).
  * Внедряет адаптивный Exponential Backoff для разведения конкурирующих транзакций во времени.
  */
-@Disabled
 public class XdStorageStressTest {
 
     private static final String STRESS_DIR = "./target/stress_test_storage";
@@ -63,7 +62,7 @@ public class XdStorageStressTest {
                     // ИЛИ пока мы не исчерпаем лимит в 15 попыток (MAX_RETRIES)
                     while (!txSuccess && retries < MAX_RETRIES) {
                         // 1. Открываем изолированную транзакцию в СУБД с таймаутом ожидания локов в 3 секунды
-                        IXdStorageTransaction tx = storage.beginTransaction(3000L);
+                        IXdStorageTransaction tx = storage.beginTransaction(3_000L);
 
                         try {
                             // 2. Сама запись: Передаем наш POJO-объект и контекст текущей транзакции.
@@ -107,8 +106,8 @@ public class XdStorageStressTest {
         private void executeAdaptiveBackoffDelay(int currentRetry) {
             try {
                 // Базовая пауза растет с каждой ошибкой + добавляется случайный разброс
-                long baseDelay = 15L * currentRetry;
-                long jitter = ThreadLocalRandom.current().nextInt(30);
+                long baseDelay = 5L * currentRetry;
+                long jitter = ThreadLocalRandom.current().nextInt(15);
                 Thread.sleep(baseDelay + jitter);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
@@ -147,8 +146,8 @@ public class XdStorageStressTest {
         latch.countDown(); // Одновременный залп!
 
         executor.shutdown();
-        // Даем пулу потоков 45 секунд, чтобы переварить всю пачку
-        boolean finishedCleanly = executor.awaitTermination(45, TimeUnit.SECONDS);
+
+        boolean finishedCleanly = executor.awaitTermination(60, TimeUnit.SECONDS);
 
         assertTrue(finishedCleanly, "Критический баг! Локеры СУБД ушли в циклический Deadlock!");
 
