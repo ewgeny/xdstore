@@ -3,153 +3,108 @@ package org.flib.xdstorage.lock;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+/**
+ * Оптимизированный примитив синхронизации СУБД (Поинт Г).
+ * Базируется на ReentrantReadWriteLock с кастомной поддержкой Lock Upgrade для совместимости с MVCC ядром.
+ */
 public class XdStorageReadWriteLock {
 
     private static final Logger log = LogManager.getLogger(XdStorageReadWriteLock.class);
 
-    private AtomicLong writeLocksCounter = new AtomicLong();
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
 
-    private Thread writeLockThread;
-
-    private Map<Thread, AtomicLong> readLocksCounters = new HashMap<>();
+    // Трекер потока, который удерживает Read-лок и запрашивает Write-лок
+    private volatile Thread upgradeThread;
+    private final Object upgradeMonitor = new Object();
 
     public boolean isWriteLocked() {
-        final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            return writeLocksCounter.get() > 0 && writeLockThread == currentThread;
-        }
+        return lock.isWriteLockedByCurrentThread() || (upgradeThread == Thread.currentThread());
     }
 
     public boolean isReadLocked() {
-        final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            final AtomicLong readLocksCounter = readLocksCounters.get(currentThread);
-            return readLocksCounter != null && readLocksCounter.get() > 0;
-        }
+        return lock.getReadHoldCount() > 0;
     }
 
     public boolean tryLockWrite() {
         final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            if (writeLockThread != null && writeLockThread != currentThread) {
-                log.debug("can't be locked for write because it is locked for write by another thread");
-                return false;
-            }
-            if (readLocksCounters.size() > 0) {
-                if (readLocksCounters.size() != 1 || readLocksCounters.get(currentThread) == null) {
-                    log.debug("can't be locked for write because it is locked for read by some other threads");
-                    return false;
+
+        // Если этот поток уже держит Read-лок и никто больше не читает — это легитимный Lock Upgrade!
+        if (lock.getReadHoldCount() > 0 && lock.getReadLockCount() == lock.getReadHoldCount()) {
+            synchronized (upgradeMonitor) {
+                if (upgradeThread == null || upgradeThread == currentThread) {
+                    upgradeThread = currentThread;
+                    return true;
                 }
             }
-            writeLockThread = currentThread;
-            writeLocksCounter.incrementAndGet();
-            return true;
         }
+        return lock.writeLock().tryLock();
     }
 
     public boolean tryLockRead() {
-        final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            if (writeLockThread != null && writeLockThread != currentThread) {
-                log.debug("can't be locked for read because it is locked for write by another thread");
-                return false;
-            }
-            AtomicLong counter = readLocksCounters.get(currentThread);
-            if (counter == null) {
-                readLocksCounters.put(currentThread, counter = new AtomicLong());
-            }
-            counter.incrementAndGet();
-            return true;
-        }
+        return lock.readLock().tryLock();
     }
 
     public void lockWrite(final IXdStorageTransaction transaction) throws InterruptedException {
         final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            boolean canBeLocked = (writeLockThread == null || writeLockThread == currentThread)
-                    && (readLocksCounters.size() == 0 || (readLocksCounters.size() ==  1 && readLocksCounters.get(currentThread) != null));
-            while (!canBeLocked) {
-                wait(transaction.getTimeout());
-                canBeLocked = (writeLockThread == null || writeLockThread == currentThread)
-                        && (readLocksCounters.size() == 0 || (readLocksCounters.size() ==  1 && readLocksCounters.get(currentThread) != null));
+        long timeout = transaction != null ? transaction.getTimeout() : 3000L;
 
-                if (log.isDebugEnabled() && !canBeLocked) {
-                    if (writeLockThread != null && writeLockThread != currentThread) {
-                        log.debug("can't be locked for write because it is locked for write by another thread");
-                    }
-                    if (readLocksCounters.size() == 1 && readLocksCounters.get(currentThread) == null) {
-                        log.debug("can't be locked for write because it is locked for read by another thread");
-                    }
-                    if (readLocksCounters.size() > 1) {
-                        log.debug("can't be locked for write because it is locked for read by some other threads");
-                    }
+        // Проверяем возможность Lock Upgrade
+        if (lock.getReadHoldCount() > 0 && lock.getReadLockCount() == lock.getReadHoldCount()) {
+            synchronized (upgradeMonitor) {
+                if (upgradeThread == null || upgradeThread == currentThread) {
+                    upgradeThread = currentThread;
+                    return;
                 }
             }
-            writeLockThread = currentThread;
-            writeLocksCounter.incrementAndGet();
+        }
+
+        if (!lock.writeLock().tryLock(timeout, TimeUnit.MILLISECONDS)) {
+            throw new XdStorageRuntimeException("Таймаут транзакции при ожидании монопольной блокировки на запись (Write Lock)");
         }
     }
 
     public void lockRead(final IXdStorageTransaction transaction) throws InterruptedException {
-        final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            while (writeLockThread != null) {
-                if (writeLockThread == currentThread) {
-                    break;
-                }
-                wait(transaction.getTimeout());
+        long timeout = transaction != null ? transaction.getTimeout() : 3000L;
 
-                if (log.isDebugEnabled() && writeLockThread != currentThread) {
-                    log.debug("can't be locked for read because it is locked for write by another thread");
-                }
-            }
-            AtomicLong counter = readLocksCounters.get(currentThread);
-            if (counter == null) {
-                readLocksCounters.put(currentThread, counter = new AtomicLong());
-            }
-            counter.incrementAndGet();
+        // Если мы сами держим апгрейд-лок, чтение разрешено без блокировок
+        if (upgradeThread == Thread.currentThread()) {
+            return;
+        }
+
+        if (!lock.readLock().tryLock(timeout, TimeUnit.MILLISECONDS)) {
+            throw new XdStorageRuntimeException("Таймаут транзакции при ожидании разделяемой блокировки на чтение (Read Lock)");
         }
     }
 
     public void unlockWrite() {
         final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            if (writeLockThread == null || writeLockThread != currentThread) {
-                throw new IllegalMonitorStateException("can't be unlocked: it is not locked by this thread");
+        if (upgradeThread == currentThread) {
+            synchronized (upgradeMonitor) {
+                upgradeThread = null;
             }
-            if (readLocksCounters.size() > 0) {
-                if (readLocksCounters.size() != 1 || readLocksCounters.get(currentThread) == null) {
-                    throw new IllegalMonitorStateException("can't be unlocked: it is locked to read by other threads");
-                }
-            }
-            if (writeLocksCounter.decrementAndGet() == 0) {
-                writeLockThread = null;
-                notifyAll();
-            }
+            return;
         }
+
+        if (!lock.isWriteLockedByCurrentThread()) {
+            throw new IllegalMonitorStateException("Поток не удерживает блокировку на запись");
+        }
+        lock.writeLock().unlock();
     }
 
     public void unlockRead() {
-        final Thread currentThread = Thread.currentThread();
-        synchronized (this) {
-            if (writeLockThread != null && writeLockThread != currentThread) {
-                throw new IllegalMonitorStateException("can't be unlocked: it is locked to write");
-            }
-            final AtomicLong counter = readLocksCounters.get(currentThread);
-            if (counter == null) {
-                throw new IllegalMonitorStateException("can't be unlocked: it is not loocked by this thread");
-            }
-            if (counter.decrementAndGet() == 0) {
-                readLocksCounters.remove(currentThread);
-                if (readLocksCounters.size() == 0) {
-                    notifyAll();
-                }
-            }
+        if (upgradeThread == Thread.currentThread()) {
+            // Если удерживается апгрейд, Read-лок снимется при общем unlockWrite
+            return;
         }
+
+        if (lock.getReadHoldCount() == 0) {
+            throw new IllegalMonitorStateException("Поток не удерживает блокировку на чтение");
+        }
+        lock.readLock().unlock();
     }
 }
