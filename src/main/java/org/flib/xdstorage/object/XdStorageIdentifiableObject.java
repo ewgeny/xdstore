@@ -24,4 +24,9 @@ public class XdStorageIdentifiableObject extends XdStorageObject {
         final XdStorageIdentifiableObject that = (XdStorageIdentifiableObject) o;
         return Objects.equals(id, that.id) && super.equals(o);
     }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), id);
+    }
 }

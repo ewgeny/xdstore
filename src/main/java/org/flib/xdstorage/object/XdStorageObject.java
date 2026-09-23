@@ -45,4 +45,9 @@ public class XdStorageObject {
         return Objects.equals(type, that.type) &&
                 Objects.equals(properties, that.properties);
     }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(type, properties);
+    }
 }

@@ -26,7 +26,7 @@ import javax.sql.DataSource;
 
 public class XdStorageSQLResourcesManager extends XdStorageAbstractResourcesManager {
 
-    final IXdStorageSQLTypesHelper typesHelper;
+    IXdStorageSQLTypesHelper typesHelper;
 
     private final IXdStorageSQLDataSourceProvider dataSourceProvider;
 
