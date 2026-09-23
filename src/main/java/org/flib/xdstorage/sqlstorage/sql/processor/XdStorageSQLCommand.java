@@ -84,12 +84,19 @@ public class XdStorageSQLCommand extends XdStorageAbstractSQLCommand {
 
         final Connection connection = connectionProvider.getConnection(resourceId, transaction);
 
+        // ИСПРАВЛЕНИЕ ПО ПОИНТУ Б: Гарантируем закрытие PreparedStatement через блок try-finally
         final PreparedStatement st = connection.prepareStatement(query);
-        if (parameters != null && parameters.size() > 0) {
-            for (int j = 0; j < parameters.size(); ++j) {
-                helper.setParameter(st, j + 1, parameters.get(j));
+        try {
+            if (parameters != null && parameters.size() > 0) {
+                for (int j = 0; j < parameters.size(); ++j) {
+                    helper.setParameter(st, j + 1, parameters.get(j));
+                }
+            }
+            st.execute();
+        } finally {
+            if (st != null) {
+                st.close();
             }
         }
-        st.execute();
     }
 }

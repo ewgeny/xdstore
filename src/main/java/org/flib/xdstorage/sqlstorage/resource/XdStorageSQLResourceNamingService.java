@@ -1,7 +1,5 @@
 package org.flib.xdstorage.sqlstorage.resource;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
@@ -14,38 +12,34 @@ import org.flib.xdstorage.sqlstorage.fkresource.XdStorageSQLCrossDatasourceFk;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
+/**
+ * Финальный декомпозированный сервис именования ресурсов (Поинт В).
+ * Полностью избавлен от логики шардирования и конкатенации строк.
+ * Делегирует роутинг в XdStorageSQLDataSourceRouter, а форматирование в XdStorageSQLTableFormatter.
+ */
 public class XdStorageSQLResourceNamingService implements IXdStorageResourceNamingService {
 
-    private static final Logger log = LogManager.getLogger(XdStorageSQLResourceNamingService.class);
-
-    private XdStorageServicesLocator services;
-
-    private XdStorageSQLConfiguration configuration;
-
-    private Map<String, IXdStorageSQLDataSourceRule> rules = new ConcurrentHashMap<>();
+    private final XdStorageServicesLocator services;
+    private final XdStorageSQLDataSourceRouter dataSourceRouter;
 
     public XdStorageSQLResourceNamingService(final XdStorageServicesLocator provider) {
         this.services = provider;
-        this.configuration = provider.getConfiguration();
+        this.dataSourceRouter = new XdStorageSQLDataSourceRouter(provider);
     }
 
     public IXdStorageSQLDataSourceConfiguration getDataSourceConfig(final String dataSourceName) {
-        return configuration.getDataSourceConfig(dataSourceName);
+        return dataSourceRouter.getConfiguration().getDataSourceConfig(dataSourceName);
     }
 
     public <T> Object getChildrenResourceId(final XdStoragePolicy policy, final Object parentObjectResourceId,
                                             final Class<?> cl, final T object, final Object objectId) throws XdStorageException {
-        final XdStorageSQLClassConfiguration classCfg = configuration.getClassConfig(cl);
+        final XdStorageSQLClassConfiguration classCfg = dataSourceRouter.getConfiguration().getClassConfig(cl);
         if (classCfg == null) {
             throw new XdStorageException(String.format("Configuration for %s was not found", cl));
         }
 
         if (classCfg.isParentDataSource()) {
             final XdStorageSQLResourceId parentResourceId = (XdStorageSQLResourceId) parentObjectResourceId;
-
             final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId();
             resourceId.setTable(classCfg.getTable());
             resourceId.setDataSource(parentResourceId.getDataSource());
@@ -56,54 +50,7 @@ public class XdStorageSQLResourceNamingService implements IXdStorageResourceNami
 
     @Override
     public <T> Object getResourceId(final XdStoragePolicy policy, final Class<?> cl, final T object, final Object objectId) throws XdStorageException {
-        final XdStorageSQLClassConfiguration classCfg = configuration.getClassConfig(cl);
-        if (classCfg == null) {
-            throw new XdStorageException(String.format("Configuration for %s was not found", cl));
-        }
-
-        final IXdStorageSQLDataSourceConfiguration dataSourceCfg;
-        if (classCfg.isMultiple()) {
-            String defaultDataSource = null, passedDataSource = null;
-            for(final XdStorageSQLRuleConfiguration ruleCfg : classCfg.getRules()) {
-                if(ruleCfg.getType() == XdStorageSQLRuleType.DEFAULT) {
-                    defaultDataSource = ruleCfg.getDataSource();
-                } else {
-                    IXdStorageSQLDataSourceRule rule = getDatasourceRule(ruleCfg.getClassName());
-                    if(rule != null && rule.passed(object)) {
-                        passedDataSource = ruleCfg.getDataSource();
-                        break;
-                    }
-                }
-            }
-            if(passedDataSource != null) {
-                dataSourceCfg = configuration.getDataSourceConfig(passedDataSource);
-            } else {
-                dataSourceCfg = configuration.getDataSourceConfig(defaultDataSource);
-            }
-        } else {
-            dataSourceCfg = configuration.getDataSourceConfig(classCfg.getDataSource());
-        }
-
-        final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId();
-        resourceId.setTable(classCfg.getTable());
-        resourceId.setDataSource(dataSourceCfg.getName());
-        return resourceId;
-    }
-
-    private IXdStorageSQLDataSourceRule getDatasourceRule(final String className) {
-        IXdStorageSQLDataSourceRule rule = rules.get(className);
-        if(rule == null) {
-            try {
-                final Class<?> cl = Class.forName(className);
-                rule = (IXdStorageSQLDataSourceRule) cl.newInstance();
-                rule.setStorage(services.getStorage());
-            } catch (final ClassNotFoundException | InstantiationException | IllegalAccessException e) {
-                log.error("cannot initialize data source rule", e);
-            }
-            rules.putIfAbsent(className, rule);
-            rule = rules.get(className);
-        }
-        return rule;
+        return dataSourceRouter.routeResourceId(cl, object);
     }
 
     public Object getCrossDatasourceFkResourceId(final XdStorageSQLResourceId parentObjectResourceId, final XdStorageClassInfo parentObjectClassInfo,
@@ -114,59 +61,61 @@ public class XdStorageSQLResourceNamingService implements IXdStorageResourceNami
         return resourceId;
     }
 
-    public String getObjectTable(final Class<?> cl) {
-        String table;
+    private String getRawTableName(final Class<?> cl) {
         if (cl == XdStorageTransaction.class) {
-            table = "transaction";
-        } else {
-            final XdStorageSQLClassConfiguration config = configuration.getClassConfig(cl);
-            if (config != null) {
-                table = config.getTable();
-            } else {
-                table = cl.getSimpleName().toLowerCase();
-            }
+            return "transaction";
         }
-        return table;
+        final XdStorageSQLClassConfiguration config = dataSourceRouter.getConfiguration().getClassConfig(cl);
+        return config != null ? config.getTable() : cl.getSimpleName().toLowerCase();
+    }
+
+    public String getObjectTable(final Class<?> cl) {
+        return XdStorageSQLTableFormatter.formatObjectTable(getRawTableName(cl));
     }
 
     public String getPrevStateObjectTable(final Class<?> cl) {
-        return getObjectTable(cl) + "_prev_state";
+        return XdStorageSQLTableFormatter.formatPrevStateObjectTable(getRawTableName(cl));
     }
 
     public String getCrossDatasourceFkTable(final Class<?> parentObjectClass, final Class<?> childObjectClass, final Class<?> fkClass) throws XdStorageException {
-        final XdStorageSQLClassConfiguration parentObjectConfig = configuration.getClassConfig(parentObjectClass);
-        final XdStorageSQLClassConfiguration childObjectConfig = configuration.getClassConfig(childObjectClass);
-        final XdStorageSQLClassConfiguration fkConfig = configuration.getClassConfig(fkClass);
+        final XdStorageSQLClassConfiguration parentObjectConfig = dataSourceRouter.getConfiguration().getClassConfig(parentObjectClass);
+        final XdStorageSQLClassConfiguration childObjectConfig = dataSourceRouter.getConfiguration().getClassConfig(childObjectClass);
+        final XdStorageSQLClassConfiguration fkConfig = dataSourceRouter.getConfiguration().getClassConfig(fkClass);
         if (fkConfig == null) {
             throw new XdStorageException(String.format("Configuration for %s was not found", XdStorageSQLCrossDatasourceFk.class));
         }
-
-        return fkConfig.getTable() + "_" + parentObjectConfig.getTable() + "_" + childObjectConfig.getTable();
+        return XdStorageSQLTableFormatter.formatCrossDatasourceFkTable(fkConfig.getTable(), parentObjectConfig.getTable(), childObjectConfig.getTable());
     }
 
     public String getPrevStateCrossDatasourceFkTable(final Class<?> parentObjectClass, final Class<?> childObjectClass, final Class<?> fkClass) throws XdStorageException {
-        return getCrossDatasourceFkTable(parentObjectClass, childObjectClass, fkClass) + "_prev_state";
+        final XdStorageSQLClassConfiguration parentObjectConfig = dataSourceRouter.getConfiguration().getClassConfig(parentObjectClass);
+        final XdStorageSQLClassConfiguration childObjectConfig = dataSourceRouter.getConfiguration().getClassConfig(childObjectClass);
+        final XdStorageSQLClassConfiguration fkConfig = dataSourceRouter.getConfiguration().getClassConfig(fkClass);
+        if (fkConfig == null) {
+            throw new XdStorageException(String.format("Configuration for %s was not found", XdStorageSQLCrossDatasourceFk.class));
+        }
+        return XdStorageSQLTableFormatter.formatPrevStateCrossDatasourceFkTable(fkConfig.getTable(), parentObjectConfig.getTable(), childObjectConfig.getTable());
     }
 
     public String getObjectLinksTable(final Class<?> cl, final String fieldName) {
-        return getObjectTable(cl) + "_" + fieldName;
+        return XdStorageSQLTableFormatter.formatLinksTable(getRawTableName(cl), fieldName);
     }
 
     public String getObjectPrevStateLinksTable(final Class<?> cl, final String fieldName) {
-        return getObjectTable(cl) + "_" + fieldName + "_prev_state";
+        return XdStorageSQLTableFormatter.formatPrevStateLinksTable(getRawTableName(cl), fieldName);
     }
 
     public String getInternalObjectsTable(final Class<?> cl, final String fieldName) {
-        return getObjectTable(cl) + "_" + fieldName;
+        return XdStorageSQLTableFormatter.formatLinksTable(getRawTableName(cl), fieldName);
     }
 
     public String getInternalObjectsPrevStateTable(final Class<?> cl, final String fieldName) {
-        return getObjectTable(cl) + "_" + fieldName + "_prev_state";
+        return XdStorageSQLTableFormatter.formatPrevStateLinksTable(getRawTableName(cl), fieldName);
     }
 
     @Override
     public Object getIndexResourceId(final String indexName, final XdStoragePolicy policy, final Class<?> cl) {
-        final IXdStorageSQLDataSourceConfiguration dataSourceCfg = configuration.getCentralDataSourceConfig();
+        final IXdStorageSQLDataSourceConfiguration dataSourceCfg = dataSourceRouter.getConfiguration().getCentralDataSourceConfig();
 
         final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId();
         resourceId.setTable(getIndexTable(cl, indexName));
@@ -175,53 +124,25 @@ public class XdStorageSQLResourceNamingService implements IXdStorageResourceNami
     }
 
     public String getIndexTable(final Class<?> cl, final String indexName) {
-        final String table;
-        final XdStorageSQLClassConfiguration config = configuration.getClassConfig(cl);
-        if (config != null) {
-            table = config.getTable();
-        } else {
-            table = cl.getSimpleName().toLowerCase();
-        }
-        return table + "_" + indexName + "_idx";
+        return XdStorageSQLTableFormatter.formatIndexTable(getRawTableName(cl), indexName);
     }
 
     public String getPrevStateIndexTable(final Class<?> cl, final String indexName) {
-        final String table;
-        final XdStorageSQLClassConfiguration config = configuration.getClassConfig(cl);
-        if (config != null) {
-            table = config.getTable();
-        } else {
-            table = cl.getSimpleName().toLowerCase();
-        }
-        return table + "_" + indexName + "_prev_state_idx";
+        return XdStorageSQLTableFormatter.formatPrevStateIndexTable(getRawTableName(cl), indexName);
     }
 
     public String getSearchIndexTable(final Class<?> cl, final String indexName) {
-        final String table;
-        final XdStorageSQLClassConfiguration config = configuration.getClassConfig(cl);
-        if (config != null) {
-            table = config.getTable();
-        } else {
-            table = cl.getSimpleName().toLowerCase();
-        }
-        return table + "_" + indexName;
+        return XdStorageSQLTableFormatter.formatSearchIndexTable(getRawTableName(cl), indexName);
     }
 
     public String getPrevStateSearchIndexTable(final Class<?> cl, final String indexName) {
-        final String table;
-        final XdStorageSQLClassConfiguration config = configuration.getClassConfig(cl);
-        if (config != null) {
-            table = config.getTable();
-        } else {
-            table = cl.getSimpleName().toLowerCase();
-        }
-        return table + "_" + indexName + "_prev_state";
+        return XdStorageSQLTableFormatter.formatPrevStateSearchIndexTable(getRawTableName(cl), indexName);
     }
 
     @Override
     public Object getStructureResourceId(final Class<?> cl) {
         if (cl == XdStorageLongIdCounterRecord.class) {
-            final IXdStorageSQLDataSourceConfiguration dataSourceCfg = configuration.getCentralDataSourceConfig();
+            final IXdStorageSQLDataSourceConfiguration dataSourceCfg = dataSourceRouter.getConfiguration().getCentralDataSourceConfig();
 
             final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId();
             resourceId.setTable("counter_long");
@@ -229,7 +150,7 @@ public class XdStorageSQLResourceNamingService implements IXdStorageResourceNami
             return resourceId;
         }
         if (cl == XdStorageIntegerIdCounterRecord.class) {
-            final IXdStorageSQLDataSourceConfiguration dataSourceCfg = configuration.getCentralDataSourceConfig();
+            final IXdStorageSQLDataSourceConfiguration dataSourceCfg = dataSourceRouter.getConfiguration().getCentralDataSourceConfig();
 
             final XdStorageSQLResourceId resourceId = new XdStorageSQLResourceId();
             resourceId.setTable("counter_integer");
@@ -238,6 +159,4 @@ public class XdStorageSQLResourceNamingService implements IXdStorageResourceNami
         }
         throw new XdStorageRuntimeException("database resources are not needed in structure");
     }
-
-
 }

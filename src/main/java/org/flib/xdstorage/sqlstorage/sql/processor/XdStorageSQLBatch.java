@@ -68,19 +68,28 @@ public class XdStorageSQLBatch extends XdStorageAbstractSQLCommand {
             st = connection.prepareStatement(query);
         }
 
-        for (int i = 0; i < parametersProvider.getCountRows(); ++i) {
-            for (int j = 0; j < parametersProvider.getCountParameters(i); ++j) {
-                helper.setParameter(st, j + 1, parametersProvider.getParameter(i, j));
-            }
-            st.addBatch();
-        }
-        st.executeBatch();
-
-        if (idConsumer != null) {
-            final ResultSet keys = st.getGeneratedKeys();
+        // ИСПРАВЛЕНИЕ ПО ПОИНТУ Б: Защищаем пакетную обработку и дескрипторы сгенерированных ключей ResultSet
+        try {
             for (int i = 0; i < parametersProvider.getCountRows(); ++i) {
-                keys.next();
-                idConsumer.setId(i, keys);
+                for (int j = 0; j < parametersProvider.getCountParameters(i); ++j) {
+                    helper.setParameter(st, j + 1, parametersProvider.getParameter(i, j));
+                }
+                st.addBatch();
+            }
+            st.executeBatch();
+
+            if (idConsumer != null) {
+                // Дополнительно оборачиваем ResultSet в try-with-resources для предотвращения утечек курсоров выборки
+                try (ResultSet keys = st.getGeneratedKeys()) {
+                    for (int i = 0; i < parametersProvider.getCountRows(); ++i) {
+                        keys.next();
+                        idConsumer.setId(i, keys);
+                    }
+                }
+            }
+        } finally {
+            if (st != null) {
+                st.close();
             }
         }
     }
