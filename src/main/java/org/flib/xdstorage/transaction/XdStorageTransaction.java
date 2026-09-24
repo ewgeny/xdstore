@@ -212,7 +212,9 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         final XdStorageRuntimeException[] exceptions = new XdStorageRuntimeException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean();
 
-        final Collection<IXdStorageResourceObject> resourceToCommit = resources.values();
+        // ИСПРАВЛЕНИЕ МНОГОПОТОЧНОСТИ: Вместо прямой вьюхи resources.values() делаем изолированный Snapshot.
+        // Это защищает параллельный стрим от ConcurrentModificationException и пропусков ресурсов при коммите!
+        final Collection<IXdStorageResourceObject> resourceToCommit = new ArrayList<>(resources.values());
 
         // performing first phase commit
         state.setState(XdStorageCommitTransactionState.PREPARING);

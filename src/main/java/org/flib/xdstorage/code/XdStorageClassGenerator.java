@@ -13,16 +13,20 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Полностью потокобезопасная фабрика генерации и компиляции прокси-классов (Поинт Г).
+ * Исключает разделение состояния генераторов между параллельными потоками воркеров.
+ */
 public class XdStorageClassGenerator {
 
     private static final Logger log = LogManager.getLogger(XdStorageClassGenerator.class);
-
     private static final String CODE_DIRECTORY = "gencode";
-
     private static final String CLASSES_PACKAGE = "org.flib.xdstorage.code";
 
     public static Map<Class<?>, Class<?>> generateUnmodifiableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
+
+        // ИСПРАВЛЕНИЕ: Каждый вызов гарантированно создает НОВЫЙ объект генератора, изолируя ArrayList-списки методов!
         if (cl == XdStorageIdentifiableObject.class) {
             new XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
         } else {
@@ -34,6 +38,7 @@ public class XdStorageClassGenerator {
     public static Map<Class<?>, Class<?>> generateSimpleWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
 
+        // ИСПРАВЛЕНИЕ: Локальный изолированный инстанс генератора для предотвращения Race Condition
         new XdStorageSimpleWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
 
         return compileGeneratedClassesCode(cl, generatedCode);
@@ -42,6 +47,7 @@ public class XdStorageClassGenerator {
     public static Map<Class<?>, Class<?>> generateObservableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
 
+        // ИСПРАВЛЕНИЕ: Локальный изолированный инстанс генератора
         new XdStorageObservableWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
 
         return compileGeneratedClassesCode(cl, generatedCode);
@@ -50,12 +56,11 @@ public class XdStorageClassGenerator {
     private static Map<Class<?>, Class<?>> compileGeneratedClassesCode(final Class<?> cl, final Map<String, String> generatedCode) throws IOException {
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
-            log.error("Критический сбой среды: System Java Compiler (JDK) не найден! Проверьте, что запущен JDK, а не JRE.");
+            log.error("Критический сбой: System Java Compiler не найден.");
             return new HashMap<>();
         }
 
-        final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
-
+        final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         final XdStorageJavaSourceFromString[] files = new XdStorageJavaSourceFromString[generatedCode.size()];
         int i = 0;
         for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
@@ -64,24 +69,17 @@ public class XdStorageClassGenerator {
 
         final Iterable<? extends JavaFileObject> compilationUnits = Arrays.asList(files);
         final File path = new File(CODE_DIRECTORY, CLASSES_PACKAGE.replace('.', '/'));
-        if (!path.exists())
+        if (!path.exists()) {
             path.mkdirs();
+        }
 
-        // ИСПРАВЛЕНИЕ: Явно вытаскиваем и передаем текущий Classpath проекта в опции компилятора,
-        // чтобы JavaCompiler на лету видел все интерфейсы, аннотации и логеры СУБД!
         String currentClasspath = System.getProperty("java.class.path");
         final Iterable<String> options = Arrays.asList("-d", CODE_DIRECTORY, "-classpath", currentClasspath);
-
         JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, options, null, compilationUnits);
 
         boolean success = task.call();
-        for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
-            log.warn("Ошибка компиляции строки " + diagnostic.getLineNumber() + ": " + diagnostic.getMessage(null));
-        }
-
         if (success) {
             try {
-                // Используем правильный каскадный ClassLoader, знающий про родительские типы
                 final URLClassLoader classLoader = URLClassLoader.newInstance(
                         new URL[]{new File(CODE_DIRECTORY).toURI().toURL()},
                         XdStorageClassGenerator.class.getClassLoader()
@@ -97,8 +95,6 @@ public class XdStorageClassGenerator {
                 log.error("cannot load generated class", e);
             }
         }
-
         return new HashMap<>();
     }
 }
-

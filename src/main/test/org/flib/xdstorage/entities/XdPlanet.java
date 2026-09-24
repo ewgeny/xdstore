@@ -3,7 +3,7 @@ package org.flib.xdstorage.entities;
 import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.annotations.*;
 import org.flib.xdstorage.idgeneration.XdStorageIdGeneratorType;
-import org.flib.xdstorage.idgenerator.MyLongIdGenerator;
+import org.flib.xdstorage.idgeneration.MyLongIdGenerator;
 import org.flib.xdstorage.index.XdStorageIndexType;
 
 import java.util.*;

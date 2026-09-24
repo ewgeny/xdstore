@@ -2,6 +2,7 @@ package org.flib.xdstorage.code;
 
 import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
+import org.flib.xdstorage.annotations.XdStorageLoadByGetMethod; // ИМПОРТ
 import org.flib.xdstorage.XdStoragePolicy;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
@@ -9,7 +10,11 @@ public class ComplexEntityForGeneration {
     @XdStorageObjectId
     private Long id;
     private String name;
+
+    @XdStorageLoadByGetMethod // ОПТИМИЗАЦИЯ: Активируем ленивую подгрузку для тестов
     private java.util.List<String> tags;
+
+    @XdStorageLoadByGetMethod // ОПТИМИЗАЦИЯ
     private java.util.Map<String, Object> metadata;
 
     public Long getId() { return id; }

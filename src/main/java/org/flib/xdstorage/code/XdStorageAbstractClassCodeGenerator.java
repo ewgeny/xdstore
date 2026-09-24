@@ -12,23 +12,26 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Полностью stateless базовый генератор кода (Поинт В / Г).
+ * Исключает изменяемые поля класса для предотвращения затирания данных при рекурсивной генерации прокси.
+ */
 public abstract class XdStorageAbstractClassCodeGenerator {
 
-    protected static final Logger log = LogManager.getLogger(XdStorageUnmodifiableWrapperClassCodeGenerator.class);
-
+    protected static final Logger log = LogManager.getLogger(XdStorageAbstractClassCodeGenerator.class);
     protected final boolean generateLoadByGet;
 
-    protected Method parentGetter;
-
-    protected List<Method> fieldsGetters = new ArrayList<>();
-
-    protected List<Method> strongGetters = new ArrayList<>();
-
-    protected List<Method> setters = new ArrayList<>();
-
-    protected List<Method> strongLoadByGetGetters = new ArrayList<>();
-
-    protected List<Method> toCloseMethods = new ArrayList<>();
+    /**
+     * Контекст собираемых методов, изолированный в рамках одного вызова.
+     */
+    protected static class GenerationContext {
+        public Method parentGetter;
+        public final List<Method> fieldsGetters = new ArrayList<>();
+        public final List<Method> strongGetters = new ArrayList<>();
+        public final List<Method> setters = new ArrayList<>();
+        public final List<Method> strongLoadByGetGetters = new ArrayList<>();
+        public final List<Method> toCloseMethods = new ArrayList<>();
+    }
 
     protected XdStorageAbstractClassCodeGenerator() {
         this(false);
@@ -44,7 +47,6 @@ public abstract class XdStorageAbstractClassCodeGenerator {
                                            final Type genReturnType, final Class<?>[] parameterTypes, final Type[] genParameterTypes,
                                            final Class<?>[] exceptionTypes) {
         final StringBuilder builder = new StringBuilder();
-
         builder.append("public ");
         if (typeParameters != null && typeParameters.length > 0) {
             builder.append("<");
@@ -56,9 +58,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
             }
             builder.append("> ");
         }
-        if (genReturnType != null
-                && (genReturnType instanceof ParameterizedType
-                || genReturnType instanceof TypeVariable)) {
+        if (genReturnType != null && (genReturnType instanceof ParameterizedType || genReturnType instanceof TypeVariable)) {
             builder.append(genReturnType.toString());
         } else if (returnType.isArray()) {
             builder.append(returnType.getComponentType().getName()).append("[]");
@@ -70,8 +70,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
             for (int i = 0; i < genParameterTypes.length; ++i) {
                 final Type type = genParameterTypes[i];
                 if (type instanceof Class<?>) {
-                    final String parameterTypeName = parameterTypes[i].isArray() ? parameterTypes[i].getComponentType().getName() + "[]"
-                            : parameterTypes[i].getName();
+                    final String parameterTypeName = parameterTypes[i].isArray() ? parameterTypes[i].getComponentType().getName() + "[]" : parameterTypes[i].getName();
                     builder.append(parameterTypeName).append(" ").append("var").append(i);
                 } else if (type instanceof ParameterizedType || type instanceof TypeVariable) {
                     builder.append(type.toString()).append(" ").append("var").append(i);
@@ -82,8 +81,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
             }
         } else {
             for (int i = 0; i < parameterTypes.length; ++i) {
-                final String parameterTypeName = parameterTypes[i].isArray() ? parameterTypes[i].getComponentType().getName() + "[]"
-                        : parameterTypes[i].getName();
+                final String parameterTypeName = parameterTypes[i].isArray() ? parameterTypes[i].getComponentType().getName() + "[]" : parameterTypes[i].getName();
                 builder.append(parameterTypeName).append(" ").append("var").append(i);
                 if (i < parameterTypes.length - 1) {
                     builder.append(", ");
@@ -101,13 +99,11 @@ public abstract class XdStorageAbstractClassCodeGenerator {
                 }
             }
         }
-
         return builder.toString();
     }
 
     protected String buildMethodCalling(final String name, final Class<?>[] parameterTypes) {
         final StringBuilder builder = new StringBuilder();
-
         builder.append(name).append("(");
         for (int i = 0; i < parameterTypes.length; ++i) {
             builder.append("var").append(i);
@@ -116,20 +112,11 @@ public abstract class XdStorageAbstractClassCodeGenerator {
             }
         }
         builder.append(")");
-
         return builder.toString();
     }
 
-    protected void collectMethodsAndClasses(final Class<?> cl) {
-        // ИСПРАВЛЕНИЕ ПО ПОИНТУ Б (Гонка потоков): Сбрасываем старые состояния списков
-        // перед парсингом нового класса, чтобы избежать перемешивания методов
-        this.fieldsGetters.clear();
-        this.strongGetters.clear();
-        this.setters.clear();
-        this.strongLoadByGetGetters.clear();
-        this.toCloseMethods.clear();
-        this.parentGetter = null;
-
+    protected GenerationContext collectMethodsAndClasses(final Class<?> cl) {
+        final GenerationContext ctx = new GenerationContext();
         final Method[] methods = getPublicMethods(cl);
         for (final Method method : methods) {
             final String name = method.getName();
@@ -137,38 +124,37 @@ public abstract class XdStorageAbstractClassCodeGenerator {
             try {
                 if (name.startsWith("get")) {
                     if (XdStorageObjectUtils.isSimpleType(tmp, null)) {
-                        fieldsGetters.add(method);
+                        ctx.fieldsGetters.add(method);
                     } else {
                         if (generateLoadByGet && isLoadByGet(cl, method)) {
-                            strongLoadByGetGetters.add(method);
+                            ctx.strongLoadByGetGetters.add(method);
                         } else {
-                            strongGetters.add(method);
+                            ctx.strongGetters.add(method);
                         }
                     }
                     try {
                         if (isParentGetter(cl, method)) {
-                            parentGetter = method;
+                            ctx.parentGetter = method;
                         }
                     } catch (final NoSuchFieldException e) {
                         log.debug(e);
                     }
                 } else if (name.startsWith("is")) {
                     if (XdStorageObjectUtils.isSimpleType(tmp, null)) {
-                        fieldsGetters.add(method);
+                        ctx.fieldsGetters.add(method);
                     } else {
-                        strongGetters.add(method);
+                        ctx.strongGetters.add(method);
                     }
                 } else if (name.startsWith("set")) {
-                    setters.add(method);
-                } else if (!name.equals("equals")
-                        && !name.equals("hashCode")
-                        && !name.equals("toString")) {
-                    toCloseMethods.add(method);
+                    ctx.setters.add(method);
+                } else if (!name.equals("equals") && !name.equals("hashCode") && !name.equals("toString")) {
+                    ctx.toCloseMethods.add(method);
                 }
             } catch (Exception e) {
                 log.warn("collection methods and classes error", e);
             }
         }
+        return ctx;
     }
 
     protected String getIdFieldName(final Class<?> cl) {
@@ -202,7 +188,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
     }
 
     protected static Method[] getPublicMethods(final Class<?> cl) {
-        final List<Method> result = new ArrayList<Method>();
+        final List<Method> result = new ArrayList<>();
         for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {
             final Method[] tmp = clazz.getDeclaredMethods();
             for (final Method method : tmp) {

@@ -1,4 +1,4 @@
-package org.flib.xdstorage.idgenerator;
+package org.flib.xdstorage.idgeneration;
 
 public class XdStorageDefaultIdGeneratorTest {
 }

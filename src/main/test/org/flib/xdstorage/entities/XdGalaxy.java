@@ -6,7 +6,7 @@ import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.annotations.XdStorageObjectIdIndexType;
 import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 import org.flib.xdstorage.idgeneration.XdStorageIdGeneratorType;
-import org.flib.xdstorage.idgenerator.MyStringIdGenerator;
+import org.flib.xdstorage.idgeneration.MyStringIdGenerator;
 import org.flib.xdstorage.index.XdStorageIndexType;
 
 import java.util.Collection;

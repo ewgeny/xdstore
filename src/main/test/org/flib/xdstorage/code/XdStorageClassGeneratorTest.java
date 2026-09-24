@@ -7,14 +7,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Исправленный комплект JUnit 5 тестов для проверки динамической кодогенерации СУБД.
- * Избавлен от статических вложенных классов для предотвращения синтаксических сбоев JavaCompiler.
+ * Полностью адаптирован под stateless-возврат GenerationContext.
  */
 public class XdStorageClassGeneratorTest {
 
     private static class ConcreteTestCodeGenerator extends XdStorageAbstractClassCodeGenerator {
         @Override
         public Map<String, String> generate(String classesPackage, Class<?> cl, Map<String, String> code) {
-            collectMethodsAndClasses(cl);
+            // Наш базовый метод collectMethodsAndClasses теперь возвращает контекст,
+            // но для тестов мы можем перехватить его напрямую
             return code;
         }
         @Override
@@ -41,11 +42,14 @@ public class XdStorageClassGeneratorTest {
     @Test
     public void testCollectMethods_ShouldParseGettersAndSetters() {
         ConcreteTestCodeGenerator generator = new ConcreteTestCodeGenerator();
-        Map<String, String> dummyCode = new HashMap<>();
-        generator.generate("org.flib.xdstorage.code", TestGeneratedEntity.class, dummyCode);
 
-        assertFalse(generator.fieldsGetters.isEmpty(), "Должен найти простой геттер");
-        assertFalse(generator.setters.isEmpty(), "Должен найти сеттеры");
+        // ИСПРАВЛЕНИЕ: Вызываем collectMethodsAndClasses напрямую и получаем изолированный контекст стека!
+        XdStorageAbstractClassCodeGenerator.GenerationContext ctx = generator.collectMethodsAndClasses(TestGeneratedEntity.class);
+
+        // Проверяем списки методов внутри полученного контекста ctx
+        assertNotNull(ctx, "Контекст генерации не должен быть null");
+        assertFalse(ctx.fieldsGetters.isEmpty(), "Должен найти простой геттер getCodeId/getValue");
+        assertFalse(ctx.setters.isEmpty(), "Должен найти сеттеры полей");
     }
 
     @Test

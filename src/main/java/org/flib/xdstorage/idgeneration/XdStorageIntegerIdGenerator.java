@@ -13,9 +13,7 @@ import org.flib.xdstorage.utils.XdStorageClassInfo;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -23,14 +21,10 @@ import java.util.concurrent.locks.ReentrantLock;
 public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
 
     private final int PART_OF_IDENTIFIERS = 100;
-
     private final XdStorageServicesLocator services;
-
     private final Map<Class<?>, Lock> lockers = new ConcurrentHashMap<>();
-
-    private Map<Class<?>, AtomicInteger> counters = new ConcurrentHashMap<>();
-
-    private Map<Class<?>, Integer> lastIdentifierOfPart = new ConcurrentHashMap<>();
+    private final Map<Class<?>, AtomicInteger> counters = new ConcurrentHashMap<>();
+    private final Map<Class<?>, Integer> lastIdentifierOfPart = new ConcurrentHashMap<>();
 
     public XdStorageIntegerIdGenerator(final XdStorageServicesLocator provider) {
         this.services = provider;
@@ -54,9 +48,23 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
                 counter = counters.get(cl);
             }
 
-            if ((identifier = counter.incrementAndGet()) == lastIdentifierOfPart.get(cl)) {
+            // ОПТИМИЗАЦИЯ ПО ПОИНТУ Г (Prefetch Policy):
+            // Проверяем текущее значение ДО инкремента. Если в буфере остался всего 1 элемент -
+            // упреждающе расширяем верхний лимит в БД ДО того, как счетчик вылетит за границу!
+            int currentVal = counter.get();
+            int limit = lastIdentifierOfPart.get(cl);
+
+            if (currentVal + 1 >= limit) {
                 takeNextPartOfIdentifiers(cl, transaction);
             }
+
+            identifier = counter.incrementAndGet();
+
+            // Жесткий Fail-Safe инвариант безопасности:
+            if (identifier > lastIdentifierOfPart.get(cl)) {
+                throw new XdStorageException("Критический сбой Hi-Lo буфера: сгенерированный ID вышел за пределы пачки!");
+            }
+
         } finally {
             locker.unlock();
         }
@@ -65,9 +73,7 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
 
     private void initIdentifiers(final Class<?> cl, final IXdStorageTransaction tx) throws XdStorageException {
         XdStorageException exception = null;
-
         Integer newLastIdentifierOfPart = null;
-
         final Class<?> clRecord = XdStorageIntegerIdCounterRecord.class;
 
         final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
@@ -81,17 +87,13 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
             XdStorageIntegerIdCounterRecord record = (XdStorageIntegerIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
             if (record == null) {
                 newLastIdentifierOfPart = PART_OF_IDENTIFIERS;
-
                 record = new XdStorageIntegerIdCounterRecord();
                 record.setCl(cl);
                 record.setCounter(newLastIdentifierOfPart);
-
                 resource.insert(record, (XdStorageTransaction) transaction);
             } else {
                 newLastIdentifierOfPart = record.getCounter() + PART_OF_IDENTIFIERS;
-
                 record.setCounter(newLastIdentifierOfPart);
-
                 resource.update(record, (XdStorageTransaction) transaction);
             }
 
@@ -112,7 +114,6 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
 
     private void takeNextPartOfIdentifiers(final Class<?> cl, final IXdStorageTransaction tx) throws XdStorageException {
         XdStorageException exception = null;
-
         final Class<?> clRecord = XdStorageIntegerIdCounterRecord.class;
 
         final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
@@ -126,9 +127,10 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
             final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
 
             final XdStorageIntegerIdCounterRecord record = (XdStorageIntegerIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
-            record.setCounter(newLastIdentifierOfPart);
-            resource.update(record, (XdStorageTransaction) transaction);
-
+            if (record != null) {
+                record.setCounter(newLastIdentifierOfPart);
+                resource.update(record, (XdStorageTransaction) transaction);
+            }
             transaction.commit();
         } catch (final XdStorageConnectionException e) {
             transaction.rollback();

@@ -210,38 +210,44 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
     @Override
     public void registerRollbackOnlyTransaction(final XdStorageTransaction transaction) {
         services.getExecutor().submit(() -> {
-            if (transactionsById.containsKey(transaction.getTransactionId()) && transaction.isRollbackOnly()) {
-                final Collection<IXdStorageResourceObject> resources = transaction.getResources();
+            // ИСПРАВЛЕНИЕ МНОГОПОТОЧНОСТИ: Синхронизируемся по экземпляру транзакции,
+            // чтобы асинхронный логгер отката не устроил Race Condition с ручным rollbackTransaction()!
+            synchronized (transaction) {
+                if (transactionsById.containsKey(transaction.getTransactionId()) && transaction.isRollbackOnly()) {
+                    final Collection<IXdStorageResourceObject> resources = transaction.getResources();
 
-                transaction.skipOrWaitForInternalTransactions();
+                    transaction.skipOrWaitForInternalTransactions();
 
-                transaction.rollbackInternal();
+                    transaction.rollbackInternal();
 
-                resources.parallelStream().forEach(resource -> {
-                    resource.release(transaction);
-                });
+                    resources.parallelStream().forEach(resource -> {
+                        resource.release(transaction);
+                    });
 
-                services.getCloner().release(transaction);
+                    services.getCloner().release(transaction);
 
-                threadsByTransactionId.remove(transaction.getTransactionId());
-                transactionsById.remove(transaction.getTransactionId());
+                    threadsByTransactionId.remove(transaction.getTransactionId());
+                    transactionsById.remove(transaction.getTransactionId());
 
-                final String currentThreadId = transaction.getTransactionThreadId();
-                transactionsByThreadId.remove(currentThreadId);
+                    final String currentThreadId = transaction.getTransactionThreadId();
+                    transactionsByThreadId.remove(currentThreadId);
 
-                final String globalTransactionId = transaction.getGlobalTransactionId();
-                if (globalTransactionId != null) {
-                    final XdStorageTransaction globalTransaction = transactionsById.get(globalTransactionId);
-                    if (globalTransaction.getTransactionThreadId().equalsIgnoreCase(currentThreadId)) {
-                        threadsByTransactionId.put(globalTransactionId, currentThreadId);
-                        transactionsByThreadId.put(currentThreadId, globalTransaction);
+                    final String globalTransactionId = transaction.getGlobalTransactionId();
+                    if (globalTransactionId != null) {
+                        final XdStorageTransaction globalTransaction = transactionsById.get(globalTransactionId);
+                        if (globalTransaction != null && globalTransaction.getTransactionThreadId().equalsIgnoreCase(currentThreadId)) {
+                            threadsByTransactionId.put(globalTransactionId, currentThreadId);
+                            transactionsByThreadId.put(currentThreadId, globalTransaction);
+                        }
+                        if (globalTransaction != null) {
+                            globalTransaction.resume(transaction.getTransactionId());
+                        }
                     }
-                    globalTransaction.resume(transaction.getTransactionId());
+
+                    transaction.markFinished();
+
+                    log.info("Rolled back transaction " + transaction.getTransactionId() + " by mark rollback only");
                 }
-
-                transaction.markFinished();
-
-                log.info("Rolled back transaction " + transaction.getTransactionId() + " by mark rollback only");
             }
         });
     }
