@@ -121,6 +121,15 @@ public abstract class XdStorageAbstractClassCodeGenerator {
     }
 
     protected void collectMethodsAndClasses(final Class<?> cl) {
+        // ИСПРАВЛЕНИЕ ПО ПОИНТУ Б (Гонка потоков): Сбрасываем старые состояния списков
+        // перед парсингом нового класса, чтобы избежать перемешивания методов
+        this.fieldsGetters.clear();
+        this.strongGetters.clear();
+        this.setters.clear();
+        this.strongLoadByGetGetters.clear();
+        this.toCloseMethods.clear();
+        this.parentGetter = null;
+
         final Method[] methods = getPublicMethods(cl);
         for (final Method method : methods) {
             final String name = method.getName();

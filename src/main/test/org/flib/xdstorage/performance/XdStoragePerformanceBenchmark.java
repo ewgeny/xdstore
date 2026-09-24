@@ -14,9 +14,10 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.Throughput) // Измеряем количество операций в секунду
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Benchmark)
-@Fork(1)
-@Warmup(iterations = 2, time = 2) // Прогрев JVM от JIT-компилятора
-@Measurement(iterations = 3, time = 3) // Измерительные итерации
+@Fork(2) // Делаем 2 независимых перезапуска JVM для исключения случайных аномалий ОС
+@Warmup(iterations = 4, time = 2) // Увеличиваем прогрев до 4 итераций по 2 секунды
+@Measurement(iterations = 5, time = 2) // Делаем 5 чистых измерительных прогонов по 2 секунды
+@Threads(4) // РАЗГОН: Запускаем бенчмарк параллельно в 4 потока!
 public class XdStoragePerformanceBenchmark {
 
     private IXdFileStorage storage;
@@ -40,11 +41,15 @@ public class XdStoragePerformanceBenchmark {
 
     @Benchmark
     public void benchmarkTransactionWriteAndReadFlow() throws Exception {
+        // Генерируем уникальный ID для каждой операции, чтобы потоки не конфликтовали по ключам
         String uniqueId = UUID.randomUUID().toString();
-        BenchmarkEntity entity = new BenchmarkEntity(uniqueId, "JMH_Payload_Data");
 
-        // Тестируем полный сквозной транзакционный цикл верхнего уровня
-        IXdStorageTransaction tx = storage.beginTransaction();
+        // Используем BenchmarkEntity, которая благодаря твоей вчерашней правке
+        // имеет аннотацию @XdStorageObjectPolicy!
+        BenchmarkEntity entity = new BenchmarkEntity(uniqueId, "JMH_MultiThread_Payload");
+
+        // Фиксируем чистый сквозной транзакционный цикл
+        IXdStorageTransaction tx = storage.beginTransaction(3000L); // таймаут 3 секунды
         try {
             storage.save(entity, tx);
             storage.load(BenchmarkEntity.class, uniqueId, tx);

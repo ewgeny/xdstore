@@ -49,6 +49,11 @@ public class XdStorageClassGenerator {
 
     private static Map<Class<?>, Class<?>> compileGeneratedClassesCode(final Class<?> cl, final Map<String, String> generatedCode) throws IOException {
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        if (compiler == null) {
+            log.error("Критический сбой среды: System Java Compiler (JDK) не найден! Проверьте, что запущен JDK, а не JRE.");
+            return new HashMap<>();
+        }
+
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
 
         final XdStorageJavaSourceFromString[] files = new XdStorageJavaSourceFromString[generatedCode.size()];
@@ -61,41 +66,35 @@ public class XdStorageClassGenerator {
         final File path = new File(CODE_DIRECTORY, CLASSES_PACKAGE.replace('.', '/'));
         if (!path.exists())
             path.mkdirs();
-        final Iterable<String> options = Arrays.asList(new String[]{"-d", CODE_DIRECTORY});
+
+        // ИСПРАВЛЕНИЕ: Явно вытаскиваем и передаем текущий Classpath проекта в опции компилятора,
+        // чтобы JavaCompiler на лету видел все интерфейсы, аннотации и логеры СУБД!
+        String currentClasspath = System.getProperty("java.class.path");
+        final Iterable<String> options = Arrays.asList("-d", CODE_DIRECTORY, "-classpath", currentClasspath);
+
         JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, options, null, compilationUnits);
 
         boolean success = task.call();
-        for (Diagnostic diagnostic : diagnostics.getDiagnostics()) {
-//            System.out.println(diagnostic.getCode());
-//            System.out.println(diagnostic.getKind());
-//            System.out.println(diagnostic.getPosition());
-//            System.out.println(diagnostic.getStartPosition());
-//            System.out.println(diagnostic.getEndPosition());
-//            System.out.println(diagnostic.getSource());
-            log.warn(diagnostic.getMessage(null));
+        for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
+            log.warn("Ошибка компиляции строки " + diagnostic.getLineNumber() + ": " + diagnostic.getMessage(null));
         }
+
         if (success) {
-            for (final XdStorageJavaSourceFromString source : files) {
-                log.info("Generation class '" + source.getName() + "' success: " + success);
-            }
+            try {
+                // Используем правильный каскадный ClassLoader, знающий про родительские типы
+                final URLClassLoader classLoader = URLClassLoader.newInstance(
+                        new URL[]{new File(CODE_DIRECTORY).toURI().toURL()},
+                        XdStorageClassGenerator.class.getClassLoader()
+                );
 
-            if (success) {
-                try {
-                    final URLClassLoader classLoader = URLClassLoader.newInstance(new URL[]{new File(CODE_DIRECTORY).toURI().toURL()});
-
-                    final Map<Class<?>, Class<?>> result = new HashMap<>();
-                    for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
-                        Class<?> clazz = Class.forName(entry.getKey(), true, classLoader);
-                        result.put(cl, clazz);
-                    }
-                    return result;
-                } catch (ClassNotFoundException e) {
-                    log.error("cannot load generated class", e);
+                final Map<Class<?>, Class<?>> result = new HashMap<>();
+                for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
+                    Class<?> clazz = Class.forName(entry.getKey(), true, classLoader);
+                    result.put(cl, clazz);
                 }
-            }
-        } else {
-            for (final XdStorageJavaSourceFromString source : files) {
-                log.info("Generation class '" + source.getName() + "' success: " + success);
+                return result;
+            } catch (ClassNotFoundException e) {
+                log.error("cannot load generated class", e);
             }
         }
 

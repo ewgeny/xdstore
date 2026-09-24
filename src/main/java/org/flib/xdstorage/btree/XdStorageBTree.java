@@ -142,6 +142,11 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
     public void insert(final Comparable key, final Object object,
                        final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        // ИСПРАВЛЕНИЕ: Fail-fast проверка прерывания потока на входе в СУБД
+        if (Thread.currentThread().isInterrupted()) {
+            throw new XdStorageException("interrupted", new InterruptedException("Поток прерван перед вставкой в B+ Дерево"));
+        }
+
         lockWrite(transaction);
         try {
             if (root == null) {
@@ -191,6 +196,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public void delete(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new XdStorageException("interrupted", new InterruptedException("Поток прерван перед удалением из B+ Дерева"));
+        }
+
         lockWrite(transaction);
         try {
             if (root != null) {
@@ -235,6 +244,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public void update(final Comparable key, final Object value, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new XdStorageException("interrupted", new InterruptedException("Поток прерван перед обновлением в B+ Дереве"));
+        }
+
         lockWrite(transaction);
         try {
             if (root == null) {
