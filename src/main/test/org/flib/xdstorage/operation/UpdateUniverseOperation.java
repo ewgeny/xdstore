@@ -30,7 +30,7 @@ public class UpdateUniverseOperation implements Runnable {
         final IXdStorageTransaction tx = storage.beginTransaction();
         try {
             final Collection<XdUniverse> universes = storage.load(XdUniverse.class);
-            final int universeIndex = Math.abs(rand.nextInt()) % universes.size();
+            final int universeIndex = Math.abs(rand.nextInt()) % (universes.size() == 0 ? 1 : universes.size());
             Iterator<XdUniverse> it = universes.iterator();
             for (int i = 0; it.hasNext(); ++i) {
                 final XdUniverse universe = it.next();

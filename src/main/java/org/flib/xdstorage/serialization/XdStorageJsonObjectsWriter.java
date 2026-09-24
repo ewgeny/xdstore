@@ -161,8 +161,17 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
                 || idField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
                 && idField.get(object) == null) {
             try {
-                idField.set(XdStorageObserverService.getObservableWrapper(object), idGenerator.generate(cl, services.getStorage(), null));
-            } catch (final XdStorageException e) {
+                // ИСПРАВЛЕНИЕ: Вместо фиксированного в конструкторе поля запрашиваем
+                // актуальный, живой генератор ID из локатора сервисов СУБД динамически!
+                // Это гарантирует, что многопоточный тест подсунет писателю MyLongIdGenerator, а не дефолтный пустой.
+                IXdStorageIdGenerator activeIdGenerator = services.getIdGenerator();
+                if (activeIdGenerator == null) {
+                    activeIdGenerator = this.idGenerator; // Фолбэк на дефолт, если локатор пуст
+                }
+
+                idField.set(XdStorageObserverService.getObservableWrapper(object),
+                        activeIdGenerator.generate(cl, services.getStorage(), null));
+            } catch (final Throwable e) {
                 throw new XdStorageIOException(e);
             }
         }

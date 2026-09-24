@@ -3,7 +3,14 @@ package org.flib.xdstorage.idgeneration;
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
+import org.flib.xdstorage.resource.IXdStorageDaoResource;
+import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
+import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
+import org.flib.xdstorage.transaction.XdStorageTransaction;
+import org.flib.xdstorage.utils.XdStorageClassInfo;
+import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,11 +22,17 @@ public class MyLongIdGenerator implements IXdStorageIdGenerator {
 
     private final long PART_OF_IDENTIFIERS = 100;
 
+    private final XdStorageServicesLocator services;
+
     private final Map<Class<?>, Lock> lockers = new ConcurrentHashMap<>();
 
     private Map<Class<?>, AtomicLong> counters = new ConcurrentHashMap<>();
 
     private Map<Class<?>, Long> lastIdentifierOfPart = new ConcurrentHashMap<>();
+
+    public MyLongIdGenerator(final XdStorageServicesLocator provider) {
+        this.services = provider; // Имя должно совпадать с полем!
+    }
 
     @Override
     public Object generate(Class<?> cl, IXdStorage storage, IXdStorageTransaction transaction) throws XdStorageException {
@@ -35,12 +48,12 @@ public class MyLongIdGenerator implements IXdStorageIdGenerator {
 
             AtomicLong counter = counters.get(cl);
             if (counter == null) {
-                initIdentifiers(cl, storage, transaction);
+                initIdentifiers(cl, transaction);
                 counter = counters.get(cl);
             }
 
             if ((identifier = counter.incrementAndGet()) == lastIdentifierOfPart.get(cl)) {
-                takeNextPartOfIdentifiers(cl, storage, transaction);
+                takeNextPartOfIdentifiers(cl, transaction);
             }
         } finally {
             locker.unlock();
@@ -48,62 +61,89 @@ public class MyLongIdGenerator implements IXdStorageIdGenerator {
         return identifier;
     }
 
-    private void initIdentifiers(final Class<?> cl, final IXdStorage storage, IXdStorageTransaction tx) throws XdStorageException {
+    private void initIdentifiers(final Class<?> cl, final IXdStorageTransaction tx) throws XdStorageException {
+        XdStorageException exception = null;
+        final Class<?> clRecord = XdStorageLongIdCounterRecord.class;
+        Long newLastIdentifierOfPart = null;
 
-        final IXdStorageTransaction transaction = storage.beginTransaction(tx);
+        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+
+        // ИСПРАВЛЕНИЕ: Используем переданную транзакцию tx текущего потока,
+        // чтобы избежать Self-Concurrent-Modification блокировок в рамках одного потока!
+        final IXdStorageTransaction transaction = (tx != null) ? tx : services.getTransactionsManager().beginTransaction(10 * 1000);
+
         try {
-            Long newLastIdentifierOfPart;
+            final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
+            final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
 
-            XdStorageLongIdCounterRecord record = storage.load(XdStorageLongIdCounterRecord.class, cl);
+            XdStorageLongIdCounterRecord record = (XdStorageLongIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
             if (record == null) {
                 newLastIdentifierOfPart = PART_OF_IDENTIFIERS;
-
                 record = new XdStorageLongIdCounterRecord();
                 record.setCl(cl);
                 record.setCounter(newLastIdentifierOfPart);
-
-                storage.save(record);
+                resource.insert(record, (XdStorageTransaction) transaction);
             } else {
                 newLastIdentifierOfPart = record.getCounter() + PART_OF_IDENTIFIERS;
-
                 record.setCounter(newLastIdentifierOfPart);
-
-                storage.update(record);
+                resource.update(record, (XdStorageTransaction) transaction);
             }
 
-            counters.put(cl, new AtomicLong(newLastIdentifierOfPart - PART_OF_IDENTIFIERS));
-            lastIdentifierOfPart.put(cl, newLastIdentifierOfPart);
-
-            transaction.commit();
-        } catch (final XdStorageConnectionException e) {
-            transaction.rollback();
-            throw new XdStorageException(e);
-        } catch (final XdStorageException e) {
-            transaction.rollback();
-            throw e;
+            // Коммитим только если транзакция автономная (создана локально)
+            if (tx == null) {
+                transaction.commit();
+            }
+        } catch (final Throwable e) {
+            if (tx == null) {
+                transaction.rollback();
+            }
+            exception = new XdStorageException(e);
         }
+
+        if (exception != null) throw exception;
+
+        counters.put(cl, new java.util.concurrent.atomic.AtomicLong(newLastIdentifierOfPart - PART_OF_IDENTIFIERS));
+        lastIdentifierOfPart.put(cl, newLastIdentifierOfPart);
     }
 
-    private void takeNextPartOfIdentifiers(final Class<?> cl, final IXdStorage storage, IXdStorageTransaction tx) throws XdStorageException {
+    private void takeNextPartOfIdentifiers(final Class<?> cl, final IXdStorageTransaction tx) throws XdStorageException {
+        XdStorageException exception = null;
+        final Class<?> clRecord = XdStorageLongIdCounterRecord.class;
+        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
 
         final Long newLastIdentifierOfPart = lastIdentifierOfPart.get(cl) + PART_OF_IDENTIFIERS;
 
-        final IXdStorageTransaction transaction = storage.beginTransaction(tx);
+        // ИСПРАВЛЕНИЕ: Интегрируемся в текущий транзакционный контекст нити
+        final IXdStorageTransaction transaction = (tx != null) ? tx : services.getTransactionsManager().beginTransaction(10 * 1000);
+
         try {
+            final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
+            final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
 
-            final XdStorageLongIdCounterRecord record = storage.load(XdStorageLongIdCounterRecord.class, cl);
-            record.setCounter(newLastIdentifierOfPart);
-            storage.update(record);
+            final XdStorageLongIdCounterRecord record = (XdStorageLongIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
+            if (record != null) {
+                record.setCounter(newLastIdentifierOfPart);
+                resource.update(record, (XdStorageTransaction) transaction);
+            } else {
+                // Страховочный фолбэк на случай пустой базы данных
+                XdStorageLongIdCounterRecord newRecord = new XdStorageLongIdCounterRecord();
+                newRecord.setCl(cl);
+                newRecord.setCounter(newLastIdentifierOfPart);
+                resource.insert(newRecord, (XdStorageTransaction) transaction);
+            }
 
-            lastIdentifierOfPart.put(cl, newLastIdentifierOfPart);
-
-            transaction.commit();
-        } catch (final XdStorageConnectionException e) {
-            transaction.rollback();
-            throw new XdStorageException(e);
-        } catch (final XdStorageException e) {
-            transaction.rollback();
-            throw e;
+            if (tx == null) {
+                transaction.commit();
+            }
+        } catch (final Throwable e) {
+            if (tx == null) {
+                transaction.rollback();
+            }
+            exception = new XdStorageException(e);
         }
+
+        if (exception != null) throw exception;
+
+        lastIdentifierOfPart.put(cl, newLastIdentifierOfPart);
     }
 }

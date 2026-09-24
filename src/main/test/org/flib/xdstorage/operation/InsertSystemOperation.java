@@ -29,7 +29,7 @@ public class InsertSystemOperation implements Runnable {
         try {
             final Collection<XdUniverse> universes = storage.load(XdUniverse.class);
             if (universes.size() > 0) {
-                final int universeIndex = Math.abs(rand.nextInt()) % universes.size();
+                final int universeIndex = Math.abs(rand.nextInt()) % (universes.size() == 0 ? 1 : universes.size());
                 Iterator<XdUniverse> it = universes.iterator();
                 for (int i = 0; it.hasNext(); ++i) {
                     final XdUniverse universe = it.next();
