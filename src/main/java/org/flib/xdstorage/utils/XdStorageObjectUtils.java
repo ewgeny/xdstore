@@ -258,27 +258,30 @@ public final class XdStorageObjectUtils {
 
 
     private static Class<?> getClassSimpleWrapper(final Class<?> cl) throws IOException {
-        // ИСПРАВЛЕНИЕ ПО ПОИНТУ Б/Г: Используем атомарный computeIfAbsent на ConcurrentHashMap.
-        // JVM на уровне ядра мапы гарантирует, что функция генерации вызовется строго ОДИН раз для класса,
-        // полностью исключая Race Condition и необходимость в ручных массивах ReentrantLock!
+        // Проверяем быстрый путь: если класс уже сгенерирован или находится в процессе сборки
+        Class<?> existing = classesSimpleWrappers.get(cl);
+        if (existing != null) {
+            return existing;
+        }
+
+        // РАЗРЫВ ДЕДЛОКА: Временно резервируем место в мапе, чтобы рекурсивный обход
+        // связанных полей (Circular Dependency) не уходил в циклический computeIfAbsent!
+        classesSimpleWrappers.putIfAbsent(cl, XdStorageDummySimpleWrapper.class);
+
         try {
-            return classesSimpleWrappers.computeIfAbsent(cl, keyClass -> {
-                try {
-                    Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateSimpleWrapper(keyClass);
-                    if (generatedCode.isEmpty()) {
-                        return XdStorageDummySimpleWrapper.class;
-                    }
-                    return generatedCode.get(keyClass);
-                } catch (IOException e) {
-                    throw new RuntimeException("Ошибка генерации SimpleWrapper для класса " + keyClass, e);
-                }
-            });
-        } catch (RuntimeException e) {
-            if (e.getCause() instanceof IOException) {
-                throw (IOException) e.getCause();
+            Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateSimpleWrapper(cl);
+            if (generatedCode.isEmpty()) {
+                classesSimpleWrappers.put(cl, XdStorageDummySimpleWrapper.class);
+            } else {
+                Class<?> generatedClass = generatedCode.get(cl);
+                classesSimpleWrappers.put(cl, generatedClass != null ? generatedClass : XdStorageDummySimpleWrapper.class);
             }
+        } catch (IOException e) {
+            classesSimpleWrappers.remove(cl); // Чистим при аварии
             throw e;
         }
+
+        return classesSimpleWrappers.get(cl);
     }
 
     public static <TObject> TObject wrapAsUnmodifiableObject(final TObject object, final IXdStorage storage, final IXdStorageTransaction transaction) {
@@ -399,24 +402,27 @@ public final class XdStorageObjectUtils {
     }
 
     private static Class<?> getClassUnmodifiableWrapper(final Class<?> cl) throws IOException {
+        Class<?> existing = classesUnmodifiableWrappers.get(cl);
+        if (existing != null) {
+            return existing;
+        }
+
+        classesUnmodifiableWrappers.putIfAbsent(cl, XdStorageDummyUnmodifiableWrapper.class);
+
         try {
-            return classesUnmodifiableWrappers.computeIfAbsent(cl, keyClass -> {
-                try {
-                    Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateUnmodifiableWrapper(keyClass);
-                    if (generatedCode.isEmpty()) {
-                        return XdStorageDummyUnmodifiableWrapper.class;
-                    }
-                    return generatedCode.get(keyClass);
-                } catch (IOException e) {
-                    throw new RuntimeException("Ошибка генерации UnmodifiableWrapper для класса " + keyClass, e);
-                }
-            });
-        } catch (RuntimeException e) {
-            if (e.getCause() instanceof IOException) {
-                throw (IOException) e.getCause();
+            Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateUnmodifiableWrapper(cl);
+            if (generatedCode.isEmpty()) {
+                classesUnmodifiableWrappers.put(cl, XdStorageDummyUnmodifiableWrapper.class);
+            } else {
+                Class<?> generatedClass = generatedCode.get(cl);
+                classesUnmodifiableWrappers.put(cl, generatedClass != null ? generatedClass : XdStorageDummyUnmodifiableWrapper.class);
             }
+        } catch (IOException e) {
+            classesUnmodifiableWrappers.remove(cl);
             throw e;
         }
+
+        return classesUnmodifiableWrappers.get(cl);
     }
 
     private static Object cloneArray(final Object parent, final Object array) {

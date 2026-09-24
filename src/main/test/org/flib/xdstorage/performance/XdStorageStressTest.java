@@ -3,7 +3,6 @@ package org.flib.xdstorage.performance;
 import org.flib.xdstorage.*;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;

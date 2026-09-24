@@ -13,20 +13,15 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Полностью потокобезопасная фабрика генерации и компиляции прокси-классов (Поинт Г).
- * Исключает разделение состояния генераторов между параллельными потоками воркеров.
- */
 public class XdStorageClassGenerator {
 
     private static final Logger log = LogManager.getLogger(XdStorageClassGenerator.class);
     private static final String CODE_DIRECTORY = "gencode";
     private static final String CLASSES_PACKAGE = "org.flib.xdstorage.code";
 
-    public static Map<Class<?>, Class<?>> generateUnmodifiableWrapper(final Class<?> cl) throws IOException {
+    // СИНХРОНИЗАЦИЯ: Полностью изолирует фазу сборки StringBuilder от перекрестных потоков
+    public static synchronized Map<Class<?>, Class<?>> generateUnmodifiableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
-
-        // ИСПРАВЛЕНИЕ: Каждый вызов гарантированно создает НОВЫЙ объект генератора, изолируя ArrayList-списки методов!
         if (cl == XdStorageIdentifiableObject.class) {
             new XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
         } else {
@@ -35,30 +30,21 @@ public class XdStorageClassGenerator {
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
-    public static Map<Class<?>, Class<?>> generateSimpleWrapper(final Class<?> cl) throws IOException {
+    public static synchronized Map<Class<?>, Class<?>> generateSimpleWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
-
-        // ИСПРАВЛЕНИЕ: Локальный изолированный инстанс генератора для предотвращения Race Condition
         new XdStorageSimpleWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
-
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
-    public static Map<Class<?>, Class<?>> generateObservableWrapper(final Class<?> cl) throws IOException {
+    public static synchronized Map<Class<?>, Class<?>> generateObservableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
-
-        // ИСПРАВЛЕНИЕ: Локальный изолированный инстанс генератора
         new XdStorageObservableWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
-
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
     private static Map<Class<?>, Class<?>> compileGeneratedClassesCode(final Class<?> cl, final Map<String, String> generatedCode) throws IOException {
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        if (compiler == null) {
-            log.error("Критический сбой: System Java Compiler не найден.");
-            return new HashMap<>();
-        }
+        if (compiler == null) return new HashMap<>();
 
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         final XdStorageJavaSourceFromString[] files = new XdStorageJavaSourceFromString[generatedCode.size()];
@@ -69,9 +55,7 @@ public class XdStorageClassGenerator {
 
         final Iterable<? extends JavaFileObject> compilationUnits = Arrays.asList(files);
         final File path = new File(CODE_DIRECTORY, CLASSES_PACKAGE.replace('.', '/'));
-        if (!path.exists()) {
-            path.mkdirs();
-        }
+        if (!path.exists()) path.mkdirs();
 
         String currentClasspath = System.getProperty("java.class.path");
         final Iterable<String> options = Arrays.asList("-d", CODE_DIRECTORY, "-classpath", currentClasspath);
@@ -84,7 +68,6 @@ public class XdStorageClassGenerator {
                         new URL[]{new File(CODE_DIRECTORY).toURI().toURL()},
                         XdStorageClassGenerator.class.getClassLoader()
                 );
-
                 final Map<Class<?>, Class<?>> result = new HashMap<>();
                 for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
                     Class<?> clazz = Class.forName(entry.getKey(), true, classLoader);
