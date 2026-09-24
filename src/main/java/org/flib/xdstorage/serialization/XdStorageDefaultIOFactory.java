@@ -26,12 +26,13 @@ public class XdStorageDefaultIOFactory implements IXdStorageIOFactory {
 
     @Override
     public IXdStorageObjectsReader newInstanceReader() {
-        return new XdStorageDefaultObjectsReader(simpleTypeHelper);
+        // Переключаем маршалинг ядра СУБД на легкий JSON!
+        return new XdStorageJsonObjectsReader(simpleTypeHelper);
     }
 
     @Override
     public IXdStorageObjectsWriter newInstanceWriter() {
-        return new XdStorageDefaultObjectsWriter(services, simpleTypeHelper, idGenerator);
+        // Переключаем маршалинг ядра СУБД на легкий JSON!
+        return new XdStorageJsonObjectsWriter(services, simpleTypeHelper, idGenerator);
     }
-
 }
