@@ -21,7 +21,6 @@ import org.flib.xdstorage.search.query.IXdStorageCriterionOperator;
 import org.flib.xdstorage.search.query.IXdStoragePrimaryCriterion;
 import org.flib.xdstorage.search.query.XdStorageSearchQuery;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
-import org.flib.xdstorage.sqlstorage.search.query.XdStorageSqlSearchQuery;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.utils.*;
 
@@ -489,10 +488,5 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
                 }
             }
         });
-    }
-
-    @Override
-    public <T> Collection<T> search(final Class<T> cl, final String indexName, final XdStorageSqlSearchQuery query, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        throw new XdStorageException("Unsupported operation exception");
     }
 }

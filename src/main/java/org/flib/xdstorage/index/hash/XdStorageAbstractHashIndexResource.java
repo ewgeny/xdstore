@@ -14,7 +14,6 @@ import org.flib.xdstorage.resource.IXdStorageDaoResource;
 import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
 import org.flib.xdstorage.resource.XdStorageResourceCache;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
-import org.flib.xdstorage.sqlstorage.resource.XdStorageSQLResourcesManager;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
@@ -170,12 +169,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         final Collection<Object> ids = index.getResourcesIds();
         for (final Object resourceId : ids) {
             final XdStoragePolicy policy = objectClInfo.getPolicy();
-            final IXdStorageDaoResource resource;
-            if (policy == XdStoragePolicy.StoreWithParentObject) {
-                resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-            } else {
-                resource = manager.lockResource(resourceId, objectClInfo, transaction);
-            }
+            final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
             result.addAll(resource.read(transaction));
         }
         return result;
@@ -186,12 +180,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         final Collection<Object> ids = index.getResourcesIds();
         for (final Object resourceId : ids) {
             final XdStoragePolicy policy = objectClInfo.getPolicy();
-            final IXdStorageDaoResource resource;
-            if (policy == XdStoragePolicy.StoreWithParentObject) {
-                resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-            } else {
-                resource = manager.lockResource(resourceId, objectClInfo, transaction);
-            }
+            final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
             result.addAll(resource.read(transaction, predicate));
         }
         return result;
@@ -201,12 +190,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         final Collection<Object> ids = index.getResourcesIds();
         for (final Object resourceId : ids) {
             final XdStoragePolicy policy = objectClInfo.getPolicy();
-            final IXdStorageDaoResource resource;
-            if (policy == XdStoragePolicy.StoreWithParentObject) {
-                resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-            } else {
-                resource = manager.lockResource(resourceId, objectClInfo, transaction);
-            }
+            final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
             resource.watch(transaction, watcher);
         }
     }
@@ -219,13 +203,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         }
 
         final XdStoragePolicy policy = objectClInfo.getPolicy();
-        final IXdStorageDaoResource resource;
-        if (policy == XdStoragePolicy.StoreWithParentObject) {
-            resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-        } else {
-            resource = manager.lockResource(resourceId, objectClInfo, transaction);
-        }
-        resource.readByReference(reference, transaction);
+        final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
     }
 
     public Object read(final Object id, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
@@ -235,12 +213,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         }
 
         final XdStoragePolicy policy = objectClInfo.getPolicy();
-        final IXdStorageDaoResource resource;
-        if (policy == XdStoragePolicy.StoreWithParentObject) {
-            resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-        } else {
-            resource = manager.lockResource(resourceId, objectClInfo, transaction);
-        }
+        final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
         return resource.read(id, transaction);
     }
 
@@ -292,12 +265,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         }
 
         final XdStoragePolicy policy = objectClInfo.getPolicy();
-        final IXdStorageDaoResource resource;
-        if (policy == XdStoragePolicy.StoreWithParentObject) {
-            resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-        } else {
-            resource = manager.lockResource(resourceId, objectClInfo, transaction);
-        }
+        final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
         resource.update(object, transaction);
     }
 
@@ -309,12 +277,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         }
 
         final XdStoragePolicy policy = objectClInfo.getPolicy();
-        final IXdStorageDaoResource resource;
-        if (policy == XdStoragePolicy.StoreWithParentObject) {
-            resource = ((XdStorageSQLResourcesManager) manager).lockChildrenClassResource(objectClInfo, resourceId, transaction);
-        } else {
-            resource = manager.lockResource(resourceId, objectClInfo, transaction);
-        }
+        final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
         resource.delete(object, transaction); // will be rolled back
 
         cache.delete(objectId, transaction);

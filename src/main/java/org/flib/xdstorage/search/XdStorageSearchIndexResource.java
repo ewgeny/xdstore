@@ -8,7 +8,6 @@ import org.flib.xdstorage.btree.XdStorageBTreeId;
 import org.flib.xdstorage.code.IXdStorageSimpleWrapper;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
-import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.index.IXdStorageChangeIndexRollback;
 import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
 import org.flib.xdstorage.resource.XdStorageObjectChange;
@@ -16,12 +15,10 @@ import org.flib.xdstorage.search.data.XdStorageSearchKeyIndexRecord;
 import org.flib.xdstorage.search.data.XdStorageSearchIndexRecord;
 import org.flib.xdstorage.search.key.XdStorageSearchIndexKey;
 import org.flib.xdstorage.search.key.XdStorageSearchIndexOperationType;
-import org.flib.xdstorage.search.query.XdStorageSearchQuery;
 import org.flib.xdstorage.serialization.IXdStorageIOFactory;
 import org.flib.xdstorage.serialization.IXdStorageObjectsReader;
 import org.flib.xdstorage.serialization.IXdStorageObjectsWriter;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
-import org.flib.xdstorage.sqlstorage.search.query.XdStorageSqlSearchQuery;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
@@ -254,11 +251,6 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
                 }
             });
         }
-    }
-
-    @Override
-    public List<IXdStorageSimpleWrapper> selectObjectReferences(XdStorageClassInfo clInfo, XdStorageSqlSearchQuery query, XdStorageTransaction transaction) throws XdStorageException {
-        throw new XdStorageException("Unsupported operation exception");
     }
 
     @Override

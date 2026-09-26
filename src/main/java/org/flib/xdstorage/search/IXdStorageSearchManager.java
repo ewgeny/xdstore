@@ -2,9 +2,7 @@ package org.flib.xdstorage.search;
 
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
-import org.flib.xdstorage.search.query.IXdStorageCriterion;
 import org.flib.xdstorage.search.query.XdStorageSearchQuery;
-import org.flib.xdstorage.sqlstorage.search.query.XdStorageSqlSearchQuery;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 
 import java.util.Collection;
@@ -24,8 +22,5 @@ public interface IXdStorageSearchManager {
     void delete(Collection<?> references, XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException;
 
     <T> Collection<T> search(Class<T> cl, String indexName, XdStorageSearchQuery query,
-                             XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException;
-
-    <T> Collection<T> search(Class<T> cl, String indexName, XdStorageSqlSearchQuery query,
                              XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException;
 }

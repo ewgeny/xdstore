@@ -12,22 +12,6 @@ public class XdStorageProvider {
 
     private static Lock lock = new ReentrantLock();
 
-    public static IXdSqlStorage newOrGetPGStorage(final String name) {
-        XdStorage storage = storages.get(name);
-        if (storage == null) {
-            lock.lock();
-            try {
-                storage = storages.get(name);
-                if (storage == null) {
-                    storages.put(name, storage = new XdStorage(name));
-                }
-            } finally {
-                lock.unlock();
-            }
-        }
-        return storage;
-    }
-
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize) {
         XdStorage storage = storages.get(name);
         if (storage == null) {

@@ -5,10 +5,8 @@ import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.index.IXdStorageIndexDaoResource;
 import org.flib.xdstorage.resource.*;
 import org.flib.xdstorage.search.IXdStorageSearchManager;
-import org.flib.xdstorage.search.query.IXdStorageCriterion;
 import org.flib.xdstorage.search.query.XdStorageSearchQuery;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
-import org.flib.xdstorage.sqlstorage.search.query.XdStorageSqlSearchQuery;
 import org.flib.xdstorage.structure.update.IXdStorageStructureUpdater;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
@@ -25,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * This class presents simple working interface. This one provides simple
  * methods for object persistence.
  */
-class XdStorage implements IXdFileStorage, IXdSqlStorage {
+class XdStorage implements IXdFileStorage {
 
     private final String name;
 
@@ -41,15 +39,6 @@ class XdStorage implements IXdFileStorage, IXdSqlStorage {
         this.name = name;
         services = new XdStorageServicesLocator();
         services.initFileConfiguration(this, folder, fragmentSize);
-    }
-
-    /**
-     *
-     */
-    XdStorage(final String name) {
-        this.name = name;
-        services = new XdStorageServicesLocator();
-        services.initPGConfiguration(this);
     }
 
     @Override
@@ -744,44 +733,6 @@ class XdStorage implements IXdFileStorage, IXdSqlStorage {
 
     @Override
     public <T> Collection<T> load(final Class<T> cl, final String indexName, final XdStorageSearchQuery query,
-                                  final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        if (cl == null)
-            throw new XdStorageException("class cannot be null");
-        if (query == null)
-            throw new XdStorageException("query cannot be null");
-        if (transaction == null)
-            throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
-
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
-
-        final XdStorageTransaction tx = cast(transaction);
-
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
-
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreWithParentObject) {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
-        }
-
-        return services.getSearchManager().search(cl, indexName, query, tx);
-    }
-
-    @Override
-    public <T> Collection<T> load(final Class<T> cl, final String indexName, final XdStorageSqlSearchQuery query) throws XdStorageException, XdStorageConnectionException {
-        if (!checkIsInTransaction())
-            throw new XdStorageException("method must be executed in transaction");
-
-        final IXdStorageTransaction transaction = services.getTransactionsManager().getCurrentTransaction();
-
-        return load(cl, indexName, query, transaction);
-    }
-
-    @Override
-    public <T> Collection<T> load(final Class<T> cl, final String indexName, final XdStorageSqlSearchQuery query,
                                   final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         if (cl == null)
             throw new XdStorageException("class cannot be null");
