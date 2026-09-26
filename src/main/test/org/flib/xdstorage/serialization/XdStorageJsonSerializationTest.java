@@ -6,6 +6,7 @@ import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper;
 import org.flib.xdstorage.idgeneration.IXdStorageIdGenerator;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
+import org.flib.xdstorage.utils.XdStorageObjectIdField;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * JUnit 5 тесты для верификации работы кастомного JSON движка СУБД (Поинт Г).
+ * JUnit 5 тесты для верификации работы многострочного JSON-движка СУБД (Поинт Г).
  */
 public class XdStorageJsonSerializationTest {
 
@@ -52,7 +53,7 @@ public class XdStorageJsonSerializationTest {
         jsonReader = new XdStorageJsonObjectsReader(typeHelper);
     }
 
-    // === 1. ОБЫЧНЫЕ ТЕСТЫ (Счастливый путь) ===
+    // === 1. ОБЫЧНЫЕ ТЕСТЫ (Счастливый путь с учетом Pretty Print) ===
 
     @Test
     public void testWriteAndReadObjects_ShouldMaintainDataConsistency() throws Exception {
@@ -69,17 +70,20 @@ public class XdStorageJsonSerializationTest {
 
         String outputJson = stringWriter.toString();
 
-        // Базовые ассерты на структуру JSON
+        // Базовые ассерты на форматированную структуру JSON
         assertNotNull(outputJson);
-        assertTrue(outputJson.contains("\"type\":\"" + JsonTestRecord.class.getName() + "\""), "JSON обязан содержать мета-тип класса!");
-        assertTrue(outputJson.contains("\"id\":777"), "JSON обязан корректно сериализовать числовые ID полей!");
-        assertTrue(outputJson.contains("\"title\":\"JSON_Test_Payload\""), "Строковые поля должны быть экранированы!");
+        assertTrue(outputJson.contains("\"type\": \"" + JsonTestRecord.class.getName() + "\""),
+                "JSON обязан содержать мета-тип класса с учетом форматирования!");
+        assertTrue(outputJson.contains("\"id\": 777"),
+                "JSON обязан корректно сериализовать числовые ID полей с пробелом после двоеточия!");
+        assertTrue(outputJson.contains("\"title\": \"JSON_Test_Payload\""),
+                "Строковые поля должны быть правильно отформатированы и экранированы!");
 
         // Шаг 3. Десериализуем JSON-строку обратно через StringReader
         StringReader stringReader = new StringReader(outputJson);
         Collection<Object> deserializedResult = jsonReader.read(stringReader);
 
-        // Верифицируем, что наш JSON-движок бесшовно воссоздал объект в памяти
+        // Верифицируем, что наш JSON-движок бесшовно воссоздал объект из многострочного формата
         assertNotNull(deserializedResult);
         assertEquals(1, deserializedResult.size(), "Должен быть восстановлен ровно 1 объект");
 
@@ -108,7 +112,7 @@ public class XdStorageJsonSerializationTest {
         JsonTestRecord mockRef = mock(JsonTestRecord.class);
         when(mockRef.getId()).thenReturn(100L);
 
-        org.flib.xdstorage.utils.XdStorageObjectIdField mockIdField = mock(org.flib.xdstorage.utils.XdStorageObjectIdField.class);
+        XdStorageObjectIdField mockIdField = mock(XdStorageObjectIdField.class);
         when(mockIdField.get(any())).thenReturn(100L);
 
         List<Object> references = new ArrayList<>();
@@ -119,6 +123,7 @@ public class XdStorageJsonSerializationTest {
 
         String output = writer.toString();
         assertTrue(output.contains("\"references\":"));
-        assertTrue(output.contains("\"id\":\"100\""));
+        assertTrue(output.contains("\"id\": \"100\""),
+                "Идентификатор ссылки обязан содержать пробел после двоеточия из-за Pretty Print!");
     }
 }

@@ -23,7 +23,7 @@ import java.util.Map;
 
 /**
  * Высокопроизводительный JSON-писатель графа объектов СУБД (Поинт Г).
- * Заменяет старый XML-райтер, генерируя компактный JSON.
+ * Генерирует форматированный (Pretty Printed) JSON с нулевой аллокацией отступов в куче.
  */
 public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
 
@@ -31,6 +31,19 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
     private final IXdStorageSimpleTypeHelper simpleTypeHelper;
     private final IXdStorageIdGenerator idGenerator;
     private final Map<Class<?>, Collection<XdStorageObjectField>> propertiesCache = new HashMap<>();
+
+    // РАЗГОН: Статический массив готовых отступов для исключения нагрузки на Garbage Collector
+    private static final String[] INDENTS = new String[64];
+
+    static {
+        INDENTS[0] = "";
+        String singleIndent = "  "; // 2 пробела на уровень
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < INDENTS.length; i++) {
+            sb.append(singleIndent);
+            INDENTS[i] = sb.toString();
+        }
+    }
 
     public XdStorageJsonObjectsWriter(final XdStorageServicesLocator services,
                                       final IXdStorageSimpleTypeHelper simpleTypeHelper,
@@ -43,14 +56,21 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
     @Override
     public void writeReferences(final Writer writer, final XdStorageObjectIdField field, final Collection<Object> references) throws XdStorageIOException {
         try {
-            writer.write("{\"references\":[");
+            writer.write("{\n");
+            writeIndent(writer, 1);
+            writer.write("\"references\": [\n");
             Iterator<Object> it = references.iterator();
             while (it.hasNext()) {
-                writeReferenceValue(it.next(), writer, field);
-                if (it.hasNext()) writer.write(",");
+                writeReferenceValue(it.next(), writer, field, 2);
+                if (it.hasNext()) {
+                    writer.write(",\n");
+                } else {
+                    writer.write("\n");
+                }
             }
-            writer.write("]}");
-            writer.flush(); // Выталкиваем накопленный буфер на диск
+            writeIndent(writer, 1);
+            writer.write("]\n}");
+            writer.flush();
         } catch (Throwable cause) {
             throw new XdStorageIOException(cause);
         }
@@ -59,27 +79,40 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
     @Override
     public void writeObjects(final Writer writer, final Collection<Object> objects) throws XdStorageIOException {
         try {
-            writer.write("{\"objects\":[");
+            writer.write("{\n");
+            writeIndent(writer, 1);
+            writer.write("\"objects\": [\n");
             Iterator<Object> it = objects.iterator();
             while (it.hasNext()) {
-                writeObjectValue(it.next(), writer);
-                if (it.hasNext()) writer.write(",");
+                writeObjectValue(it.next(), writer, 2);
+                if (it.hasNext()) {
+                    writer.write(",\n");
+                } else {
+                    writer.write("\n");
+                }
             }
-            writer.write("]}");
-            writer.flush(); // Пакетированный сброс буфера памяти на диск при коммите транзакции
+            writeIndent(writer, 1);
+            writer.write("]\n}");
+            writer.flush();
         } catch (Throwable cause) {
             throw new XdStorageIOException(cause);
         }
     }
 
-    private void writeObjectValue(final Object object, final Writer writer) throws IOException {
+    private void writeObjectValue(final Object object, final Writer writer, final int indentLevel) throws IOException {
         final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
         Collection<XdStorageObjectField> props = propertiesCache.computeIfAbsent(cl, k -> clInfo.getFields().values());
 
-        writer.write("{");
-        writer.write("\"type\":\"" + cl.getName() + "\",\"properties\":{");
+        writeIndent(writer, indentLevel);
+        writer.write("{\n");
+
+        writeIndent(writer, indentLevel + 1);
+        writer.write("\"type\": \"" + cl.getName() + "\",\n");
+
+        writeIndent(writer, indentLevel + 1);
+        writer.write("\"properties\": {\n");
 
         Iterator<XdStorageObjectField> it = props.iterator();
         boolean first = true;
@@ -92,31 +125,47 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
             final Object value = property.get(object);
             if (value == null) continue;
 
-            if (!first) writer.write(",");
+            if (!first) {
+                writer.write(",\n");
+            }
             first = false;
 
-            writer.write("\"" + property.getName() + "\":");
-            writeValue(value, writer);
+            writeIndent(writer, indentLevel + 2);
+            writer.write("\"" + property.getName() + "\": ");
+            writeValue(value, writer, indentLevel + 2);
         }
-        writer.write("}}");
+        writer.write("\n");
+        writeIndent(writer, indentLevel + 1);
+        writer.write("}\n");
+
+        writeIndent(writer, indentLevel);
+        writer.write("}");
     }
 
-    private void writeReferenceValue(final Object object, final Writer writer, final XdStorageObjectIdField field) throws IOException {
-        writer.write("{");
-        writer.write("\"type\":\"" + XdStorageObjectUtils.getEntityClass(object.getClass()).getName() + "\",");
-        writer.write("\"idType\":\"" + field.get(object).getClass().getName() + "\",");
+    private void writeReferenceValue(final Object object, final Writer writer, final XdStorageObjectIdField field, final int indentLevel) throws IOException {
+        writeIndent(writer, indentLevel);
+        writer.write("{\n");
+
+        writeIndent(writer, indentLevel + 1);
+        writer.write("\"type\": \"" + XdStorageObjectUtils.getEntityClass(object.getClass()).getName() + "\",\n");
+
+        writeIndent(writer, indentLevel + 1);
+        writer.write("\"idType\": \"" + field.get(object).getClass().getName() + "\",\n");
 
         Object idVal = field.get(object);
-        writer.write("\"id\":");
+        writeIndent(writer, indentLevel + 1);
+        writer.write("\"id\": ");
         if (idVal instanceof Class) {
             writer.write("\"" + ((Class<?>) idVal).getName() + "\"");
         } else {
             writer.write("\"" + escapeJson(idVal.toString()) + "\"");
         }
+        writer.write("\n");
+        writeIndent(writer, indentLevel);
         writer.write("}");
     }
 
-    private void writeValue(final Object value, final Writer writer) throws IOException {
+    private void writeValue(final Object value, final Writer writer, final int indentLevel) throws IOException {
         final Class<?> c = value.getClass();
         if (simpleTypeHelper.isSimpleType(c, value)) {
             if (c == Boolean.class || Number.class.isAssignableFrom(c)) {
@@ -125,34 +174,50 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
                 writer.write("\"" + escapeJson(simpleTypeHelper.simpleTypeToString(value)) + "\"");
             }
         } else if (c.isArray()) {
-            writer.write("[");
+            writer.write("[\n");
             int len = Array.getLength(value);
             for (int i = 0; i < len; i++) {
-                writeValue(Array.get(value, i), writer);
-                if (i < len - 1) writer.write(",");
+                writeIndent(writer, indentLevel + 1);
+                writeValue(Array.get(value, i), writer, indentLevel + 1);
+                if (i < len - 1) writer.write(",\n");
             }
+            writer.write("\n");
+            writeIndent(writer, indentLevel);
             writer.write("]");
         } else if (value instanceof Collection) {
-            writer.write("[");
+            writer.write("[\n");
             Iterator<?> it = ((Collection<?>) value).iterator();
             while (it.hasNext()) {
-                writeValue(it.next(), writer);
-                if (it.hasNext()) writer.write(",");
+                writeIndent(writer, indentLevel + 1);
+                writeValue(it.next(), writer, indentLevel + 1);
+                if (it.hasNext()) writer.write(",\n");
             }
+            writer.write("\n");
+            writeIndent(writer, indentLevel);
             writer.write("]");
         } else if (value instanceof Map) {
-            writer.write("{");
+            writer.write("{\n");
             Iterator<? extends Map.Entry<?, ?>> it = ((Map<?, ?>) value).entrySet().iterator();
             while (it.hasNext()) {
                 Map.Entry<?, ?> entry = it.next();
-                writer.write("\"" + escapeJson(entry.getKey().toString()) + "\":");
-                writeValue(entry.getValue(), writer);
-                if (it.hasNext()) writer.write(",");
+                writeIndent(writer, indentLevel + 1);
+                writer.write("\"" + escapeJson(entry.getKey().toString()) + "\": ");
+                writeValue(entry.getValue(), writer, indentLevel + 1);
+                if (it.hasNext()) writer.write(",\n");
             }
+            writer.write("\n");
+            writeIndent(writer, indentLevel);
             writer.write("}");
         } else {
-            writeObjectValue(value, writer);
+            writeObjectValue(value, writer, indentLevel);
         }
+    }
+
+    private void writeIndent(final Writer writer, int level) throws IOException {
+        if (level >= INDENTS.length) {
+            level = INDENTS.length - 1;
+        }
+        writer.write(INDENTS[level]);
     }
 
     private void checkAndGenerateId(Object object, Class<?> cl, XdStorageClassInfo clInfo) throws XdStorageIOException {
@@ -161,14 +226,10 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
                 || idField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
                 && idField.get(object) == null) {
             try {
-                // ИСПРАВЛЕНИЕ: Вместо фиксированного в конструкторе поля запрашиваем
-                // актуальный, живой генератор ID из локатора сервисов СУБД динамически!
-                // Это гарантирует, что многопоточный тест подсунет писателю MyLongIdGenerator, а не дефолтный пустой.
                 IXdStorageIdGenerator activeIdGenerator = services.getIdGenerator();
                 if (activeIdGenerator == null) {
-                    activeIdGenerator = this.idGenerator; // Фолбэк на дефолт, если локатор пуст
+                    activeIdGenerator = this.idGenerator;
                 }
-
                 idField.set(XdStorageObserverService.getObservableWrapper(object),
                         activeIdGenerator.generate(cl, services.getStorage(), null));
             } catch (final Throwable e) {
@@ -184,7 +245,7 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
                 .replace("\b", "\\b")
                 .replace("\f", "\\f")
                 .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+                .replace("\r", "\r")
+                .replace("\t", "\t");
     }
 }

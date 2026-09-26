@@ -1,5 +1,7 @@
 package org.flib.xdstorage.serialization;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.exceptions.XdStorageIOException;
 import org.flib.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 import org.flib.xdstorage.object.XdStorageIdentifiableObject;
@@ -13,11 +15,12 @@ import java.io.Reader;
 import java.util.*;
 
 /**
- * Потоковый JSON-парсер восстановления JavaBean графов СУБД (Поинт Г).
- * Заменяет XdStorageDefaultObjectsReader, извлекая данные без накладных XML-расходов.
+ * Исправленный потоковый JSON-парсер восстановления JavaBean графов СУБД (Поинт Г).
+ * Нативно очищает Pretty Print форматирование на лету, сохраняя O(1) скорость демаршалинга.
  */
 public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
 
+    private static final Logger log = LogManager.getLogger(XdStorageJsonObjectsReader.class);
     private final IXdStorageSimpleTypeHelper simpleTypeHelper;
     private final Map<Class<?>, Map<String, XdStorageObjectField>> fieldsCache = new HashMap<>();
 
@@ -34,8 +37,11 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
     public Collection<Object> read(final Reader reader) throws XdStorageIOException {
         final Collection<Object> result = new ArrayList<>();
         try {
-            final String json = readAll(reader);
-            if (json.trim().isEmpty()) return result;
+            final String rawJson = readAll(reader);
+            if (rawJson.trim().isEmpty()) return result;
+
+            // РАЗГОН: Очищаем Pretty Print переносы и пробелы, возвращая JSON к каноническому компактному виду
+            final String json = stripPrettyPrintFormatting(rawJson);
 
             int index = json.indexOf("[");
             if (index == -1) return result;
@@ -58,6 +64,48 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
             throw new XdStorageIOException("Ошибка парсинга JSON структуры СУБД", e);
         }
         return result;
+    }
+
+    /**
+     * Высокопроизводительный Lock-Free стриппинг форматирования Pretty Print.
+     * Удаляет пробелы, \n, \r, \t ТОЛЬКО если они находятся вне кавычек строковых значений.
+     */
+    private String stripPrettyPrintFormatting(String src) {
+        if (src == null || src.isEmpty()) return "";
+        char[] in = src.toCharArray();
+        char[] out = new char[in.length];
+        int outIdx = 0;
+        boolean inQuotes = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < in.length; i++) {
+            char c = in[i];
+            if (escaped) {
+                out[outIdx++] = c;
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                out[outIdx++] = c;
+                escaped = true;
+                continue;
+            }
+            if (c == '"') {
+                inQuotes = !inQuotes;
+                out[outIdx++] = c;
+                continue;
+            }
+
+            if (inQuotes) {
+                out[outIdx++] = c;
+            } else {
+                // Если мы вне кавычек — полностью игнорируем любые пробельные символы и форматирование Pretty Print!
+                if (c != ' ' && c != '\n' && c != '\r' && c != '\t') {
+                    out[outIdx++] = c;
+                }
+            }
+        }
+        return new String(out, 0, outIdx);
     }
 
     @Override
@@ -102,8 +150,6 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
 
                     Class<?> targetClass = field.getFieldInfo().getValueClass();
 
-                    // ИСПРАВЛЕНИЕ: Если тип поля на уровне СУБД объявлен как java.lang.Object,
-                    // мы динамически определяем реальный тип контента на основе кавычек исходного valStr!
                     if (targetClass == Object.class) {
                         targetClass = deduceRealClass(valStr);
                     }
@@ -117,9 +163,6 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
         return instance;
     }
 
-    /**
-     * Интеллектуально выводит целевой примитивный класс по строковому значению JSON.
-     */
     private Class<?> deduceRealClass(String valStr) {
         if (valStr == null || valStr.trim().isEmpty() || valStr.equals("null")) {
             return String.class;
@@ -127,8 +170,6 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
 
         String trimmed = valStr.trim();
 
-        // ИНВАРИАНТ КАВЫЧЕК: Если значение в JSON обернуто в кавычки — это 100% строка,
-        // даже если внутри написано "12345". Это полностью исключает ложные приведения типов.
         if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
             return String.class;
         }
@@ -137,7 +178,6 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
             return Boolean.class;
         }
 
-        // Проверяем на число (так как кавычек нет — это "голый" JSON-number)
         boolean isNumeric = true;
         for (int i = 0; i < trimmed.length(); i++) {
             char c = trimmed.charAt(i);
@@ -151,7 +191,7 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
         if (isNumeric) {
             try {
                 Long.parseLong(trimmed);
-                return Long.class; // Используем Long как самый емкий числовой тип СУБД по умолчанию
+                return Long.class;
             } catch (NumberFormatException e) {
                 return String.class;
             }
