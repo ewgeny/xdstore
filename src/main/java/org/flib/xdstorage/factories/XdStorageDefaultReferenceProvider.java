@@ -40,11 +40,15 @@ public class XdStorageDefaultReferenceProvider implements IXdStorageReferencePro
 
         IXdStorageSimpleWrapper result = transactionClassReferences.get(objectId);
         if (result == null) {
-            // ФАЗА 1: Упреждающая регистрация фиктивной заглушки Dummy, чтобы разорвать StackOverflow рекурсии полей!
-            XdStorageDummySimpleWrapper dummyWrapper = new XdStorageDummySimpleWrapper();
-            transactionClassReferences.putIfAbsent(objectId, dummyWrapper);
 
             try {
+                // ФАЗА 1: Упреждающая регистрация фиктивной заглушки Dummy, чтобы разорвать StackOverflow рекурсии полей!
+//            XdStorageDummySimpleWrapper dummyWrapper = new XdStorageDummySimpleWrapper();
+                IXdStorageSimpleWrapper dummyWrapper = XdStorageObjectUtils.wrapAsSimpleObject(
+                        cl.newInstance(), storage, transaction
+                );
+                transactionClassReferences.putIfAbsent(objectId, dummyWrapper);
+
                 // ФАЗА 2: Спокойно генерируем реальный прокси-класс
                 final IXdStorageSimpleWrapper tmp = XdStorageObjectUtils.wrapAsSimpleObject(cl.newInstance(), storage, transaction);
                 if (tmp != null) {

@@ -266,7 +266,7 @@ public final class XdStorageObjectUtils {
 
         // РАЗРЫВ ДЕДЛОКА: Временно резервируем место в мапе, чтобы рекурсивный обход
         // связанных полей (Circular Dependency) не уходил в циклический computeIfAbsent!
-        classesSimpleWrappers.putIfAbsent(cl, XdStorageDummySimpleWrapper.class);
+//        classesSimpleWrappers.putIfAbsent(cl, XdStorageDummySimpleWrapper.class);
 
         try {
             Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateSimpleWrapper(cl);

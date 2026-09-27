@@ -1,18 +1,11 @@
 package org.flib.xdstorage.factories;
 
 import org.flib.xdstorage.IXdStorage;
-import org.flib.xdstorage.XdStoragePolicy;
-import org.flib.xdstorage.annotations.XdStorageObjectId;
-import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
-import org.flib.xdstorage.code.IXdStorageSimpleWrapper;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -24,31 +17,6 @@ public class XdStorageSmartClonerTest {
 
     private IXdStorageReferenceProvider referenceProvider;
     private XdStorageSmartCloner smartCloner;
-
-    // Тестовые классы с циклической зависимостью для выявления StackOverflowError
-    @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
-    public static class CyclicParent {
-        @XdStorageObjectId
-        private Long id;
-        private CyclicChild child;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public CyclicChild getChild() { return child; }
-        public void setChild(CyclicChild child) { this.child = child; }
-    }
-
-    @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
-    public static class CyclicChild {
-        @XdStorageObjectId
-        private Long id;
-        private CyclicParent parent;
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public CyclicParent getParent() { return parent; }
-        public void setParent(CyclicParent parent) { this.parent = parent; }
-    }
 
     @BeforeEach
     public void setUp() {
