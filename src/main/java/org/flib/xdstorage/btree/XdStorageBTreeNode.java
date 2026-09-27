@@ -656,7 +656,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         final Object parentId = parent.getId();
         final XdStorageBTreeNode root = getTree().getRoot();
         if ((parentId != null && parentId.equals(root.getId())) || parent == root) {
-            if (parent.getKeys().size() == 0) {
+            if (parent.getKeys().size() > 0) {
                 final XdStorageBTreeNode child = parent.loadChildOfThisNode(0, storage, transaction);
                 child.lockAndAddToDeepLock(deepLockedNode, transaction);
                 storage.delete(parent, transaction);
@@ -955,7 +955,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         } finally {
             toUnlock.unlockRead();
         }
-        while (current.getObjects().isEmpty()) {
+        while (current != null && current.getObjects().isEmpty()) {
             try {
                 boolean isFound = false;
                 for (int i = 0; i < current.getKeys().size(); ++i) {
@@ -979,6 +979,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             child = null;
         }
 
+        if (current == null) {
+            return null;
+        }
+
         final List<Object> result = new ArrayList<>();
         try {
             boolean stop = false;
@@ -995,14 +999,14 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 child = current.getNextTreeNodeOnThisLevel();
                 if (child != null) {
                     final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
-                    if (!retryFind.get()) {
+                    if (!retryFind.get() && tmp != null) {
                         result.addAll(tmp);
                     }
                 }
             }
             return retryFind.get() ? null : result;
         } finally {
-            if (current.isReadLocked()) {
+            if (current != null && current.isReadLocked()) {
                 current.unlockRead();
             }
         }
