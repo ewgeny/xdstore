@@ -12,8 +12,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Неблокирующий реентерабельный примитив синхронизации ядра СУБД (Поинт Г).
- * Полностью исключает Deadlocks и Lock Starvation за счет мгновенного fail-fast отката.
- * Идеально интегрирован с транзакционной Retry Policy стресс-теста.
+ * Гарантирует потокобезопасный отпуск ресурсов за счет блокирующего вызова mainLock.lock()
+ * и адаптивного опроса transaction.getTimeout() при захвате.
  */
 public class XdStorageReadWriteLock {
 
@@ -81,25 +81,38 @@ public class XdStorageReadWriteLock {
     }
 
     public void lockWrite(final IXdStorageTransaction transaction) throws InterruptedException {
-        // Заменяем пессимистичное ожидание очереди на мгновенный fail-fast Try-Lock.
-        // Если лок занят другим транзакционным потоком — сразу выбрасываем исключение,
-        // чтобы сработал откат транзакции и применился Exponential Backoff в стресс-тесте.
-        if (!tryLockWrite()) {
-            throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс монопольно занят на запись другим потоком");
+        long timeout = transaction != null ? transaction.getTimeout() : 5000;
+        long startTime = System.currentTimeMillis();
+        long sleepStep = 15;
+
+        while (!tryLockWrite()) {
+            long elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed >= timeout) {
+                throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс монопольно занят на запись другим потоком. Превышен таймаут ожидания: " + timeout + " мс");
+            }
+            Thread.sleep(Math.min(sleepStep, timeout - elapsed));
         }
     }
 
     public void lockRead(final IXdStorageTransaction transaction) throws InterruptedException {
-        if (!tryLockRead()) {
-            throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс занят на чтение другим потоком");
+        long timeout = transaction != null ? transaction.getTimeout() : 5000;
+        long startTime = System.currentTimeMillis();
+        long sleepStep = 15;
+
+        while (!tryLockRead()) {
+            long elapsed = System.currentTimeMillis() - startTime;
+            if (elapsed >= timeout) {
+                throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс занят на чтение другим потоком. Превышен таймаут ожидания: " + timeout + " мс");
+            }
+            Thread.sleep(Math.min(sleepStep, timeout - elapsed));
         }
     }
 
     public void unlockWrite() {
         final Thread currentThread = Thread.currentThread();
-        if (!mainLock.tryLock()) {
-            throw new IllegalMonitorStateException("Не удалось монопольно захватить монитор для unlockWrite");
-        }
+        // ИСПРАВЛЕНИЕ: Используем ГАРАНТИРОВАННЫЙ блокирующий вызов lock() вместо tryLock(),
+        // полностью ликвидируя ложные выбросы IllegalMonitorStateException при разгрузке потоков!
+        mainLock.lock();
         try {
             if (writeLockThread == null || writeLockThread != currentThread) {
                 throw new IllegalMonitorStateException("Блокировка записи не удерживается текущим потоком");
@@ -114,9 +127,9 @@ public class XdStorageReadWriteLock {
 
     public void unlockRead() {
         final Thread currentThread = Thread.currentThread();
-        if (!mainLock.tryLock()) {
-            throw new IllegalMonitorStateException("Не удалось монопольно захватить монитор для unlockRead");
-        }
+        // ИСПРАВЛЕНИЕ: Используем ГАРАНТИРОВАННЫЙ блокирующий вызов lock() вместо tryLock(),
+        // полностью ликвидируя ложные выбросы IllegalMonitorStateException при разгрузке потоков!
+        mainLock.lock();
         try {
             final AtomicLong counter = readLocksCounters.get(currentThread);
             if (counter == null || counter.get() <= 0) {

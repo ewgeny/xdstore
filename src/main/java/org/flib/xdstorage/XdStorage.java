@@ -251,7 +251,7 @@ class XdStorage implements IXdFileStorage {
         final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean(false);
 
-        objects.stream().forEach(object -> {
+        objects.forEach(object -> {
             if (hasError.get()) {
                 return;
             }
@@ -499,7 +499,7 @@ class XdStorage implements IXdFileStorage {
         final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean(false);
 
-        references.stream().forEach(reference -> {
+        references.forEach(reference -> {
             if (hasError.get()) {
                 return;
             }
@@ -594,7 +594,7 @@ class XdStorage implements IXdFileStorage {
             final AtomicBoolean hasError = new AtomicBoolean(false);
 
             final Collection<Object> references = referencesResource.readReferences(tx);
-            references.stream().forEach(reference -> {
+            references.forEach(reference -> {
                 if (hasError.get()) {
                     return;
                 }
@@ -682,7 +682,7 @@ class XdStorage implements IXdFileStorage {
             final AtomicBoolean hasError = new AtomicBoolean(false);
 
             final Collection<Object> references = referencesResource.readReferences(tx);
-            references.stream().forEach(reference -> {
+            references.forEach(reference -> {
                 if (hasError.get()) {
                     return;
                 }
@@ -810,7 +810,7 @@ class XdStorage implements IXdFileStorage {
             final AtomicBoolean hasError = new AtomicBoolean(false);
 
             final Collection<Object> references = referencesResource.readReferences(tx);
-            references.stream().forEach(reference -> {
+            references.forEach(reference -> {
                 if (hasError.get()) {
                     return;
                 }
@@ -940,7 +940,7 @@ class XdStorage implements IXdFileStorage {
         final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean(false);
 
-        objects.stream().forEach(object -> {
+        objects.forEach(object -> {
             if (hasError.get()) {
                 return;
             }
@@ -1093,7 +1093,7 @@ class XdStorage implements IXdFileStorage {
         final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean(false);
 
-        references.stream().forEach(reference -> {
+        references.forEach(reference -> {
             if (hasError.get()) {
                 return;
             }
