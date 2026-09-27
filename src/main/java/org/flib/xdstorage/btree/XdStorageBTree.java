@@ -292,24 +292,24 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public List<Object> find(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        lockWrite(transaction);
-        try {
-            if (root == null) {
-                return Collections.emptyList();
-            }
-
-            if (XdStorageObjectUtils.isReference(root)) {
-                root.lockWrite(transaction);
-                try {
-                    if (XdStorageObjectUtils.isReference(root)) {
-                        storage.load(root, transaction);
+        // ОПТИМИЗАЦИЯ: Захватываем WriteЛок исключительно если корень реально является незагруженной прокси-ссылкой СУБД.
+        // Если корень готов, пропускаем монопольную блокировку, открывая дорогу параллельным читателям!
+        if (root != null && XdStorageObjectUtils.isReference(root)) {
+            lockWrite(transaction);
+            try {
+                if (XdStorageObjectUtils.isReference(root)) {
+                    root.lockWrite(transaction);
+                    try {
+                        if (XdStorageObjectUtils.isReference(root)) {
+                            storage.load(root, transaction);
+                        }
+                    } finally {
+                        root.unlockWrite();
                     }
-                } finally {
-                    root.unlockWrite();
                 }
+            } finally {
+                unlockWrite();
             }
-        } finally {
-            unlockWrite();
         }
 
         List<Object> result;
