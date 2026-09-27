@@ -533,6 +533,9 @@ public class XdStorageResourceCache {
         }
 
         final Object objectId = field.get(reference);
+        if (objectId == null) {
+            return;
+        }
         CacheRecord record = cache.get(objectId);
         if (record != null) {
             Object object = null;
