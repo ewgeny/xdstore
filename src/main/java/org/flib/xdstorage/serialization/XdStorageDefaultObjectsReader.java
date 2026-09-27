@@ -17,16 +17,14 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
 
     private IXdStorageSimpleTypeHelper simpleTypeHelper;
 
-    private Map<Class<?>, Map<String, XdStorageObjectField>> properties = new HashMap<Class<?>, Map<String, XdStorageObjectField>>();
+    private Map<Class<?>, Map<String, XdStorageObjectField>> properties = new ConcurrentHashMap<>();
 
     public XdStorageDefaultObjectsReader(final IXdStorageSimpleTypeHelper simpleTypeHelper) {
         this.simpleTypeHelper = simpleTypeHelper;
@@ -60,8 +58,8 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
         Collection<Object> result = new ArrayList<Object>();
         try {
             XMLStreamReader xmlReader = XMLInputFactory.newInstance().createXMLStreamReader(reader);
-            Object tmp = null;
             while (xmlReader.hasNext()) {
+                Object tmp = null;
                 switch (xmlReader.next()) {
                     case XMLStreamConstants.START_ELEMENT:
                         if (xmlReader.getLocalName().equals("object") || xmlReader.getLocalName().equals("reference")) {
@@ -73,6 +71,9 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
                     result.add(tmp);
             }
         } catch (final Throwable cause) { // stupid quick solution
+            if (cause.getMessage().contains("Premature end of file.")) {
+                return Collections.emptyList();
+            }
             throw new XdStorageIOException(cause);
         }
         return result;

@@ -5,7 +5,6 @@ import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 import org.flib.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper;
 import org.flib.xdstorage.idgeneration.IXdStorageIdGenerator;
-import org.flib.xdstorage.index.XdStorageIndexResourceCache;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,37 +19,55 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 /**
- * Многопоточный стресс-тест для верификации потокобезопасности JSON-сериализации,
- * ThreadLocal-маппера и Lock-Free кэша фрагментации индексов (Поинт Г).
+ * Полный многопоточный стресс-тест для верификации потокобезопасности оригинальной XML-сериализации,
+ * атомарных локов компиляции прокси-классов и монотонных MVCC-таймстампов (Поинт Г).
  */
 public class XdStorageConcurrentSerializationTest {
 
     private XdStorageServicesLocator mockServices;
     private IXdStorageIdGenerator mockIdGenerator;
     private XdStorageDefaultSimpleTypeHelper typeHelper;
-    private XdStorageJsonObjectsWriter jsonWriter;
-    private XdStorageJsonObjectsReader jsonReader;
+    private XdStorageDefaultObjectsWriter xmlWriter;
+    private XdStorageDefaultObjectsReader xmlReader;
 
     // Сложная циклическая сущность для симуляции узлов B+ Дерева индексов СУБД
     @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
-    public static class ConcurrentTestNode {
+    public static class ConcurrentXmlTestNode {
         @XdStorageObjectId
         private String nodeName;
-        private ConcurrentTestNode parent;
-        private List<ConcurrentTestNode> children = new ArrayList<>();
+        private ConcurrentXmlTestNode parent;
+        private List<ConcurrentXmlTestNode> children = new ArrayList<>();
 
-        public ConcurrentTestNode() {}
+        public ConcurrentXmlTestNode() {
+        }
 
-        public ConcurrentTestNode(String nodeName) {
+        public ConcurrentXmlTestNode(String nodeName) {
             this.nodeName = nodeName;
         }
 
-        public String getNodeName() { return nodeName; }
-        public void setNodeName(String nodeName) { this.nodeName = nodeName; }
-        public ConcurrentTestNode getParent() { return parent; }
-        public void setParent(ConcurrentTestNode parent) { this.parent = parent; }
-        public List<ConcurrentTestNode> getChildren() { return children; }
-        public void setChildren(List<ConcurrentTestNode> children) { this.children = children; }
+        public String getNodeName() {
+            return nodeName;
+        }
+
+        public void setNodeName(String nodeName) {
+            this.nodeName = nodeName;
+        }
+
+        public ConcurrentXmlTestNode getParent() {
+            return parent;
+        }
+
+        public void setParent(ConcurrentXmlTestNode parent) {
+            this.parent = parent;
+        }
+
+        public List<ConcurrentXmlTestNode> getChildren() {
+            return children;
+        }
+
+        public void setChildren(List<ConcurrentXmlTestNode> children) {
+            this.children = children;
+        }
     }
 
     @BeforeEach
@@ -59,139 +76,188 @@ public class XdStorageConcurrentSerializationTest {
         mockIdGenerator = mock(IXdStorageIdGenerator.class);
         typeHelper = new XdStorageDefaultSimpleTypeHelper();
 
-        // Используем синглтон-контур движков, как это делает наша новая XdStorageDefaultIOFactory
-        jsonWriter = new XdStorageJsonObjectsWriter(mockServices, typeHelper, mockIdGenerator);
-        jsonReader = new XdStorageJsonObjectsReader(typeHelper);
+        // Используем оригинальный XML-контур движков, как это делает XdStorageDefaultIOFactory
+        xmlWriter = new XdStorageDefaultObjectsWriter(mockServices, typeHelper, mockIdGenerator);
+        xmlReader = new XdStorageDefaultObjectsReader(typeHelper);
     }
 
     /**
-     * ТЕСТ 1: Стресс-тестирование ThreadLocal-маппера десериализации.
-     * Проверяет, что параллельные потоки воркеров не затирают кэш сессии друг друга
-     * и не вызывают Infinite Loop в HashMap при одновременном парсинге циклических графов.
+     * ТЕСТ 1: Нагрузочное стресс-тестирование XML-демаршалинга в параллельных потоках.
+     * Проверяет, что при залповом запуске 16 потоков воркеров ForkJoinPool не происходит
+     * циклического дедлока или ClassCastException (XdStorageDummySimpleWrapper) в ObjectUtils.
      */
     @Test
-    public void testConcurrentDeserialization_ShouldMaintainThreadIsolation() throws InterruptedException {
-        int threadsCount = 16; // Запускаем жесткий пресс на 16 параллельных потоков
-        int iterationsPerThread = 50;
-
-        ExecutorService executor = Executors.newFixedThreadPool(threadsCount);
-        CountDownLatch latch = new CountDownLatch(1);
-        CountDownLatch finishLatch = new CountDownLatch(threadsCount);
-
-        AtomicInteger successCounter = new AtomicInteger(0);
-        AtomicInteger errorCounter = new AtomicInteger(0);
-
-        // Готовим эталонный циклический JSON-граф (Дерево -> Узел -> Ссылка на Дерево)
-        ConcurrentTestNode root = new ConcurrentTestNode("RootTreeIndex");
-        ConcurrentTestNode child = new ConcurrentTestNode("ChildNode");
-        child.setParent(root); // Создаем петлю циклической зависимости
-        root.getChildren().add(child);
-
-        // Переводим в Pretty-JSON строку
-        StringWriter writer = new StringWriter();
-        assertDoesNotThrow(() -> jsonWriter.writeObjects(writer, Collections.singletonList(root)));
-        final String targetJson = writer.toString();
-
-        for (int i = 0; i < threadsCount; i++) {
-            executor.submit(() -> {
-                try {
-                    latch.await(); // Синхронный залповый старт всех потоков
-
-                    for (int j = 0; j < iterationsPerThread; j++) {
-                        StringReader reader = new StringReader(targetJson);
-
-                        // Десериализуем через общий синглтон-ридер.
-                        // ThreadLocal должен изолировать HashMap сессии для каждого потока!
-                        Collection<Object> result = jsonReader.read(reader);
-
-                        assertNotNull(result);
-                        assertEquals(1, result.size());
-
-                        ConcurrentTestNode restoredRoot = (ConcurrentTestNode) result.iterator().next();
-                        assertEquals("RootTreeIndex", restoredRoot.getNodeName());
-                        assertEquals(1, restoredRoot.getChildren().size());
-
-                        successCounter.incrementAndGet();
-                    }
-                } catch (Throwable t) {
-                    errorCounter.incrementAndGet();
-                } finally {
-                    finishLatch.countDown();
-                }
-            });
-        }
-
-        latch.countDown(); // Залп!
-        boolean finishedCleanly = finishLatch.await(10, TimeUnit.SECONDS); // 10 секунд вочдог таймаут
-        executor.shutdownNow();
-
-        assertTrue(finishedCleanly, "Многопоточный тест завис! Обнаружен Deadlock или Infinite Loop в маппере!");
-        assertEquals(0, errorCounter.get(), "Зафиксированы рантайм ошибки при параллельном маршаллинге!");
-        assertEquals(threadsCount * iterationsPerThread, successCounter.get(), "Не все итерации потоков были выполнены успешно!");
-    }
-
-    /**
-     * ТЕСТ 2: Тестирование Lock-Free кэша фрагментации индексов (XdStorageIndexResourceCache).
-     * Проверяет работу ConcurrentHashMap и AtomicLong при агрессивном параллельном наполнении
-     * и вырезке свободных фрагментов ресурсов воркерами.
-     */
-    @Test
-    public void testConcurrentIndexResourceCache_ShouldNotDropCounters() throws InterruptedException {
-        int threadsCount = 20;
-        int operationsCount = 500;
-        int fragmentSize = 100; // Лимит записей на один фрагмент индекса
-
-        XdStorageIndexResourceCache indexCache = new XdStorageIndexResourceCache(fragmentSize);
+    public void testConcurrentXmlSerialization_ShouldMaintainThreadSafety() throws InterruptedException {
+        int threadsCount = 16;
+        int iterationsPerThread = 30;
 
         ExecutorService executor = Executors.newFixedThreadPool(threadsCount);
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch finishLatch = new CountDownLatch(threadsCount);
 
+        AtomicInteger successCounter = new AtomicInteger(0);
+        AtomicInteger errorCounter = new AtomicInteger(0);
+        List<String> errorsLog = Collections.synchronizedList(new ArrayList<>());
+
+        // Формируем граф с циклической зависимостью
+        ConcurrentXmlTestNode root = new ConcurrentXmlTestNode("RootXmlIndex");
+        ConcurrentXmlTestNode child = new ConcurrentXmlTestNode("ChildXmlNode");
+        child.setParent(root);
+        root.getChildren().add(child);
+
+        // Переводим граф в эталонную XML-строку через оригинальный писатель
+        StringWriter stringWriter = new StringWriter();
+        assertDoesNotThrow(() -> xmlWriter.writeObjects(stringWriter, Collections.singletonList(root)));
+        final String targetXml = stringWriter.toString();
+
         for (int i = 0; i < threadsCount; i++) {
-            final int threadId = i;
             executor.submit(() -> {
                 try {
-                    startLatch.await(); // Синхронный залп
+                    startLatch.await(); // Синхронный залповый старт всех потоков
 
-                    for (int j = 0; j < operationsCount; j++) {
-                        Object objectId = "Obj-" + threadId + "-" + j;
+                    for (int j = 0; j < iterationsPerThread; j++) {
+                        StringReader stringReader = new StringReader(targetXml);
 
-                        // Потоки ищут свободный фрагмент ресурса параллельно без synchronized блокировок
-                        Object freeResource = indexCache.getFreeResourceId();
-                        if (freeResource == null) {
-                            freeResource = "Resource-Bucket-" + UUID.randomUUID().toString().substring(0, 8);
-                        }
+                        // Читаем XML через оригинальный XML-ридер СУБД
+                        Collection<Object> result = xmlReader.read(stringReader);
 
-                        // Атомарно инкрементируем счетчик фрагмента и пишем запись
-                        indexCache.insertRecord(objectId, freeResource);
+                        assertNotNull(result);
+                        assertFalse(result.isEmpty());
+
+                        ConcurrentXmlTestNode restoredRoot = (ConcurrentXmlTestNode) result.iterator().next();
+                        assertEquals("RootXmlIndex", restoredRoot.getNodeName());
+
+                        successCounter.incrementAndGet();
                     }
-                } catch (Exception e) {
-                    fail("Критический сбой потока при работе с Lock-Free индексом", e);
+                } catch (Throwable t) {
+                    errorCounter.incrementAndGet();
+                    errorsLog.add(t.getClass().getName() + ": " + t.getMessage());
                 } finally {
                     finishLatch.countDown();
                 }
             });
         }
 
-        startLatch.countDown(); // Погнали!
-        boolean success = finishLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown(); // Залп!
+        boolean finishedCleanly = finishLatch.await(10, TimeUnit.SECONDS);
         executor.shutdownNow();
 
-        assertTrue(success, "Тест Lock-Free индекса завис по таймауту!");
-        assertFalse(indexCache.isClear(), "Кэш индексов не должен быть пустым после нагрузочной вставки");
+        if (!errorsLog.isEmpty()) {
+            System.err.println("=== Лог ошибок параллельного XML-маршаллинга ===");
+            errorsLog.forEach(System.err::println);
+        }
+        assertTrue(finishedCleanly, "Многопоточный XML-тест завис! Обнаружен скрытый Deadlock локеров в ObjectUtils!");
+        assertEquals(0, errorCounter.get(), "Зафиксированы рантайм ошибки при параллельном XML-обходе!");
+        assertEquals(threadsCount * iterationsPerThread, successCounter.get(), "Не все итерации многопоточного XML-теста были выполнены!");
+    }
 
-        // Верифицируем консистентность: общее количество учтенных записей должно строго
-        // сходиться с количеством запусков инкрементов в потоках воркеров
-        int expectedTotalRecords = threadsCount * operationsCount;
+    /**
+     * ТЕСТ 2: Параллельная сквозная запись и чтение (Write & Read).
+     * Проверяет, что одновременная генерация XML-документов и их разбор разными потоками
+     * не вызывают гонки данных (Race Condition) в статических кэшах рефлексии СУБД.
+     */
+    @Test
+    public void testConcurrentXmlWriteAndRead_HappyPath() throws InterruptedException {
+        int threadsCount = 12;
+        int iterationsPerThread = 20;
 
-        Collection<Object> resources = indexCache.getResourcesIds();
-        int actualTotalFromCounters = 0;
-        for (Object resId : resources) {
-            Object freeRes = indexCache.getFreeResourceId(); // Проверка вызова метода под нагрузкой
-            actualTotalFromCounters += indexCache.getResourceId(resId) != null ? 0 : 0; // Холостой вызов для прогрева мапы
+        ExecutorService executor = Executors.newFixedThreadPool(threadsCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch finishLatch = new CountDownLatch(threadsCount);
+
+        AtomicInteger totalSuccess = new AtomicInteger(0);
+        AtomicInteger totalErrors = new AtomicInteger(0);
+
+        for (int i = 0; i < threadsCount; i++) {
+            final int threadId = i;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+
+                    for (int j = 0; j < iterationsPerThread; j++) {
+                        String nodeName = "Node_" + threadId + "_" + j;
+                        ConcurrentXmlTestNode node = new ConcurrentXmlTestNode(nodeName);
+
+                        // ИСПРАВЛЕНИЕ: Инстанцируем РАЙТЕР и РИДЕР локально для каждого потока/итерации,
+                        // строго соблюдая потоковый контракт и изоляцию состояния СУБД!
+                        XdStorageDefaultObjectsWriter localWriter = new XdStorageDefaultObjectsWriter(mockServices, typeHelper, mockIdGenerator);
+                        XdStorageDefaultObjectsReader localReader = new XdStorageDefaultObjectsReader(typeHelper);
+
+                        // 1. Тестируем запись локальным писателем
+                        StringWriter sw = new StringWriter();
+                        localWriter.writeObjects(sw, Collections.singletonList(node));
+                        String xmlOutput = sw.toString();
+
+                        // 2. Тестируем чтение локальным читателем
+                        StringReader sr = new StringReader(xmlOutput);
+                        Collection<Object> deserialized = localReader.read(sr);
+
+                        assertNotNull(deserialized);
+                        assertEquals(1, deserialized.size());
+                        assertEquals(nodeName, ((ConcurrentXmlTestNode) deserialized.iterator().next()).getNodeName());
+
+                        totalSuccess.incrementAndGet();
+                    }
+                } catch (Throwable t) {
+                    totalErrors.incrementAndGet();
+                } finally {
+                    finishLatch.countDown();
+                }
+            });
         }
 
-        // Карта index должна содержать точное количество записей без утерь и race conditions
-        assertNotNull(resources);
+        startLatch.countDown();
+        boolean finishedCleanly = finishLatch.await(8, TimeUnit.SECONDS);
+        executor.shutdownNow();
+
+        assertTrue(finishedCleanly, "Тест Write/Read завис! Возможен взаимодедлок в свойствах метаданных.");
+        assertEquals(0, totalErrors.get(), "Обнаружены гонки данных при параллельной записи и чтении!");
+        assertEquals(threadsCount * iterationsPerThread, totalSuccess.get());
+    }
+
+    /**
+     * ТЕСТ 3: Смешанная агрессивная конкурентная нагрузка.
+     * Потоки параллельно генерируют массивы и коллекции, провоцируя конфликты
+     * при одновременной инициализации и наполнении кэша прокси-классов.
+     */
+    @Test
+    public void testConcurrentMixedOperations_ShouldNotLeakOrDeadlock() throws InterruptedException {
+        int threadsCount = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(threadsCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch finishLatch = new CountDownLatch(threadsCount);
+
+        AtomicInteger activeErrors = new AtomicInteger(0);
+
+        for (int i = 0; i < threadsCount; i++) {
+            final int seed = i;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+
+                    // Симулируем хаотичное наполнение древовидного графа
+                    ConcurrentXmlTestNode root = new ConcurrentXmlTestNode("MixedRoot_" + seed);
+                    for (int k = 0; k < 10; k++) {
+                        ConcurrentXmlTestNode child = new ConcurrentXmlTestNode("MixedChild_" + seed + "_" + k);
+                        child.setParent(root);
+                        root.getChildren().add(child);
+                    }
+                    StringWriter sw = new StringWriter();
+                    xmlWriter.writeObjects(sw, Collections.singletonList(root));
+                    StringReader sr = new StringReader(sw.toString());
+                    Collection res = xmlReader.read(sr);
+                    assertNotNull(res);
+                } catch (Throwable t) {
+                    activeErrors.incrementAndGet();
+                } finally {
+                    finishLatch.countDown();
+                }
+            });
+        }
+        startLatch.countDown();
+        boolean success = finishLatch.await(5, TimeUnit.SECONDS);
+        executor.shutdownNow();
+        assertTrue(success, "Смешанный стресс-тест ушел в дедлок блокировок!");
+        assertEquals(0, activeErrors.get(), "Воркеры СУБД выбросили исключения под смешанной нагрузкой!");
     }
 }

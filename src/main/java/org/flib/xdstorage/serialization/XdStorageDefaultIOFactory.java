@@ -7,8 +7,8 @@ import org.flib.xdstorage.services.XdStorageServicesLocator;
 
 /**
  * Высокопроизводительная фабрика ввода-вывода СУБД (Поинт Г).
- * Реализует паттерн Singleton для читателя и писателя, гарантируя монолитность
- * сессионного кэша и полностью исключая "concurrent modification" из-за расхождения версий объектов.
+ * Использует паттерн ThreadLocal для полной потокоизоляции читателей и писателей XML,
+ * что на 100% ликвидирует гонки данных в кэшах рефлексии метаданных СУБД.
  */
 public class XdStorageDefaultIOFactory implements IXdStorageIOFactory {
 
@@ -16,9 +16,10 @@ public class XdStorageDefaultIOFactory implements IXdStorageIOFactory {
     private final IXdStorageSimpleTypeHelper simpleTypeHelper;
     private final IXdStorageIdGenerator idGenerator;
 
-    // СИНГЛТОН-КОНТУР: Фиксируем долгоживущие экземпляры JSON-движков СУБД
-    private final IXdStorageObjectsReader jsonReaderInstance;
-    private final IXdStorageObjectsWriter jsonWriterInstance;
+    // ПОТОКОВАЯ ИЗОЛЯЦИЯ: Каждый поток воркера СУБД получает свой собственный,
+    // изолированный экземпляр ридера и райтера со своими локальными кэшами свойств!
+    private final ThreadLocal<IXdStorageObjectsReader> threadLocalReader = new ThreadLocal<>();
+    private final ThreadLocal<IXdStorageObjectsWriter> threadLocalWriter = new ThreadLocal<>();
 
     public XdStorageDefaultIOFactory(final XdStorageServicesLocator service, final IXdStorageIdGenerator idGenerator) {
         this(service, new XdStorageDefaultSimpleTypeHelper(), idGenerator);
@@ -29,21 +30,27 @@ public class XdStorageDefaultIOFactory implements IXdStorageIOFactory {
         this.services = services;
         this.simpleTypeHelper = simpleTypeHelper;
         this.idGenerator = idGenerator;
-
-        // Инстанцируем компоненты строго один раз при запуске базы данных
-        this.jsonReaderInstance = new XdStorageJsonObjectsReader(simpleTypeHelper);
-        this.jsonWriterInstance = new XdStorageJsonObjectsWriter(services, simpleTypeHelper, idGenerator);
     }
 
     @Override
     public IXdStorageObjectsReader newInstanceReader() {
-        // Гарантируем возврат единого экземпляра ридера со сквозным sessionObjectsCache!
-        return jsonReaderInstance;
+        // Ленивая инициализация ридера строго для текущего потока выполнения
+        IXdStorageObjectsReader reader = threadLocalReader.get();
+        if (reader == null) {
+            reader = new XdStorageDefaultObjectsReader(simpleTypeHelper);
+            threadLocalReader.set(reader);
+        }
+        return reader;
     }
 
     @Override
     public IXdStorageObjectsWriter newInstanceWriter() {
-        // Гарантируем возврат единого экземпляра райтера
-        return jsonWriterInstance;
+        // Ленивая инициализация райтера строго для текущего потока выполнения
+        IXdStorageObjectsWriter writer = threadLocalWriter.get();
+        if (writer == null) {
+            writer = new XdStorageDefaultObjectsWriter(services, simpleTypeHelper, idGenerator);
+            threadLocalWriter.set(writer);
+        }
+        return writer;
     }
 }
