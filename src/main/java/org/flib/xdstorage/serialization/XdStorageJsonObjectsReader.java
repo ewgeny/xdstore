@@ -34,7 +34,9 @@ public class XdStorageJsonObjectsReader implements IXdStorageObjectsReader {
     public Collection<Object> read(final Reader reader) throws XdStorageIOException, XdStorageException {
         final Collection<Object> result = new ArrayList<>();
         try {
-            mapper.clearSessionCache();
+            // ИСПРАВЛЕНИЕ: Убираем зачистку сессии на каждый чих!
+            // Это позволит мапперу склеить версии XdStorageBTree между последовательными вызовами read()
+            // mapper.clearSessionCache();
 
             final String rawJson = XdStorageJsonStreamLexer.readAll(reader);
             if (rawJson.trim().isEmpty()) return result;

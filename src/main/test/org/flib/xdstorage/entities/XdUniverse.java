@@ -6,6 +6,7 @@ import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
@@ -25,7 +26,7 @@ public class XdUniverse {
     }
 
     public Collection<XdGalaxy> getGalaxies() {
-        return galaxies;
+        return galaxies != null ? galaxies : Collections.emptyList();
     }
 
     public void setGalaxies(Collection<XdGalaxy> galaxies) {

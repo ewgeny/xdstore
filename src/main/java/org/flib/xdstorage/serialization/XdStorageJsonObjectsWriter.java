@@ -93,10 +93,28 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
         final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-        // Защита стека: разрываем петли циклических зависимостей СУБД через Identity Map сессии
+        // ИСПРАВЛЕНИЕ РАЗРЫВА ЦИКЛОВ: Пишем точный маркер ClassName@ID для маппера
         if (context.isVisited(object)) {
             XdStorageJsonPrinter.writeIndent(writer, indentLevel);
-            writer.write("{\"$ref\": \"" + cl.getName() + "@" + System.identityHashCode(object) + "\"}");
+
+            Object idVal = null;
+            if (clInfo.getIdField() != null) {
+                idVal = clInfo.getIdField().get(object);
+            }
+            if (idVal == null) {
+                String[] commonIdFields = {"idgeneration", "indexName", "resourceId"};
+                for (String fieldName : commonIdFields) {
+                    try {
+                        java.lang.reflect.Field f = cl.getDeclaredField(fieldName);
+                        f.setAccessible(true);
+                        Object val = f.get(object);
+                        if (val != null) { idVal = val; break; }
+                    } catch (Throwable ignored) {}
+                }
+            }
+
+            String refIdStr = (idVal != null) ? idVal.toString() : ("temp_" + System.identityHashCode(object));
+            writer.write("{\"$ref\":\"" + cl.getName() + "@" + refIdStr + "\"}");
             return;
         }
 
@@ -108,10 +126,10 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
         writer.write("{\n");
 
         XdStorageJsonPrinter.writeIndent(writer, indentLevel + 1);
-        writer.write("\"type\": \"" + cl.getName() + "\",\n");
+        writer.write("\"type\":\"" + cl.getName() + "\",\n");
 
         XdStorageJsonPrinter.writeIndent(writer, indentLevel + 1);
-        writer.write("\"properties\": {\n");
+        writer.write("\"properties\":{\n");
 
         Iterator<XdStorageObjectField> it = props.iterator();
         boolean first = true;
@@ -130,7 +148,7 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
             first = false;
 
             XdStorageJsonPrinter.writeIndent(writer, indentLevel + 2);
-            writer.write("\"" + property.getName() + "\": ");
+            writer.write("\"" + property.getName() + "\":");
             writeValue(value, writer, indentLevel + 2, context);
         }
         writer.write("\n");
@@ -153,22 +171,29 @@ public class XdStorageJsonObjectsWriter implements IXdStorageObjectsWriter {
         writer.write("{\n");
 
         XdStorageJsonPrinter.writeIndent(writer, indentLevel + 1);
-        writer.write("\"type\": \"" + XdStorageObjectUtils.getEntityClass(object.getClass()).getName() + "\",\n");
+        writer.write("\"type\":\"" + XdStorageObjectUtils.getEntityClass(object.getClass()).getName() + "\",\n");
 
         Object idVal = (field != null) ? field.get(object) : null;
         String idTypeName = (idVal != null) ? idVal.getClass().getName() : "java.lang.Object";
 
         XdStorageJsonPrinter.writeIndent(writer, indentLevel + 1);
-        writer.write("\"idType\": \"" + idTypeName + "\",\n");
+        writer.write("\"idType\":\"" + idTypeName + "\",\n");
 
         XdStorageJsonPrinter.writeIndent(writer, indentLevel + 1);
-        writer.write("\"id\": ");
+        writer.write("\"id\":");
         if (idVal == null) {
             writer.write("null");
         } else if (idVal instanceof Class) {
             writer.write("\"" + ((Class<?>) idVal).getName() + "\"");
+        } else if (simpleTypeHelper.isSimpleType(idVal.getClass(), idVal)) {
+            if (idVal.getClass() == Boolean.class || Number.class.isAssignableFrom(idVal.getClass())) {
+                writer.write(idVal.toString());
+            } else {
+                writer.write("\"" + XdStorageJsonPrinter.escapeJson(idVal.toString()) + "\"");
+            }
         } else {
-            writer.write("\"" + XdStorageJsonPrinter.escapeJson(idVal.toString()) + "\"");
+            // ИСПРАВЛЕНИЕ: Сложные составные ID пишем как полноценные объекты
+            writeValue(idVal, writer, indentLevel + 1, new XdStorageJsonContext());
         }
         writer.write("\n");
         XdStorageJsonPrinter.writeIndent(writer, indentLevel);
