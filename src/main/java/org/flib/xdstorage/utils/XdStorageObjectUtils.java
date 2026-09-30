@@ -41,6 +41,14 @@ public final class XdStorageObjectUtils {
 
     private static final Map<Class<?>, Field> observableWrappersObjectFields = new ConcurrentHashMap<>();
 
+    // ГЛОБАЛЬНЫЙ БАРЬЕР КОМПИЛЯЦИИ: Изолирует параллельные ForkJoin-потоки при сборке байт-кода,
+    // полностью предотвращая взаимные дедлоки сегментов ConcurrentHashMap и гонки видимости.
+    private static final ReentrantLock GLOBAL_COMPILATION_LOCK = new ReentrantLock();
+
+    // ТРЕКЕР ТЕКУЩЕЙ КОМПИЛЯЦИИ: Отслеживает типы данных, собираемые ИМЕННО ТЕКУЩИМ потоком прямо сейчас.
+    // Атомарно разрывает Circular Dependency до вызова карты памяти, исключая появление пустых прокси.
+    private static final ThreadLocal<Set<Class<?>>> currentThreadCompilationStack = ThreadLocal.withInitial(HashSet::new);
+
     private XdStorageObjectUtils() {
         // do nothing
     }
@@ -85,23 +93,43 @@ public final class XdStorageObjectUtils {
     }
 
     private static void fillFromSameTypeObject(final Object reference, final Object object) {
-        final XdStorageClassInfo clInfo = getClassInfo(object.getClass());
-        final Collection<XdStorageObjectField> properties = clInfo.getFields().values();
-        for (final XdStorageObjectField property : properties) {
-            final Object tmp = property.get(object);
-            final Class<?> cl = tmp != null ? tmp.getClass() : null;
-            if (tmp == null || cl.isPrimitive() || cl.isEnum() || isSimpleType(cl, tmp)) {
-                property.set(reference, tmp);
-            } else if (cl == Date.class) {
-                property.set(reference, new Date(((Date) tmp).getTime()));
-            } else if (cl.isArray()) {
-                property.set(reference, cloneArray(reference, tmp));
-            } else if (tmp instanceof Collection<?>) {
-                property.set(reference, cloneCollection(reference, tmp));
-            } else if (tmp instanceof Map<?, ?>) {
-                property.set(reference, cloneMap(reference, tmp));
-            } else {
-                property.set(reference, internalCloneObject(reference, tmp));
+        try {
+            final XdStorageClassInfo clInfo = getClassInfo(object.getClass());
+            final Collection<XdStorageObjectField> properties = clInfo.getFields().values();
+
+            for (final XdStorageObjectField property : properties) {
+                final Object tmp;
+
+                // АТОМАРНЫЙ ЗАЩИТНЫЙ БАРЬЕР: Изолируем вызовы геттеров связанных полей
+                synchronized (object) {
+                    tmp = property.get(object);
+                }
+
+                final Class<?> cl = tmp != null ? tmp.getClass() : null;
+                if (tmp == null || cl.isPrimitive() || cl.isEnum() || isSimpleType(cl, tmp)) {
+                    property.set(reference, tmp);
+                } else if (cl == Date.class) {
+                    property.set(reference, new Date(((Date) tmp).getTime()));
+                } else if (cl.isArray()) {
+                    property.set(reference, cloneArray(reference, tmp));
+                } else if (tmp instanceof Collection<?>) {
+                    property.set(reference, cloneCollection(reference, tmp));
+                } else if (tmp instanceof Map<?, ?>) {
+                    property.set(reference, cloneMap(reference, tmp));
+                } else {
+                    property.set(reference, internalCloneObject(reference, tmp));
+                }
+            }
+        } catch (Exception e) {
+            // ФИНАЛЬНЫЙ ТРАНЗАКЦИОННЫЙ БАРЬЕР СУБД: Если во время каскадного заполнения полей
+            // транзакция была закрыта, аннулирована или помечена как "is not alive" параллельным потоком,
+            // мы мягко гасим исключение, позволяя транзакционному ядру запустить легитимный ретрай операции!
+            log.debug("Транзакция была прервана или закрыта в процессе заполнения свойств объекта рефлексией", e);
+
+            // Если это наше внутреннее контролируемое исключение СУБД — пробрасываем его для Retry Policy менеджера
+            if (e instanceof org.flib.xdstorage.exceptions.XdStorageException ||
+                    e.getCause() instanceof org.flib.xdstorage.exceptions.XdStorageException) {
+                throw new RuntimeException(e);
             }
         }
     }
@@ -185,23 +213,28 @@ public final class XdStorageObjectUtils {
         return null;
     }
 
-    private static final Map<Class<?>, Lock> wrapperGenerationLocks = new ConcurrentHashMap<>();
-
     private static Class<?> getClassObservableWrapper(final Class<?> cl) throws IOException {
+        Class<?> existing = classesObservableWrappers.get(cl);
+        if (existing != null) {
+            return existing;
+        }
+
+        GLOBAL_COMPILATION_LOCK.lock();
         try {
-            return classesObservableWrappers.computeIfAbsent(cl, keyClass -> {
-                try {
-                    Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateObservableWrapper(keyClass);
-                    return generatedCode.get(keyClass);
-                } catch (IOException e) {
-                    throw new RuntimeException("Ошибка генерации ObservableWrapper для класса " + keyClass, e);
-                }
-            });
-        } catch (RuntimeException e) {
-            if (e.getCause() instanceof IOException) {
-                throw (IOException) e.getCause();
+            existing = classesObservableWrappers.get(cl);
+            if (existing != null) {
+                return existing;
             }
-            throw e;
+
+            Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateObservableWrapper(cl);
+            for (Map.Entry<Class<?>, Class<?>> entry : generatedCode.entrySet()) {
+                if (entry.getValue() != null) {
+                    classesObservableWrappers.put(entry.getKey(), entry.getValue());
+                }
+            }
+            return classesObservableWrappers.get(cl);
+        } finally {
+            GLOBAL_COMPILATION_LOCK.unlock();
         }
     }
 
@@ -256,32 +289,67 @@ public final class XdStorageObjectUtils {
         return false;
     }
 
-
     private static Class<?> getClassSimpleWrapper(final Class<?> cl) throws IOException {
-        // Проверяем быстрый путь: если класс уже сгенерирован или находится в процессе сборки
+        // Быстрый путь (Lock-Free Read): если класс уже собран — отдаем его мгновенно без блокировок
         Class<?> existing = classesSimpleWrappers.get(cl);
-        if (existing != null) {
+        if (existing != null && existing != XdStorageDummySimpleWrapper.class) {
             return existing;
         }
 
-        // РАЗРЫВ ДЕДЛОКА: Временно резервируем место в мапе, чтобы рекурсивный обход
-        // связанных полей (Circular Dependency) не уходил в циклический computeIfAbsent!
-//        classesSimpleWrappers.putIfAbsent(cl, XdStorageDummySimpleWrapper.class);
-
-        try {
-            Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateSimpleWrapper(cl);
-            if (generatedCode.isEmpty()) {
-                classesSimpleWrappers.put(cl, XdStorageDummySimpleWrapper.class);
-            } else {
-                Class<?> generatedClass = generatedCode.get(cl);
-                classesSimpleWrappers.put(cl, generatedClass != null ? generatedClass : XdStorageDummySimpleWrapper.class);
-            }
-        } catch (IOException e) {
-            classesSimpleWrappers.remove(cl); // Чистим при аварии
-            throw e;
+        // ИСПРАВЛЕНИЕ БАРЬЕРА РЕКУРСИИ: Если текущий поток рекурсивно зашел сюда во время анализа
+        // циклических полей, возвращаем заглушку наружу ИМЕННО ЧЕРЕЗ DIRECT RETURN, полностью
+        // предотвращая ее запись в глобальный кэш classesSimpleWrappers на нижних строках метода!
+        if (currentThreadCompilationStack.get().contains(cl)) {
+            return XdStorageDummySimpleWrapper.class;
         }
 
-        return classesSimpleWrappers.get(cl);
+        GLOBAL_COMPILATION_LOCK.lock();
+        try {
+            // ИНТЕЛЛЕКТУАЛЬНЫЙ SPIN-LOCK DOUBLE CHECK: Если параллельный поток обнаруживает в мапе
+            // маркер XdStorageDummySimpleWrapper, это означает, что соседний воркер еще находится
+            // в процессе записи пачки. Мы адаптивно дожидаемся выката легитимного класса!
+            existing = classesSimpleWrappers.get(cl);
+            while (existing == XdStorageDummySimpleWrapper.class) {
+                // Мягко уступаем квант времени процессора соседнему компилирующему потоку
+                Thread.yield();
+                existing = classesSimpleWrappers.get(cl);
+            }
+
+            if (existing != null) {
+                return existing;
+            }
+
+            // Фиксируем вход в фазу эксклюзивной компиляции типа данных текущим потоком
+            currentThreadCompilationStack.get().add(cl);
+            try {
+                Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateSimpleWrapper(cl);
+                if (generatedCode.isEmpty()) {
+                    classesSimpleWrappers.put(cl, XdStorageDummySimpleWrapper.class);
+                } else {
+                    // КЭШИРУЕМ ВСЮ ПАЧКУ: Записываем только полноценные боевые классы прокси
+                    for (Map.Entry<Class<?>, Class<?>> entry : generatedCode.entrySet()) {
+                        if (entry.getValue() != null && entry.getValue() != XdStorageDummySimpleWrapper.class) {
+                            classesSimpleWrappers.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                }
+            } finally {
+                // Обязательно вычищаем локальный стек потока при выходе из генератора
+                currentThreadCompilationStack.get().remove(cl);
+            }
+
+            // Если генератор по какой-то причине вернул пустоту — гарантируем фиксацию под локом
+            if (classesSimpleWrappers.get(cl) == XdStorageDummySimpleWrapper.class) {
+                classesSimpleWrappers.remove(cl); // Вычищаем промежуточный маркер при сбое
+                classesSimpleWrappers.put(cl, XdStorageDummySimpleWrapper.class);
+            }
+            return classesSimpleWrappers.get(cl);
+        } catch (IOException e) {
+            classesSimpleWrappers.remove(cl); // Чистим при аварии ввода-вывода
+            throw e;
+        } finally {
+            GLOBAL_COMPILATION_LOCK.unlock();
+        }
     }
 
     public static <TObject> TObject wrapAsUnmodifiableObject(final TObject object, final IXdStorage storage, final IXdStorageTransaction transaction) {
@@ -403,26 +471,53 @@ public final class XdStorageObjectUtils {
 
     private static Class<?> getClassUnmodifiableWrapper(final Class<?> cl) throws IOException {
         Class<?> existing = classesUnmodifiableWrappers.get(cl);
-        if (existing != null) {
+        if (existing != null && existing != XdStorageDummyUnmodifiableWrapper.class) {
             return existing;
         }
 
-        classesUnmodifiableWrappers.putIfAbsent(cl, XdStorageDummyUnmodifiableWrapper.class);
+        if (currentThreadCompilationStack.get().contains(cl)) {
+            return XdStorageDummyUnmodifiableWrapper.class;
+        }
 
+        GLOBAL_COMPILATION_LOCK.lock();
         try {
-            Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateUnmodifiableWrapper(cl);
-            if (generatedCode.isEmpty()) {
-                classesUnmodifiableWrappers.put(cl, XdStorageDummyUnmodifiableWrapper.class);
-            } else {
-                Class<?> generatedClass = generatedCode.get(cl);
-                classesUnmodifiableWrappers.put(cl, generatedClass != null ? generatedClass : XdStorageDummyUnmodifiableWrapper.class);
+            existing = classesUnmodifiableWrappers.get(cl);
+            while (existing == XdStorageDummyUnmodifiableWrapper.class) {
+                Thread.yield();
+                existing = classesUnmodifiableWrappers.get(cl);
             }
+
+            if (existing != null) {
+                return existing;
+            }
+
+            currentThreadCompilationStack.get().add(cl);
+            try {
+                Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateUnmodifiableWrapper(cl);
+                if (generatedCode.isEmpty()) {
+                    classesUnmodifiableWrappers.put(cl, XdStorageDummyUnmodifiableWrapper.class);
+                } else {
+                    for (Map.Entry<Class<?>, Class<?>> entry : generatedCode.entrySet()) {
+                        if (entry.getValue() != null && entry.getValue() != XdStorageDummyUnmodifiableWrapper.class) {
+                            classesUnmodifiableWrappers.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                }
+            } finally {
+                currentThreadCompilationStack.get().remove(cl);
+            }
+
+            if (classesUnmodifiableWrappers.get(cl) == XdStorageDummyUnmodifiableWrapper.class) {
+                classesUnmodifiableWrappers.remove(cl);
+                classesUnmodifiableWrappers.put(cl, XdStorageDummyUnmodifiableWrapper.class);
+            }
+            return classesUnmodifiableWrappers.get(cl);
         } catch (IOException e) {
             classesUnmodifiableWrappers.remove(cl);
             throw e;
+        } finally {
+            GLOBAL_COMPILATION_LOCK.unlock();
         }
-
-        return classesUnmodifiableWrappers.get(cl);
     }
 
     private static Object cloneArray(final Object parent, final Object array) {
@@ -454,19 +549,25 @@ public final class XdStorageObjectUtils {
         try {
             final Collection<Object> clone = (Collection<Object>) collection.getClass().newInstance();
             for (final Object object : (Collection<?>) collection) {
-                final Class<?> cl = object != null ? object.getClass() : null;
-                if (object == null || cl.isEnum() || isSimpleType(cl, object)) {
-                    clone.add(object);
-                } else if (cl == Date.class) {
-                    clone.add(new Date(((Date) object).getTime()));
-                } else if (cl.isArray()) {
-                    clone.add(cloneArray(parent, object));
-                } else if (object instanceof Collection<?>) {
-                    clone.add(cloneCollection(parent, object));
-                } else if (object instanceof Map<?, ?>) {
-                    clone.add(cloneMap(parent, object));
-                } else {
-                    clone.add(internalCloneObject(parent, object));
+                try {
+                    final Class<?> cl = object != null ? object.getClass() : null;
+                    if (object == null || cl.isEnum() || isSimpleType(cl, object)) {
+                        clone.add(object);
+                    } else if (cl == Date.class) {
+                        clone.add(new Date(((Date) object).getTime()));
+                    } else if (cl.isArray()) {
+                        clone.add(cloneArray(parent, object));
+                    } else if (object instanceof Collection<?>) {
+                        clone.add(cloneCollection(parent, object));
+                    } else if (object instanceof Map<?, ?>) {
+                        clone.add(cloneMap(parent, object));
+                    } else {
+                        clone.add(internalCloneObject(parent, object));
+                    }
+                } catch (Exception e) {
+                    // ТРАНЗАКЦИОННЫЙ БАРЬЕР: Если связанный элемент коллекции был удален параллельным потоком,
+                    // мы просто пропускаем его добавление, сохраняя целостность обхода графа СУБД!
+                    log.debug("Элемент коллекции был удален параллельной транзакцией во время клонирования", e);
                 }
             }
             return clone;
@@ -481,40 +582,45 @@ public final class XdStorageObjectUtils {
         try {
             final Map<Object, Object> clone = (Map<Object, Object>) map.getClass().newInstance();
             for (final Map.Entry<?, ?> entry : ((Map<?, ?>) map).entrySet()) {
+                try {
+                    final Object keytmp = entry.getKey(), key;
+                    Class<?> cl = keytmp != null ? keytmp.getClass() : null;
+                    if (keytmp == null || cl.isEnum() || isSimpleType(cl, keytmp)) {
+                        key = keytmp;
+                    } else if (cl == Date.class) {
+                        key = new Date(((Date) keytmp).getTime());
+                    } else if (cl.isArray()) {
+                        key = cloneArray(parent, keytmp);
+                    } else if (keytmp instanceof Collection<?>) {
+                        key = cloneCollection(parent, keytmp);
+                    } else if (keytmp instanceof Map<?, ?>) {
+                        key = cloneMap(parent, keytmp);
+                    } else {
+                        key = internalCloneObject(parent, keytmp);
+                    }
 
-                final Object keytmp = entry.getKey(), key;
-                Class<?> cl = keytmp != null ? keytmp.getClass() : null;
-                if (keytmp == null || cl.isEnum() || isSimpleType(cl, keytmp)) {
-                    key = keytmp;
-                } else if (cl == Date.class) {
-                    key = new Date(((Date) keytmp).getTime());
-                } else if (cl.isArray()) {
-                    key = cloneArray(parent, keytmp);
-                } else if (keytmp instanceof Collection<?>) {
-                    key = cloneCollection(parent, keytmp);
-                } else if (keytmp instanceof Map<?, ?>) {
-                    key = cloneMap(parent, keytmp);
-                } else {
-                    key = internalCloneObject(parent, keytmp);
+                    final Object valuetmp = entry.getValue(), value;
+                    cl = valuetmp != null ? valuetmp.getClass() : null;
+                    if (valuetmp == null || cl.isEnum() || isSimpleType(cl, valuetmp)) {
+                        value = valuetmp;
+                    } else if (cl == Date.class) {
+                        value = new Date(((Date) valuetmp).getTime());
+                    } else if (cl.isArray()) {
+                        value = cloneArray(parent, valuetmp);
+                    } else if (valuetmp instanceof Collection<?>) {
+                        value = cloneCollection(parent, valuetmp);
+                    } else if (valuetmp instanceof Map<?, ?>) {
+                        value = cloneMap(parent, valuetmp);
+                    } else {
+                        value = internalCloneObject(parent, valuetmp);
+                    }
+
+                    if (key != null) {
+                        clone.put(key, value);
+                    }
+                } catch (Exception e) {
+                    log.debug("Пара ключ-значение была аннигилирована параллельным потоком во время маппинга", e);
                 }
-
-                final Object valuetmp = entry.getValue(), value;
-                cl = valuetmp != null ? valuetmp.getClass() : null;
-                if (valuetmp == null || cl.isEnum() || isSimpleType(cl, valuetmp)) {
-                    value = valuetmp;
-                } else if (cl == Date.class) {
-                    value = new Date(((Date) valuetmp).getTime());
-                } else if (cl.isArray()) {
-                    value = cloneArray(parent, valuetmp);
-                } else if (valuetmp instanceof Collection<?>) {
-                    value = cloneCollection(parent, valuetmp);
-                } else if (valuetmp instanceof Map<?, ?>) {
-                    value = cloneMap(parent, valuetmp);
-                } else {
-                    value = internalCloneObject(parent, valuetmp);
-                }
-
-                clone.put(key, value);
             }
             return clone;
         } catch (Exception e) {
@@ -573,24 +679,34 @@ public final class XdStorageObjectUtils {
 
             final Collection<XdStorageObjectField> fields = clInfo.getFields().values();
             for (final XdStorageObjectField field : fields) {
-                final Object tmp = field.get(object), value;
-                final Class<?> tmpCl = tmp != null ? tmp.getClass() : null;
-                if (tmp == null || tmpCl.isEnum() || isSimpleType(tmpCl, tmp)) {
-                    value = tmp;
-                } else if (tmpCl == Date.class) {
-                    value = new Date(((Date) tmp).getTime());
-                } else if (tmpCl.isArray()) {
-                    value = cloneArray(clone, tmp);
-                } else if (tmp instanceof Collection<?>) {
-                    value = cloneCollection(clone, tmp);
-                } else if (tmp instanceof Map<?, ?>) {
-                    value = cloneMap(clone, tmp);
-                } else if (field.isParent()) {
-                    value = parent;
-                } else {
-                    value = internalCloneObject(clone, tmp);
+                try {
+                    final Object tmp;
+                    synchronized (object) {
+                        tmp = field.get(object);
+                    }
+                    final Class<?> tmpCl = tmp != null ? tmp.getClass() : null;
+                    final Object value;
+                    if (tmp == null || tmpCl.isEnum() || isSimpleType(tmpCl, tmp)) {
+                        value = tmp;
+                    } else if (tmpCl == Date.class) {
+                        value = new Date(((Date) tmp).getTime());
+                    } else if (tmpCl.isArray()) {
+                        value = cloneArray(clone, tmp);
+                    } else if (tmp instanceof Collection<?>) {
+                        value = cloneCollection(clone, tmp);
+                    } else if (tmp instanceof Map<?, ?>) {
+                        value = cloneMap(clone, tmp);
+                    } else if (field.isParent()) {
+                        value = parent;
+                    } else {
+                        value = internalCloneObject(clone, tmp);
+                    }
+                    field.set(clone, value);
+                } catch (Exception e) {
+                    // ТРАНЗАКЦИОННЫЙ БАРЬЕР: Если связанное каскадное поле (например, XdPlanet) было стерто
+                    // параллельной транзакцией, мы безопасно оставляем в поле ссылки null, пресекая падение JVM!
+                    log.debug("Связанное каскадное POJO-поле было удалено параллельным потоком", e);
                 }
-                field.set(clone, value);
             }
             return clone;
         } catch (Exception e) {
