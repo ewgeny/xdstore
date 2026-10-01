@@ -3,827 +3,222 @@ package org.flib.xdstorage.serialization;
 import org.flib.xdstorage.exceptions.XdStorageIOException;
 import org.flib.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 import org.flib.xdstorage.object.XdStorageIdentifiableObject;
-import org.flib.xdstorage.utils.XdStorageClassInfo;
-import org.flib.xdstorage.utils.XdStorageObjectField;
+import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import java.io.Reader;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
 
-    private IXdStorageSimpleTypeHelper simpleTypeHelper;
+    private final XdPrimitiveTypeMapper mapper;
+    private final XdObjectPropertyHydrator hydrator;
+    private final XdXmlStreamParser xml;
+    private final XdLegacyMetadataReader legacyReader;
 
-    private Map<Class<?>, Map<String, XdStorageObjectField>> properties = new ConcurrentHashMap<>();
-
-    public XdStorageDefaultObjectsReader(final IXdStorageSimpleTypeHelper simpleTypeHelper) {
-        this.simpleTypeHelper = simpleTypeHelper;
+    public XdStorageDefaultObjectsReader(final IXdStorageSimpleTypeHelper simpleHelper) {
+        this.mapper = new XdPrimitiveTypeMapper(simpleHelper);
+        this.hydrator = new XdObjectPropertyHydrator();
+        this.xml = new XdXmlStreamParser();
+        this.legacyReader = new XdLegacyMetadataReader(mapper, hydrator, xml);
     }
 
     @Override
-    public Collection<Object> readReferences(final Reader reader, final XdStorageObjectIdField field) throws XdStorageIOException {
-        Collection<Object> result = new ArrayList<Object>();
+    public Collection<Object> readReferences(final Reader r, final XdStorageObjectIdField f) throws XdStorageIOException {
+        Collection<Object> res = new ArrayList<>();
         try {
-            XMLStreamReader xmlReader = XMLInputFactory.newInstance().createXMLStreamReader(reader);
-            Object tmp = null;
-            while (xmlReader.hasNext()) {
-                switch (xmlReader.next()) {
-                    case XMLStreamConstants.START_ELEMENT:
-                        if (xmlReader.getLocalName().equals("object") || xmlReader.getLocalName().equals("reference")) {
-                            tmp = readElement(xmlReader, field);
-                        }
-                        break;
+            XMLStreamReader xReader = XMLInputFactory.newInstance().createXMLStreamReader(r);
+            final String[] fn = new String[]{null};
+            while (xReader.hasNext()) {
+                if (xReader.next() == XMLStreamConstants.START_ELEMENT && (xReader.getLocalName().equals("object") || xReader.getLocalName().equals("reference"))) {
+                    Object tmp = readReference(fn, xReader, f, null);
+                    if (tmp != null) res.add(tmp);
                 }
-                if (tmp != null)
-                    result.add(tmp);
             }
-        } catch (final Throwable cause) { // stupid quick solution
+        } catch (Throwable cause) {
             throw new XdStorageIOException(cause);
         }
-        return result;
+        return res;
     }
 
     @Override
-    public Collection<Object> read(final Reader reader) throws XdStorageIOException {
-        Collection<Object> result = new ArrayList<Object>();
+    public Collection<Object> read(final Reader r) throws XdStorageIOException {
+        return read(r, null);
+    }
+
+    @Override
+    public Collection<Object> read(final Reader r, final IXdStorageTransaction tx) throws XdStorageIOException {
+        Collection<Object> res = new ArrayList<>();
         try {
-            XMLStreamReader xmlReader = XMLInputFactory.newInstance().createXMLStreamReader(reader);
-            while (xmlReader.hasNext()) {
-                Object tmp = null;
-                switch (xmlReader.next()) {
-                    case XMLStreamConstants.START_ELEMENT:
-                        if (xmlReader.getLocalName().equals("object") || xmlReader.getLocalName().equals("reference")) {
-                            tmp = readElement(xmlReader);
-                        }
-                        break;
+            XMLStreamReader xReader = XMLInputFactory.newInstance().createXMLStreamReader(r);
+            while (xReader.hasNext()) {
+                if (xReader.next() == XMLStreamConstants.START_ELEMENT && (xReader.getLocalName().equals("object") || xReader.getLocalName().equals("reference"))) {
+                    final String[] fn = new String[]{null};
+                    Object tmp = xReader.getLocalName().equals("object") ? read(fn, xReader, tx) : readReference(fn, xReader, tx);
+                    if (tmp != null) res.add(tmp);
                 }
-                if (tmp != null)
-                    result.add(tmp);
             }
-        } catch (final Throwable cause) { // stupid quick solution
-            if (cause.getMessage().contains("Premature end of file.")) {
+        } catch (Throwable cause) {
+            if (cause.getMessage() != null && cause.getMessage().contains("Premature end of file."))
                 return Collections.emptyList();
-            }
             throw new XdStorageIOException(cause);
         }
-        return result;
+        return res;
     }
 
-    private Object readElement(final XMLStreamReader xmlReader) throws Exception {
-        Object result = null;
-        final String[] fn = new String[]{null};
-        final String name = xmlReader.getLocalName();
-        if (name.equals("object")) {
-            result = read(fn, xmlReader);
-        }
-        return result;
-    }
-
-    private Object readElement(final XMLStreamReader xmlReader, final XdStorageObjectIdField field) throws Exception {
-        Object result = null;
-        final String[] fn = new String[]{null};
-        final String name = xmlReader.getLocalName();
-        if (name.equals("reference")) {
-            result = readReference(fn, xmlReader, field);
-        }
-        return result;
-    }
-
-    private Object read(final String fieldName[], final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, value = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("value")) {
-                value = attValue;
-            }
-        }
-        if (className == null) {
-            xmlReader.nextTag();
+    private Object read(final String[] fn, final XMLStreamReader xReader, final IXdStorageTransaction tx) throws Exception {
+        final String[] cl = {null}, val = {null}, cId = {null};
+        xml.fillAttrs(xReader, fn, cl, val, cId);
+        if (cl[0] == null) {
+            xReader.nextTag();
             return null;
         }
 
-        final Class<?> cl = Class.forName(className);
-        if (value != null) {
-            xmlReader.nextTag();
-            return simpleTypeHelper.simpleTypeFromString(cl, value);
+        final Class<?> targetClass = Class.forName(cl[0]);
+        if (val[0] != null) {
+            xReader.nextTag();
+            return mapper.toSimple(targetClass, val[0]);
         }
 
-        Map<String, XdStorageObjectField> props = properties.get(cl);
-        if (props == null) {
-            properties.put(cl, props = XdStorageObjectUtils.getClassInfo(cl).getFields());
+        Object res = hydrator.create(targetClass);
+        final String subFn[] = new String[]{null};
+        while (xReader.hasNext()) {
+            if (xReader.nextTag() == XMLStreamConstants.END_ELEMENT && xReader.getLocalName().equals("object")) break;
+            if (xReader.getEventType() != XMLStreamConstants.START_ELEMENT) continue;
+
+            final String tag = xReader.getLocalName();
+            Object tmp = null;
+            if (tag.equals("object")) tmp = read(subFn, xReader, tx);
+            else if (tag.equals("array")) tmp = readArray(subFn, xReader, tx);
+            else if (tag.equals("primitive"))
+                tmp = mapper.toPrimitive(xml.getAttr(xReader, "class"), xml.getAttr(xReader, "value"));
+            else if (tag.equals("enum"))
+                tmp = mapper.toEnum(xml.getAttr(xReader, "class"), xml.getAttr(xReader, "value"));
+            else if (tag.equals("collection")) tmp = readCollection(subFn, xReader, tx);
+            else if (tag.equals("map")) tmp = readMap(subFn, xReader, tx);
+            else if (tag.equals("reference")) tmp = readReference(subFn, xReader, tx);
+
+            hydrator.inject(res, hydrator.getMeta(targetClass), subFn[0], tmp);
         }
-
-        Object result = cl.newInstance(), tmp = null;
-        final String fn[] = new String[]{null};
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("object"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT)
-                continue;
-
-            final String elemName = xmlReader.getLocalName();
-            if (elemName.equals("object")) {
-                tmp = read(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                tmp = readArray(fn, xmlReader);
-            } else if (elemName.equals("primitive")) {
-                tmp = readPrimitive(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                tmp = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                tmp = readCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                tmp = readMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                tmp = readReference(fn, xmlReader);
-            }
-            final XdStorageObjectField property = props.get(fn[0]);
-            if (property != null) {
-                property.set(result, tmp);
-            }
-        }
-
-        return result;
+        return res;
     }
 
-    private Object readArray(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, length = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("length")) {
-                length = attValue;
-            }
-        }
-
-        Class<?> componentType;
-        if ((componentType = getPrimitiveType(className)) == null) {
-            componentType = Class.forName(className);
-        }
-        final Object array = Array.newInstance(componentType, Integer.parseInt(length));
-
-        Object tmp = null;
-        final String fn[] = new String[]{null};
+    private Object readArray(final String[] fn, final XMLStreamReader xReader, final IXdStorageTransaction tx) throws Exception {
+        final String[] cl = {null}, len = {null}, dummy = {null};
+        xml.fillAttrs(xReader, fn, cl, len, dummy);
+        Class<?> compType = mapper.getPrimitiveType(cl[0]);
+        if (compType == null) compType = Class.forName(cl[0]);
+        final Object arr = Array.newInstance(compType, Integer.parseInt(len[0]));
+        final String subFn[] = new String[]{null};
         int i = 0;
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("array"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT)
-                continue;
-
-            final String elemName = xmlReader.getLocalName();
-            if (elemName.equals("object")) {
-                tmp = read(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                tmp = readArray(fn, xmlReader);
-            } else if (elemName.equals("primitive")) {
-                tmp = readPrimitive(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                tmp = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                tmp = readCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                tmp = readMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                tmp = readReference(fn, xmlReader);
-            }
-            Array.set(array, i, tmp);
-            ++i;
+        while (xReader.hasNext()) {
+            if (xReader.nextTag() == XMLStreamConstants.END_ELEMENT && xReader.getLocalName().equals("array")) break;
+            if (xReader.getEventType() != XMLStreamConstants.START_ELEMENT) continue;
+            Array.set(arr, i++, parseDomainSub(xReader, subFn, tx));
         }
-
-        return array;
+        return arr;
     }
 
-    private Class<?> getPrimitiveType(final String className) {
-        if (className.equals(byte.class.getName())) {
-            return byte.class;
+    @SuppressWarnings("unchecked")
+    private Object readCollection(final String[] fn, final XMLStreamReader xReader, final IXdStorageTransaction tx) throws Exception {
+        final String cl = xml.getAttr(xReader, "class");
+        fn[0] = xml.getAttr(xReader, "name");
+        Collection<Object> col = hydrator.createCol(cl);
+        final String subFn[] = new String[]{null};
+        while (xReader.hasNext()) {
+            if (xReader.nextTag() == XMLStreamConstants.END_ELEMENT && xReader.getLocalName().equals("collection"))
+                break;
+            if (xReader.getEventType() != XMLStreamConstants.START_ELEMENT) continue;
+            col.add(parseDomainSub(xReader, subFn, tx));
         }
-        if (className.equals(short.class.getName())) {
-            return short.class;
+        return col;
+    }
+
+    private Object readMap(final String[] fn, final XMLStreamReader xReader, final IXdStorageTransaction tx) throws Exception {
+        fn[0] = xml.getAttr(xReader, "name");
+        final String cl = xml.getAttr(xReader, "class");
+        Map<Object, Object> map = hydrator.createMap(cl);
+        final String subFn[] = new String[]{null};
+        while (xReader.hasNext()) {
+            if (xReader.nextTag() == XMLStreamConstants.END_ELEMENT && xReader.getLocalName().equals("map")) break;
+            if (xReader.getEventType() != XMLStreamConstants.START_ELEMENT || !xReader.getLocalName().equals("entry"))
+                continue;
+            xReader.nextTag();
+            Object k = parseDomainSub(xReader, subFn, tx);
+            xReader.next();
+            xReader.nextTag();
+            Object v = parseDomainSub(xReader, subFn, tx);
+            map.put(k, v);
         }
-        if (className.equals(int.class.getName())) {
-            return int.class;
+        return map;
+    }
+
+    private Object parseDomainSub(XMLStreamReader xReader, String[] subFn, IXdStorageTransaction tx) throws Exception {
+        final String tag = xReader.getLocalName();
+        if (tag.equals("object")) return read(subFn, xReader, tx);
+        if (tag.equals("array")) return readArray(subFn, xReader, tx);
+        if (tag.equals("enum")) return mapper.toEnum(xml.getAttr(xReader, "class"), xml.getAttr(xReader, "value"));
+        if (tag.equals("collection")) return readCollection(subFn, xReader, tx);
+        if (tag.equals("map")) return readMap(subFn, xReader, tx);
+        if (tag.equals("reference")) return readReference(subFn, xReader, tx);
+        return null;
+    }
+
+    private Object readReference(final String[] fn, final XMLStreamReader xReader, final IXdStorageTransaction tx) throws Exception {
+        final String[] cl = {null}, val = {null}, cId = {null};
+        xml.fillAttrs(xReader, fn, cl, val, cId);
+        final Class<?> targetClass = Class.forName(cl[0]);
+        Object objectId = extractId(xReader, cId[0], val[0], tx);
+
+        if (tx != null && objectId != null) {
+            Object cached = tx.getStorage().load(targetClass, objectId);
+            if (cached != null) return cached;
         }
-        if (className.equals(long.class.getName())) {
-            return long.class;
+
+        final Object res = hydrator.create(targetClass);
+        XdStorageObjectUtils.getClassInfo(res.getClass()).getIdField().set(res, objectId);
+        return res;
+    }
+
+    private Object readReference(final String[] fn, final XMLStreamReader xReader, final XdStorageObjectIdField field, final IXdStorageTransaction tx) throws Exception {
+        final String[] cl = {null}, val = {null}, cId = {null};
+        xml.fillAttrs(xReader, fn, cl, val, cId);
+        final Class<?> targetClass = Class.forName(cl[0]);
+        Object objectId = extractId(xReader, cId[0], val[0], tx);
+
+        if (tx != null && objectId != null) {
+            Object cached = tx.getStorage().load(targetClass, objectId);
+            if (cached != null) return cached;
         }
-        if (className.equals(float.class.getName())) {
-            return float.class;
+
+        final Object res = hydrator.create(targetClass);
+        field.set(res, objectId);
+        return res;
+    }
+
+    private Object extractId(XMLStreamReader xReader, String cId, String val, IXdStorageTransaction tx) throws Exception {
+        final Class<?> idClass = Class.forName(cId);
+        if (idClass == Class.class || XdStorageObjectUtils.isSimpleType(idClass, null)) {
+            if (idClass == Class.class) return Class.forName(val);
+            return idClass.getConstructor(String.class).newInstance(val);
         }
-        if (className.equals(double.class.getName())) {
-            return double.class;
-        }
-        if (className.equals(boolean.class.getName())) {
-            return boolean.class;
-        }
-        if (className.equals(char.class.getName())) {
-            return char.class;
+        while (xReader.hasNext()) {
+            if (xReader.next() == XMLStreamConstants.START_ELEMENT && xReader.getLocalName().equals("object")) {
+                final String[] fn = {null};
+                return read(fn, xReader, tx);
+            }
         }
         return null;
     }
 
-    private Object readPrimitive(final String[] fieldName, final XMLStreamReader xmlReader) {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, value = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("value")) {
-                value = attValue;
-            }
-        }
-
-        Object result = null;
-        if (className.equals("byte")) {
-            result = Byte.parseByte(value);
-        } else if (className.equals("short")) {
-            result = Short.parseShort(value);
-        } else if (className.equals("int")) {
-            result = Integer.parseInt(value);
-        } else if (className.equals("long")) {
-            result = Long.parseLong(value);
-        } else if (className.equals("float")) {
-            result = Float.parseFloat(value);
-        } else if (className.equals("double")) {
-            result = Double.parseDouble(value);
-        } else if (className.equals("boolean")) {
-            result = Boolean.parseBoolean(value);
-        } else if (className.equals("char")) {
-            result = value.charAt(0);
-        }
-        return result;
-    }
-
-    private Object readEnum(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, value = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("value")) {
-                value = attValue;
-            }
-        }
-
-        final Class<?> cl = Class.forName(className);
-        final Method m = cl.getMethod("valueOf", String.class);
-        return m.invoke(cl, value);
-    }
-
-    private Object readMapEnum(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, value = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("value")) {
-                value = attValue;
-            }
-        }
-
-        final Class<?> cl = Class.forName(className);
-        final Method m = cl.getMethod("valueOf", String.class);
-        return m.invoke(cl, value);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object readCollection(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            }
-        }
-
-        Class<?> cl = Class.forName(className);
-        Collection<Object> collection = (Collection<Object>) cl.newInstance();
-        final String[] fn = new String[]{null};
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("collection"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT)
-                continue;
-
-            final String elemName = xmlReader.getLocalName();
-            Object tmp = null;
-            if (elemName.equals("object")) {
-                tmp = read(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                tmp = readArray(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                tmp = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                tmp = readCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                tmp = readMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                tmp = readReference(fn, xmlReader);
-            }
-            collection.add(tmp);
-        }
-        return collection;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object readMap(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            }
-        }
-
-        Class<?> cl = Class.forName(className);
-        Map<Object, Object> map = (Map<Object, Object>) cl.newInstance();
-        final String[] fn = new String[]{null};
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("map"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT || !xmlReader.getLocalName().equals("entry"))
-                continue;
-
-            xmlReader.nextTag();
-            String elemName = xmlReader.getLocalName();
-            Object key = null;
-            if (elemName.equals("object")) {
-                key = read(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                key = readArray(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                key = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                key = readCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                key = readMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                key = readReference(fn, xmlReader);
-            }
-            // end of prev element
-            xmlReader.next();
-
-            xmlReader.nextTag();
-            elemName = xmlReader.getLocalName();
-            Object value = null;
-            if (elemName.equals("object")) {
-                value = read(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                value = readArray(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                value = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                value = readCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                value = readMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                value = readReference(fn, xmlReader);
-            }
-            map.put(key, value);
-        }
-        return map;
-    }
-
-    private Object readReference(final String fieldName[], final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, idValue = null, classObjectId = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("dataStorageId")) {
-                idValue = attValue;
-            } else if (attName.equals("classObjectId")) {
-                classObjectId = attValue;
-            } else if (attName.equals("objectId")) {
-                idValue = attValue;
-            }
-        }
-
-        final Object result = Class.forName(className).newInstance();
-
-        final Class<?> idClass = Class.forName(classObjectId);
-        Object objectId = null;
-        if (idClass == Class.class || XdStorageObjectUtils.isSimpleType(idClass, null)) {
-            if (idClass == Class.class) {
-                objectId = Class.forName(idValue);
-            } else {
-                final Constructor<?> constructor = idClass.getConstructor(new Class<?>[]{String.class});
-                objectId = constructor.newInstance(new Object[]{idValue});
-            }
-        } else {
-            boolean stop = false;
-            while (xmlReader.hasNext()) {
-                switch (xmlReader.next()) {
-                    case XMLStreamConstants.START_ELEMENT:
-                        if (xmlReader.getLocalName().equals("object")) {
-                            objectId = readElement(xmlReader);
-                            stop = true;
-                        }
-                        break;
-                }
-                if (stop) {
-                    break;
-                }
-            }
-        }
-
-        final XdStorageObjectIdField field = XdStorageObjectUtils.getClassInfo(result.getClass()).getIdField();
-        field.set(result, objectId);
-        return result;
-    }
-
-    private Object readReference(final String fieldName[], final XMLStreamReader xmlReader, final XdStorageObjectIdField field) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, classObjectId = null, idValue = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("classObjectId")) {
-                classObjectId = attValue;
-            } else if (attName.equals("objectId")) {
-                idValue = attValue;
-            }
-        }
-
-        final Class<?> idClass = Class.forName(classObjectId);
-        Object objectId = null;
-        if (idClass == Class.class || XdStorageObjectUtils.isSimpleType(idClass, null)) {
-            if (idClass == Class.class) {
-                objectId = Class.forName(idValue);
-            } else {
-                final Constructor<?> constructor = idClass.getConstructor(new Class<?>[]{String.class});
-                objectId = constructor.newInstance(new Object[]{idValue});
-            }
-        } else {
-            boolean stop = false;
-            while (xmlReader.hasNext()) {
-                switch (xmlReader.next()) {
-                    case XMLStreamConstants.START_ELEMENT:
-                        if (xmlReader.getLocalName().equals("object")) {
-                            objectId = readElement(xmlReader);
-                            stop = true;
-                        }
-                        break;
-                }
-                if (stop) {
-                    break;
-                }
-            }
-        }
-
-        final Object result = Class.forName(className).newInstance();
-        field.set(result, objectId);
-        return result;
-    }
-
     @Override
-    public Collection<XdStorageIdentifiableObject> readData(final Reader reader, final XdStorageObjectIdField field) throws XdStorageIOException {
-        Collection<XdStorageIdentifiableObject> result = new ArrayList<>();
-        try {
-            XMLStreamReader xmlReader = XMLInputFactory.newInstance().createXMLStreamReader(reader);
-            XdStorageIdentifiableObject tmp = null;
-            final String[] fieldName = new String[]{null};
-            while (xmlReader.hasNext()) {
-                switch (xmlReader.next()) {
-                    case XMLStreamConstants.START_ELEMENT:
-                        if (xmlReader.getLocalName().equals("object")) {
-                            tmp = (XdStorageIdentifiableObject) readObjectData(fieldName, xmlReader);
-                        } else if (xmlReader.getLocalName().equals("reference")) {
-                            tmp = (XdStorageIdentifiableObject) readObjectDataReference(fieldName, xmlReader);
-                        }
-                        break;
-                }
-                if (tmp != null)
-                    result.add(tmp);
-            }
-        } catch (final Throwable cause) { // stupid quick solution
-            throw new XdStorageIOException(cause);
-        }
-        return result;
-    }
-
-    private Object readObjectData(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, value = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("value")) {
-                value = attValue;
-            }
-        }
-        if (className == null) {
-            xmlReader.nextTag();
-            return null;
-        }
-
-        final Class<?> cl = Class.forName(className);
-        if (value != null) {
-            xmlReader.nextTag();
-            return simpleTypeHelper.simpleTypeFromString(cl, value);
-        }
-
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
-
-        Map<String, XdStorageObjectField> props = properties.get(cl);
-        if (props == null) {
-            properties.put(cl, props = clInfo.getFields());
-        }
-
-        final XdStorageObjectIdField idField = clInfo.getIdField();
-
-        final XdStorageIdentifiableObject result = new XdStorageIdentifiableObject();
-        result.setType(cl);
-
-        final String fn[] = new String[]{null};
-        Object tmp = null;
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("object"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT)
-                continue;
-
-            final String elemName = xmlReader.getLocalName();
-            if (elemName.equals("object")) {
-                tmp = readObjectData(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                tmp = readObjectDataArray(fn, xmlReader);
-            } else if (elemName.equals("primitive")) {
-                tmp = readPrimitive(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                tmp = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                tmp = readObjectDataCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                tmp = readObjectDataMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                tmp = readObjectDataReference(fn, xmlReader);
-            }
-            if (fn[0].equals(idField.getName())) {
-                result.setId(tmp);
-            } else {
-                result.setProperty(fn[0], tmp);
-            }
-        }
-
-        return result;
-    }
-
-    private Object readObjectDataArray(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, length = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("length")) {
-                length = attValue;
-            }
-        }
-
-        Class<?> componentType;
-        if ((componentType = getPrimitiveType(className)) == null) {
-            componentType = Class.forName(className);
-        }
-        final Object array = Array.newInstance(componentType, Integer.parseInt(length));
-
-        Object tmp = null;
-        final String fn[] = new String[]{null};
-        int i = 0;
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("array"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT)
-                continue;
-
-            final String elemName = xmlReader.getLocalName();
-            if (elemName.equals("object")) {
-                tmp = readObjectData(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                tmp = readObjectDataArray(fn, xmlReader);
-            } else if (elemName.equals("primitive")) {
-                tmp = readPrimitive(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                tmp = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                tmp = readObjectDataCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                tmp = readObjectDataMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                tmp = readObjectDataReference(fn, xmlReader);
-            }
-            Array.set(array, i, tmp);
-            ++i;
-        }
-
-        return array;
-    }
-
-    private Object readObjectDataCollection(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            }
-        }
-
-        Class<?> cl = Class.forName(className);
-        Collection<Object> collection = (Collection<Object>) cl.newInstance();
-        final String[] fn = new String[]{null};
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("collection"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT)
-                continue;
-
-            final String elemName = xmlReader.getLocalName();
-            Object tmp = null;
-            if (elemName.equals("object")) {
-                tmp = readObjectData(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                tmp = readObjectDataArray(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                tmp = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                tmp = readObjectDataCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                tmp = readObjectDataMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                tmp = readObjectDataReference(fn, xmlReader);
-            }
-            collection.add(tmp);
-        }
-        return collection;
-    }
-
-    private Object readObjectDataMap(final String[] fieldName, final XMLStreamReader xmlReader) throws Exception {
-        final int count = xmlReader.getAttributeCount();
-        String className = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            }
-        }
-
-        Class<?> cl = Class.forName(className);
-        Map<Object, Object> map = (Map<Object, Object>) cl.newInstance();
-        final String[] fn = new String[]{null};
-        while (xmlReader.hasNext()) {
-            final int type = xmlReader.nextTag();
-            if (type == XMLStreamConstants.END_ELEMENT && xmlReader.getLocalName().equals("map"))
-                break;
-            if (type != XMLStreamConstants.START_ELEMENT || !xmlReader.getLocalName().equals("entry"))
-                continue;
-
-            xmlReader.nextTag();
-            String elemName = xmlReader.getLocalName();
-            Object key = null;
-            if (elemName.equals("object")) {
-                key = readObjectData(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                key = readObjectDataArray(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                key = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                key = readObjectDataCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                key = readObjectDataMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                key = readObjectDataReference(fn, xmlReader);
-            }
-
-            xmlReader.nextTag();
-            elemName = xmlReader.getLocalName();
-            Object value = null;
-            if (elemName.equals("object")) {
-                value = readObjectData(fn, xmlReader);
-            } else if (elemName.equals("array")) {
-                value = readObjectDataArray(fn, xmlReader);
-            } else if (elemName.equals("enum")) {
-                value = readEnum(fn, xmlReader);
-            } else if (elemName.equals("collection")) {
-                value = readObjectDataCollection(fn, xmlReader);
-            } else if (elemName.equals("map")) {
-                value = readObjectDataMap(fn, xmlReader);
-            } else if (elemName.equals("reference")) {
-                value = readObjectDataReference(fn, xmlReader);
-            }
-            map.put(key, value);
-        }
-        return map;
-    }
-
-    private Object readObjectDataReference(final String fieldName[], final XMLStreamReader xmlReader) throws InstantiationException, IllegalAccessException, ClassNotFoundException,
-            NoSuchMethodException, SecurityException, IllegalArgumentException, InvocationTargetException {
-        final int count = xmlReader.getAttributeCount();
-        String className = null, idValue = null, classObjectId = null;
-        for (int i = 0; i < count; ++i) {
-            final String attName = xmlReader.getAttributeLocalName(i);
-            final String attValue = xmlReader.getAttributeValue(i);
-            if (attName.equals("name")) {
-                fieldName[0] = attValue;
-            } else if (attName.equals("class")) {
-                className = attValue;
-            } else if (attName.equals("dataStorageId")) {
-                idValue = attValue;
-            } else if (attName.equals("classObjectId")) {
-                classObjectId = attValue;
-            } else if (attName.equals("objectId")) {
-                idValue = attValue;
-            }
-        }
-
-        final Class<?> idClass = Class.forName(classObjectId);
-        final Constructor<?> constructor = idClass.getConstructor(new Class<?>[]{String.class});
-        final Object objectId = constructor.newInstance(new Object[]{idValue});
-
-        final XdStorageIdentifiableObject result = new XdStorageIdentifiableObject();
-        result.setType(Class.forName(className));
-        result.setId(objectId);
-
-        return result;
+    public Collection readData(final Reader r, final XdStorageObjectIdField f) throws XdStorageIOException {
+        return legacyReader.readData(r, f);
     }
 }

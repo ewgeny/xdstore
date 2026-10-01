@@ -10,6 +10,7 @@ import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.structure.update.IXdStorageStructureUpdater;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
+import org.flib.xdstorage.transaction.XdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
@@ -175,41 +176,48 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("object cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final Class<?> cl = object.getClass();
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            final Class<?> cl = object.getClass();
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have identifier field @XdStorageObjectId");
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-        final IXdStorageSearchManager searchManager = services.getSearchManager();
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            resource.insert(object, tx);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
 
-            if (searchManager.hasIndex(object)) {
-                searchManager.insert(object, tx);
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                resource.insert(object, tx);
+
+                if (searchManager.hasIndex(object)) {
+                    searchManager.insert(object, tx);
+                }
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+                referencesResource.insertReference(object, tx);
+
+                final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
+                resource.insert(object, tx);
+
+                if (searchManager.hasIndex(object)) {
+                    searchManager.insert(object, tx);
+                }
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
             }
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
-            referencesResource.insertReference(object, tx);
-
-            final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
-            resource.insert(object, tx);
-
-            if (searchManager.hasIndex(object)) {
-                searchManager.insert(object, tx);
-            }
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
     }
 
@@ -236,76 +244,83 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("objects collection cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (objects.isEmpty())
-            return;
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
-
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-        final IXdStorageSearchManager searchManager = services.getSearchManager();
-
-        final XdStorageException[] exceptions = new XdStorageException[]{null};
-        final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
-        final AtomicBoolean hasError = new AtomicBoolean(false);
-
-        objects.forEach(object -> {
-            if (hasError.get()) {
+            if (objects.isEmpty())
                 return;
-            }
 
-            try {
-                final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
+            final XdStorageTransaction tx = cast(transaction);
 
-                if (!checkHasObjectIdField(cl)) {
-                    throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
-                }
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
 
-                final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageException[] exceptions = new XdStorageException[]{null};
+            final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
+            final AtomicBoolean hasError = new AtomicBoolean(false);
 
-                final XdStoragePolicy policy = clInfo.getPolicy();
-                if (policy == XdStoragePolicy.StoreAsClassObjects) {
-                    final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-                    resource.insert(object, tx);
-
-                    if (searchManager.hasIndex(object)) {
-                        searchManager.insert(object, tx);
-                    }
-                } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-                    final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
-                    referencesResource.insertReference(object, tx);
-
-                    final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
-                    resource.insert(object, tx);
-
-                    if (searchManager.hasIndex(object)) {
-                        searchManager.insert(object, tx);
-                    }
-                } else {
-                    throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                            + XdStoragePolicy.StoreAsSingleObject);
-                }
-            } catch (final XdStorageConnectionException e) {
+            objects.forEach(object -> {
                 if (hasError.get()) {
                     return;
                 }
-                hasError.set(true);
-                conExceptions[0] = e;
-            } catch (final XdStorageException e) {
-                if (hasError.get()) {
-                    return;
-                }
-                hasError.set(true);
-                exceptions[0] = e;
-            }
-        });
 
-        if (exceptions[0] != null)
-            throw exceptions[0];
-        if (conExceptions[0] != null)
-            throw conExceptions[0];
+                try {
+                    final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
+
+                    if (!checkHasObjectIdField(cl)) {
+                        throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+                    }
+
+                    final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+                    final XdStoragePolicy policy = clInfo.getPolicy();
+                    if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                        final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                        resource.insert(object, tx);
+
+                        if (searchManager.hasIndex(object)) {
+                            searchManager.insert(object, tx);
+                        }
+                    } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                        final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+                        referencesResource.insertReference(object, tx);
+
+                        final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
+                        resource.insert(object, tx);
+
+                        if (searchManager.hasIndex(object)) {
+                            searchManager.insert(object, tx);
+                        }
+                    } else {
+                        throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                                + XdStoragePolicy.StoreAsSingleObject);
+                    }
+                } catch (final XdStorageConnectionException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    conExceptions[0] = e;
+                } catch (final XdStorageException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    exceptions[0] = e;
+                }
+            });
+
+            if (exceptions[0] != null)
+                throw exceptions[0];
+            if (conExceptions[0] != null)
+                throw conExceptions[0];
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
+        }
     }
 
     /**
@@ -333,6 +348,7 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("idgeneration cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
+
         if (!isTransactionAlive(transaction))
             throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
@@ -381,29 +397,36 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("reference cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            resource.readByReference(reference, tx);
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
-            resource.readByReference(reference, tx);
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                resource.readByReference(reference, tx);
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
+                resource.readByReference(reference, tx);
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
     }
 
@@ -434,31 +457,38 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("idgeneration cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        final T result;
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            result = (T) resource.read(id, tx);
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(clInfo, id, tx);
-            result = (T) resource.read(id, tx);
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            final T result;
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                result = (T) resource.read(id, tx);
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(clInfo, id, tx);
+                result = (T) resource.read(id, tx);
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
+            return result;
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
-        return result;
     }
 
     /**
@@ -485,65 +515,72 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("references collection cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (references.isEmpty())
-            return;
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
-
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-
-        final XdStorageException[] exceptions = new XdStorageException[]{null};
-        final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
-        final AtomicBoolean hasError = new AtomicBoolean(false);
-
-        references.forEach(reference -> {
-            if (hasError.get()) {
+            if (references.isEmpty())
                 return;
-            }
 
-            try {
-                final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
+            final XdStorageTransaction tx = cast(transaction);
 
-                if (!checkHasObjectIdField(cl)) {
-                    throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
-                }
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
 
-                final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageException[] exceptions = new XdStorageException[]{null};
+            final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
+            final AtomicBoolean hasError = new AtomicBoolean(false);
 
-                final XdStoragePolicy policy = clInfo.getPolicy();
-                if (policy == XdStoragePolicy.StoreAsClassObjects) {
-                    final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-                    resource.readByReference(reference, tx);
-                } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-                    final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
-                    resource.readByReference(reference, tx);
-                } else {
-                    throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                            + XdStoragePolicy.StoreAsSingleObject);
-                }
-            } catch (final XdStorageConnectionException e) {
+            references.forEach(reference -> {
                 if (hasError.get()) {
                     return;
                 }
-                hasError.set(true);
-                conExceptions[0] = e;
-            } catch (final XdStorageException e) {
-                if (hasError.get()) {
-                    return;
+
+                try {
+                    final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
+
+                    if (!checkHasObjectIdField(cl)) {
+                        throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+                    }
+
+                    final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+                    final XdStoragePolicy policy = clInfo.getPolicy();
+                    if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                        final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                        resource.readByReference(reference, tx);
+                    } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                        final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
+                        resource.readByReference(reference, tx);
+                    } else {
+                        throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                                + XdStoragePolicy.StoreAsSingleObject);
+                    }
+                } catch (final XdStorageConnectionException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    conExceptions[0] = e;
+                } catch (final XdStorageException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    exceptions[0] = e;
                 }
-                hasError.set(true);
-                exceptions[0] = e;
-            }
-        });
+            });
 
-        if (exceptions[0] != null)
-            throw exceptions[0];
+            if (exceptions[0] != null)
+                throw exceptions[0];
 
-        if (conExceptions[0] != null)
-            throw conExceptions[0];
+            if (conExceptions[0] != null)
+                throw conExceptions[0];
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
+        }
     }
 
     /**
@@ -570,63 +607,70 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("class cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            return (Collection<T>) resource.read(tx);
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-            final XdStorageException[] exceptions = new XdStorageException[]{null};
-            final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
-            final AtomicBoolean hasError = new AtomicBoolean(false);
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                return (Collection<T>) resource.read(tx);
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
 
-            final Collection<Object> references = referencesResource.readReferences(tx);
-            references.forEach(reference -> {
-                if (hasError.get()) {
-                    return;
-                }
+                final XdStorageException[] exceptions = new XdStorageException[]{null};
+                final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
+                final AtomicBoolean hasError = new AtomicBoolean(false);
 
-                try {
-                    final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
-                    resource.readByReference(reference, tx);
-                } catch (final XdStorageConnectionException e) {
+                final Collection<Object> references = referencesResource.readReferences(tx);
+                references.forEach(reference -> {
                     if (hasError.get()) {
                         return;
                     }
-                    hasError.set(true);
-                    conExceptions[0] = e;
-                } catch (final XdStorageException e) {
-                    if (hasError.get()) {
-                        return;
+
+                    try {
+                        final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
+                        resource.readByReference(reference, tx);
+                    } catch (final XdStorageConnectionException e) {
+                        if (hasError.get()) {
+                            return;
+                        }
+                        hasError.set(true);
+                        conExceptions[0] = e;
+                    } catch (final XdStorageException e) {
+                        if (hasError.get()) {
+                            return;
+                        }
+                        hasError.set(true);
+                        exceptions[0] = e;
                     }
-                    hasError.set(true);
-                    exceptions[0] = e;
-                }
-            });
+                });
 
-            if (exceptions[0] != null)
-                throw exceptions[0];
+                if (exceptions[0] != null)
+                    throw exceptions[0];
 
-            if (conExceptions[0] != null)
-                throw conExceptions[0];
+                if (conExceptions[0] != null)
+                    throw conExceptions[0];
 
-            return (Collection<T>) references;
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+                return (Collection<T>) references;
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
     }
 
@@ -740,23 +784,30 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("query cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreWithParentObject) {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreWithParentObject) {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
+
+            return services.getSearchManager().search(cl, indexName, query, tx);
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
-
-        return services.getSearchManager().search(cl, indexName, query, tx);
     }
 
     /**
@@ -786,61 +837,68 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("predicate cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            resource.watch(tx, watcher);
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-            final XdStorageException[] exceptions = new XdStorageException[]{null};
-            final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
-            final AtomicBoolean hasError = new AtomicBoolean(false);
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                resource.watch(tx, watcher);
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
 
-            final Collection<Object> references = referencesResource.readReferences(tx);
-            references.forEach(reference -> {
-                if (hasError.get()) {
-                    return;
-                }
+                final XdStorageException[] exceptions = new XdStorageException[]{null};
+                final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
+                final AtomicBoolean hasError = new AtomicBoolean(false);
 
-                try {
-                    final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
-                    resource.watch(tx, watcher);
-                } catch (final XdStorageConnectionException e) {
+                final Collection<Object> references = referencesResource.readReferences(tx);
+                references.forEach(reference -> {
                     if (hasError.get()) {
                         return;
                     }
-                    hasError.set(true);
-                    conExceptions[0] = e;
-                } catch (final XdStorageException e) {
-                    if (hasError.get()) {
-                        return;
+
+                    try {
+                        final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
+                        resource.watch(tx, watcher);
+                    } catch (final XdStorageConnectionException e) {
+                        if (hasError.get()) {
+                            return;
+                        }
+                        hasError.set(true);
+                        conExceptions[0] = e;
+                    } catch (final XdStorageException e) {
+                        if (hasError.get()) {
+                            return;
+                        }
+                        hasError.set(true);
+                        exceptions[0] = e;
                     }
-                    hasError.set(true);
-                    exceptions[0] = e;
-                }
-            });
+                });
 
-            if (exceptions[0] != null)
-                throw exceptions[0];
+                if (exceptions[0] != null)
+                    throw exceptions[0];
 
-            if (conExceptions[0] != null)
-                throw conExceptions[0];
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+                if (conExceptions[0] != null)
+                    throw conExceptions[0];
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
     }
 
@@ -867,38 +925,45 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("object cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-        final IXdStorageSearchManager searchManager = services.getSearchManager();
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            resource.update(object, tx);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-            if (searchManager.hasIndex(object)) {
-                searchManager.update(object, tx);
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                resource.update(object, tx);
+
+                if (searchManager.hasIndex(object)) {
+                    searchManager.update(object, tx);
+                }
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
+                resource.update(object, tx);
+
+                if (searchManager.hasIndex(object)) {
+                    searchManager.update(object, tx);
+                }
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
             }
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
-            resource.update(object, tx);
-
-            if (searchManager.hasIndex(object)) {
-                searchManager.update(object, tx);
-            }
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
     }
 
@@ -925,73 +990,80 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("objects cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (objects.isEmpty())
-            return;
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
-
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-        final IXdStorageSearchManager searchManager = services.getSearchManager();
-
-        final XdStorageException[] exceptions = new XdStorageException[]{null};
-        final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
-        final AtomicBoolean hasError = new AtomicBoolean(false);
-
-        objects.forEach(object -> {
-            if (hasError.get()) {
+            if (objects.isEmpty())
                 return;
-            }
 
-            try {
-                final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
-                if (!checkHasObjectIdField(cl)) {
-                    throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
-                }
+            final XdStorageTransaction tx = cast(transaction);
 
-                final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
 
-                final XdStoragePolicy policy = clInfo.getPolicy();
-                if (policy == XdStoragePolicy.StoreAsClassObjects) {
-                    final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-                    resource.update(object, tx);
+            final XdStorageException[] exceptions = new XdStorageException[]{null};
+            final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
+            final AtomicBoolean hasError = new AtomicBoolean(false);
 
-                    if (searchManager.hasIndex(object)) {
-                        searchManager.update(object, tx);
-                    }
-                } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-                    final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
-                    resource.update(object, tx);
-
-                    if (searchManager.hasIndex(object)) {
-                        searchManager.update(object, tx);
-                    }
-                } else {
-                    throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                            + XdStoragePolicy.StoreAsSingleObject);
-                }
-            } catch (final XdStorageConnectionException e) {
+            objects.forEach(object -> {
                 if (hasError.get()) {
                     return;
                 }
-                hasError.set(true);
-                conExceptions[0] = e;
-            } catch (final XdStorageException e) {
-                if (hasError.get()) {
-                    return;
+
+                try {
+                    final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
+                    if (!checkHasObjectIdField(cl)) {
+                        throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+                    }
+
+                    final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+                    final XdStoragePolicy policy = clInfo.getPolicy();
+                    if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                        final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                        resource.update(object, tx);
+
+                        if (searchManager.hasIndex(object)) {
+                            searchManager.update(object, tx);
+                        }
+                    } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                        final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
+                        resource.update(object, tx);
+
+                        if (searchManager.hasIndex(object)) {
+                            searchManager.update(object, tx);
+                        }
+                    } else {
+                        throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                                + XdStoragePolicy.StoreAsSingleObject);
+                    }
+                } catch (final XdStorageConnectionException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    conExceptions[0] = e;
+                } catch (final XdStorageException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    exceptions[0] = e;
                 }
-                hasError.set(true);
-                exceptions[0] = e;
-            }
-        });
+            });
 
-        if (exceptions[0] != null)
-            throw exceptions[0];
+            if (exceptions[0] != null)
+                throw exceptions[0];
 
-        if (conExceptions[0] != null)
-            throw conExceptions[0];
+            if (conExceptions[0] != null)
+                throw conExceptions[0];
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
+        }
     }
 
     /**
@@ -1018,40 +1090,47 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("reference cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
-        if (!checkHasObjectIdField(cl))
-            throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
+            final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
 
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-        final IXdStorageSearchManager searchManager = services.getSearchManager();
+            final XdStorageTransaction tx = cast(transaction);
 
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
 
-        final XdStoragePolicy policy = clInfo.getPolicy();
-        if (policy == XdStoragePolicy.StoreAsClassObjects) {
-            if (searchManager.hasIndex(reference)) {
-                searchManager.delete(reference, tx);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                if (searchManager.hasIndex(reference)) {
+                    searchManager.delete(reference, tx);
+                }
+
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                resource.delete(reference, tx);
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                if (searchManager.hasIndex(reference)) {
+                    searchManager.delete(reference, tx);
+                }
+
+                final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+                final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
+                referencesResource.deleteReference(reference, tx);
+                resource.delete(reference, tx);
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
             }
-
-            final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-            resource.delete(reference, tx);
-        } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-            if (searchManager.hasIndex(reference)) {
-                searchManager.delete(reference, tx);
-            }
-
-            final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
-            final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
-            referencesResource.deleteReference(reference, tx);
-            resource.delete(reference, tx);
-        } else {
-            throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                    + XdStoragePolicy.StoreAsSingleObject);
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
         }
     }
 
@@ -1078,75 +1157,82 @@ class XdStorage implements IXdFileStorage {
             throw new XdStorageException("references collection cannot be null");
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
-        if (!isTransactionAlive(transaction))
-            throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        if (references.isEmpty())
-            return;
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
 
-        final XdStorageTransaction tx = cast(transaction);
-
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-        final IXdStorageSearchManager searchManager = services.getSearchManager();
-
-        final XdStorageException[] exceptions = new XdStorageException[]{null};
-        final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
-        final AtomicBoolean hasError = new AtomicBoolean(false);
-
-        references.forEach(reference -> {
-            if (hasError.get()) {
+            if (references.isEmpty())
                 return;
-            }
 
-            try {
-                final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
-                if (!checkHasObjectIdField(cl)) {
-                    throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
-                }
+            final XdStorageTransaction tx = cast(transaction);
 
-                final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
 
-                final XdStoragePolicy policy = clInfo.getPolicy();
-                if (policy == XdStoragePolicy.StoreAsClassObjects) {
-                    if (searchManager.hasIndex(reference)) {
-                        searchManager.delete(reference, tx);
-                    }
+            final XdStorageException[] exceptions = new XdStorageException[]{null};
+            final XdStorageConnectionException[] conExceptions = new XdStorageConnectionException[]{null};
+            final AtomicBoolean hasError = new AtomicBoolean(false);
 
-                    final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
-                    resource.delete(reference, tx);
-                } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
-                    if (searchManager.hasIndex(reference)) {
-                        searchManager.delete(reference, tx);
-                    }
-
-                    final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
-                    final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
-                    referencesResource.deleteReference(reference, tx);
-                    resource.delete(reference, tx);
-                } else {
-                    throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
-                            + XdStoragePolicy.StoreAsSingleObject);
-                }
-            } catch (final XdStorageConnectionException e) {
+            references.forEach(reference -> {
                 if (hasError.get()) {
                     return;
                 }
-                hasError.set(true);
-                conExceptions[0] = e;
-            } catch (final XdStorageException e) {
-                if (hasError.get()) {
-                    return;
+
+                try {
+                    final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
+                    if (!checkHasObjectIdField(cl)) {
+                        throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+                    }
+
+                    final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+                    final XdStoragePolicy policy = clInfo.getPolicy();
+                    if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                        if (searchManager.hasIndex(reference)) {
+                            searchManager.delete(reference, tx);
+                        }
+
+                        final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                        resource.delete(reference, tx);
+                    } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                        if (searchManager.hasIndex(reference)) {
+                            searchManager.delete(reference, tx);
+                        }
+
+                        final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+                        final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(reference, tx);
+                        referencesResource.deleteReference(reference, tx);
+                        resource.delete(reference, tx);
+                    } else {
+                        throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                                + XdStoragePolicy.StoreAsSingleObject);
+                    }
+                } catch (final XdStorageConnectionException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    conExceptions[0] = e;
+                } catch (final XdStorageException e) {
+                    if (hasError.get()) {
+                        return;
+                    }
+                    hasError.set(true);
+                    exceptions[0] = e;
                 }
-                hasError.set(true);
-                exceptions[0] = e;
-            }
-        });
+            });
 
-        if (exceptions[0] != null)
-            throw exceptions[0];
+            if (exceptions[0] != null)
+                throw exceptions[0];
 
-        if (conExceptions[0] != null)
-            throw conExceptions[0];
+            if (conExceptions[0] != null)
+                throw conExceptions[0];
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
+        }
     }
 
     public void shutdown() {

@@ -1,5 +1,6 @@
 package org.flib.xdstorage.transaction;
 
+import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.resource.IXdStorageResourceObject;
@@ -19,6 +20,10 @@ public class XdStorageTransactionTest {
         private boolean rollbackCalled = false;
         private boolean registerRollbackOnlyCalled = false;
 
+        @Override
+        public IXdStorage getStorage() {
+            return null;
+        }
         @Override public XdStorageTransaction beginTransaction(long timeout) { return null; }
         @Override public XdStorageTransaction beginTransaction(XdStorageTransaction tx, long timeout) { return null; }
         @Override public XdStorageTransaction getTransaction(String transactionId) { return null; }

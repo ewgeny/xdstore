@@ -1,8 +1,11 @@
 package org.flib.xdstorage.transaction;
 
+import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageException;
 
 public interface IXdStorageTransactionManager<T extends IXdStorageTransaction> {
+
+    IXdStorage getStorage();
 
     T beginTransaction(long timeout);
 

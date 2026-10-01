@@ -1,7 +1,10 @@
 package org.flib.xdstorage.idgeneration;
 
+import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.annotations.XdStorageObjectId;
+import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 
+@XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
 public class MyFakeIdCounterRecord {
 
     @XdStorageObjectId

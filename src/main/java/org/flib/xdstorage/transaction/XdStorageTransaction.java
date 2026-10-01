@@ -2,6 +2,7 @@ package org.flib.xdstorage.transaction;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
@@ -61,6 +62,16 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         this.resources = new ConcurrentHashMap<>();
         this.forCommit = new PriorityBlockingQueue<>();
         this.lockedResources = new ArrayList<>();
+    }
+
+    @Override
+    public IXdStorageTransactionManager<?> getTransactionManager() {
+        return manager;
+    }
+
+    @Override
+    public IXdStorage getStorage() {
+        return manager.getStorage();
     }
 
     public void markFinished() {

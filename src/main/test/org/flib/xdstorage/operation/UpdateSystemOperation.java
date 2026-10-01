@@ -3,7 +3,6 @@ package org.flib.xdstorage.operation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.IXdStorage;
-import org.flib.xdstorage.XmlDataStorageMultithreadsTest;
 import org.flib.xdstorage.entities.XdGalaxy;
 import org.flib.xdstorage.entities.XdStarSystem;
 import org.flib.xdstorage.entities.XdUniverse;
