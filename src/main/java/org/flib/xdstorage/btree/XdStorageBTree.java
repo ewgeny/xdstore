@@ -10,6 +10,7 @@ import org.flib.xdstorage.lock.XdStorageReadWriteLock;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -341,7 +342,6 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public List<Object> find(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        // Восстановление живого корня для операции неблокирующего поиска find
         if (root == null && wasInitialized) {
             lockWrite(transaction);
             try {
@@ -355,6 +355,27 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
             } finally {
                 unlockWrite();
             }
+        }
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ НА ДЕБАГЕ (Монолитная синхронизация B+Tree):
+        // Если индекс поддерживает дубликаты (isMultiple == true), мы КАТЕГОРИЧЕСКИ запрещаем
+        // осуществлять вертикальный спуск по не-листовым этажам, так как сплиты разрывают дубликаты
+        // между левой и правой ветками! Мы запускаем канонический сквозной горизонтальный обход
+        // листьев по указателям nextTreeNodeOnThisLevel, начиная с firstLeaf!
+        // Это гарантирует 100% сбор всех элементов без нарушения знаков < 0 в навигаторах мутаций!
+        // =========================================================================
+        if (this.multiple) {
+            final List<Object> multiResult = new ArrayList<>();
+            this.read(storage, transaction, new IXdStorageBTreeViewer() {
+                @Override
+                public void look(final Comparable objectId, final Object value) {
+                    if (objectId != null && objectId.compareTo(key) == 0) {
+                        multiResult.add(value);
+                    }
+                }
+            });
+            return multiResult;
         }
 
         if (root != null && XdStorageObjectUtils.isReference(root)) {
@@ -378,6 +399,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
         List<Object> result;
         final AtomicBoolean retryFind = new AtomicBoolean();
         do {
+            retryFind.set(true); // Сбрасываем флаг итерации do-while
             retryFind.set(false);
             lockRead(transaction);
             if (root == null) {

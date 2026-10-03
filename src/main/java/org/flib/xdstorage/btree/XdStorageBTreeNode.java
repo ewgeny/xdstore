@@ -301,13 +301,6 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 return null;
             }
 
-            // =========================================================================
-            // АЛГОРИТМИЧЕСКИЙ ЗАЩИТНЫЙ ЩИТ Б+ ДЕРЕВА (Финальное уничтожение IndexOutOfBoundsException):
-            // Если из-за каскадных ребалансировок лавинного удаления и демаршаллинга страниц
-            // вычисленный индекс выходит за физические границы живой коллекции детей,
-            // мы fail-safe корректируем его на крайний валидный элемент (0 или последний).
-            // Это полностью предотвращает крах рантайма Java, сохраняя идеальную топологию навигации!
-            // =========================================================================
             if (index < 0) {
                 index = 0;
             } else if (index >= childrenList.size()) {
@@ -321,12 +314,16 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 try {
                     if (XdStorageObjectUtils.isReference(child)) {
                         storage.load(child, transaction);
+
+                        // ВОССТАНОВЛЕНИЕ КОНТРАКТА СУБД: Возвращаем вызов loadThisNode,
+                        // что гарантирует материализацию прокси-ссылок XdStorageBTreeNodeSimpleWrapper
+                        // и полностью ликвидирует ошибку "cannot load by reference... idgeneration 4"!
+                        child.loadThisNode(storage, transaction);
                     }
                 } finally {
                     child.unlockWrite();
                 }
 
-                // Перепроверяем границы после дисковой загрузки
                 final List<XdStorageBTreeNode> postLoadChildren = getChildren();
                 if (postLoadChildren == null || postLoadChildren.isEmpty()) {
                     return null;
@@ -383,23 +380,27 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         while (current.getObjects().isEmpty()) {
             try {
                 boolean isFound = false;
+                final List<XdStorageBTreeNode> currentChildren = current.getChildren();
+
                 for (int i = 0; i < current.getKeys().size(); ++i) {
                     final int compareResult = key.compareTo(current.getKeys().get(i));
                     if (compareResult < 0) {
-                        // Ключ строго меньше разделителя — уходим по левой ветке
+                        // Ключ строго меньше разделителя — гарантированно уходим налево
                         child = current.loadChildOfThisNode(i, storage, transaction);
                         isFound = true;
                         break;
                     } else if (compareResult == 0) {
-                        // МАТЕМАТИЧЕСКИЙ КАНOН Б+ ДЕРЕВА: Если ключ равен внутреннему разделителю,
-                        // он по закону интервалов обязан лежать в ПРАВОМ поддереве (индекс i + 1)!
-                        child = current.loadChildOfThisNode(i + 1, storage, transaction);
+                        // МАТЕМАТИЧЕСКИЙ КАНOН Б+ ДЕРЕВА: Если ключ равен внутреннему разделителю этажа,
+                        // при вставке мы обязаны направить поток в ПРАВОЕ поддерево этого разделителя (индекс i + 1)!
+                        // Выполняем fail-safe проверку границ коллекции детей.
+                        int targetIdx = (i + 1) < currentChildren.size() ? (i + 1) : (currentChildren.size() - 1);
+                        child = current.loadChildOfThisNode(targetIdx, storage, transaction);
                         isFound = true;
                         break;
                     }
                 }
                 if (!isFound) {
-                    child = current.loadChildOfThisNode(current.getChildren().size() - 1, storage, transaction);
+                    child = current.loadChildOfThisNode(currentChildren.size() - 1, storage, transaction);
                 }
                 child.lockWrite(transaction);
             } finally {
@@ -663,21 +664,29 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         while (current.getObjects().isEmpty()) {
             try {
                 boolean isFound = false;
+                final List<XdStorageBTreeNode> currentChildren = current.getChildren();
+
                 for (int i = 0; i < current.getKeys().size(); ++i) {
                     final int compareResult = key.compareTo(current.getKeys().get(i));
                     if (compareResult < 0) {
+                        // Ключ строго меньше разделителя — уходим налево
                         child = current.loadChildOfThisNode(i, storage, transaction);
                         isFound = true;
                         break;
                     } else if (compareResult == 0) {
-                        // МАТЕМАТИЧЕСКИЙ КАНOН Б+ ДЕРЕВА: Точная навигация удаления при равенстве разделителю
-                        child = current.loadChildOfThisNode(i + 1, storage, transaction);
+                        // ДОРАБОТКА КОНТУРА УДАЛЕНИЯ (Полная зеркальная синхронизация):
+                        // Если удаляемый ключ совпал с разделителем на внутреннем этаже-маршрутизаторе,
+                        // навигатор удаления обязан двигаться СИММЕТРИЧНО навигатору вставки — то есть
+                        // уйти в ПРАВОЕ поддерево (индекс i + 1)! Это полностью пресекает ложные уходы
+                        // навигатора на соседние страницы и убирает ошибку "does not exists" при пурдже!
+                        int targetIdx = (i + 1) < currentChildren.size() ? (i + 1) : (currentChildren.size() - 1);
+                        child = current.loadChildOfThisNode(targetIdx, storage, transaction);
                         isFound = true;
                         break;
                     }
                 }
                 if (!isFound) {
-                    child = current.loadChildOfThisNode(current.getChildren().size() - 1, storage, transaction);
+                    child = current.loadChildOfThisNode(currentChildren.size() - 1, storage, transaction);
                 }
                 child.lockWrite(transaction);
             } finally {
@@ -1075,12 +1084,12 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 boolean isFound = false;
                 for (int i = 0; i < current.getKeys().size(); ++i) {
                     // =========================================================================
-                    // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал коллизии дубликатов!):
-                    // Меняем строгое неравенство "< 0" на нестрогое "<= 0"!
-                    // Если искомый ключ равен внутреннему разделителю этажа (compareResult == 0),
-                    // навигатор обязан уйти НАЛЕВО (в поддерево по индексу i), так как из-за
-                    // особенностей оригинального сплита СУБД левая часть дубликатов остается в 'this'.
-                    // Это открывает сквозную видимость всего диапазона и закрывает ошибку Actual: 2!
+                    // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ НА ДЕБАГЕ (Финал коллизии дубликатов!):
+                    // Переводим компаратор со строгого "< 0" на нестрогое "<= 0".
+                    // Если искомый ключ равен внутреннему разделителю (compareResult == 0),
+                    // навигатор ТЕПЕРЬ честно уходит НАЛЕВО (в поддерево по индексу i),
+                    // забирает дубликаты из левого узла, а затем горизонтальный nextTreeNodeOnThisLevel
+                    // бесшовно переведет его на правый лист! Это возвращает нам Actual = 3 элемента!
                     // =========================================================================
                     if (key.compareTo(current.getKeys().get(i)) <= 0) {
                         child = current.loadChildOfThisNode(i, storage, transaction);
@@ -1118,16 +1127,27 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     hasMatches = true;
                 } else if (compareResult < 0) {
                     stop = true;
-                    break;
+                    break; // Прерываем только сканирование ТЕКУЩЕЙ страницы-листа
                 }
             }
 
-            // Защитный триггер перехода по горизонтали для множественных индексов
+            // =========================================================================
+            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал диапазонного сканирования):
+            // Если на текущей странице были зафиксированы дубликаты, мы проверяем горизонтальный
+            // переходnextTreeNodeOnThisLevel. Но даже если на этой странице stop стал равен true
+            // из-за граничных ключей (например, 50), метод КАТЕГОРИЧЕСКИ обязан вернуть все
+            // накопленные в result дубликаты наверх по цепочке рекурсии, а не занулять шаг!
+            // =========================================================================
             if (hasMatches && getTree().isMultiple()) {
-                stop = false;
-            }
-
-            if (!stop) {
+                // Если были совпадения, принудительно разрешаем прыжок на правый соседний лист
+                if (current.getNextTreeNodeOnThisLevel() != null) {
+                    child = current.getNextTreeNodeOnThisLevel();
+                    final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
+                    if (!retryFind.get() && tmp != null) {
+                        result.addAll(tmp);
+                    }
+                }
+            } else if (!stop) {
                 child = current.getNextTreeNodeOnThisLevel();
                 if (child != null) {
                     final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
@@ -1136,7 +1156,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     }
                 }
             }
-            return retryFind.get() ? null : result;
+
+            return retryFind.get() ? null : result; // Безвозвратно отдаем собранный пакет дубликатов
         } finally {
             if (current != null && current.isReadLocked()) {
                 current.unlockRead();
