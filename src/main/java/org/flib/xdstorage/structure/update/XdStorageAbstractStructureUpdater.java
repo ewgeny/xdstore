@@ -84,7 +84,7 @@ public abstract class XdStorageAbstractStructureUpdater<T> implements IXdStorage
                     try {
                         objectsResource = resourcesManager.lockResource(resourceId, clInfo, transaction);
                         if (objectsResource instanceof XdStorageResource) {
-                            ((XdStorageResource) objectsResource).readAsData(transaction).parallelStream().forEach(data -> {
+                            ((XdStorageResource) objectsResource).readAsData(transaction).stream().forEach(data -> {
                                 if (!success.get()) {
                                     return;
                                 }
@@ -106,7 +106,7 @@ public abstract class XdStorageAbstractStructureUpdater<T> implements IXdStorage
             }
         } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
             final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, transaction);
-            referencesResource.readAsData(transaction).parallelStream().forEach(referenceData -> {
+            referencesResource.readAsData(transaction).stream().forEach(referenceData -> {
                 if (!success.get()) {
                     return;
                 }

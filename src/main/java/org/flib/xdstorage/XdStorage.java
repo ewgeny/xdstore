@@ -6,6 +6,7 @@ import org.flib.xdstorage.index.IXdStorageIndexDaoResource;
 import org.flib.xdstorage.resource.*;
 import org.flib.xdstorage.search.IXdStorageSearchManager;
 import org.flib.xdstorage.search.query.XdStorageSearchQuery;
+import org.flib.xdstorage.serialization.FilesFormat;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.structure.update.IXdStorageStructureUpdater;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
@@ -37,9 +38,13 @@ class XdStorage implements IXdFileStorage {
      * @param folder Storage path.
      */
     XdStorage(final String name, final String folder, final int fragmentSize) {
+        this(name, folder, fragmentSize, FilesFormat.XML);
+    }
+
+    XdStorage(final String name, final String folder, final int fragmentSize, FilesFormat format) {
         this.name = name;
         services = new XdStorageServicesLocator();
-        services.initFileConfiguration(this, folder, fragmentSize);
+        services.initFileConfiguration(this, folder, fragmentSize, format);
     }
 
     @Override

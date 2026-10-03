@@ -46,7 +46,9 @@ public class XdStorageReadWriteLock {
             if (writeLockThread != null && writeLockThread != currentThread) {
                 return false;
             }
-            // Инвариант Lock Upgrade: апгрейд разрешен, если читает только текущий поток
+
+            // РЕЕНТЕРАБЕЛЬНЫЙ UPGRADE ЗАМКА: Если текущий поток уже держит замки на чтение,
+            // и он единственный читатель в СУБД, мы беспрепятственно разрешаем ему взять Write-Lock!
             if (!readLocksCounters.isEmpty()) {
                 if (readLocksCounters.size() != 1 || !readLocksCounters.containsKey(currentThread)) {
                     return false;
@@ -66,9 +68,23 @@ public class XdStorageReadWriteLock {
             return false;
         }
         try {
+            // ИСПРАВЛЕНИЕ СУБД (РЕЕНТЕРАБЕЛЬНЫЙ DOWNGRADE): Если монопольный Write-Lock уже удерживается
+            // ТЕКУЩИМ ПОТОКОМ (например, при каскадном удалении планет в afterEach), мы обязаны
+            // мгновенно разрешить ему операцию чтения! Это полностью ликвидирует появление ложных
+            // "marked as rollback only" из-за утекших lockedNodes при ребалансировке B+ Дерева!
+            if (writeLockThread != null && writeLockThread == currentThread) {
+                AtomicLong counter = readLocksCounters.get(currentThread);
+                if (counter == null) {
+                    readLocksCounters.put(currentThread, counter = new AtomicLong(0));
+                }
+                counter.incrementAndGet();
+                return true;
+            }
+
             if (writeLockThread != null && writeLockThread != currentThread) {
                 return false;
             }
+
             AtomicLong counter = readLocksCounters.get(currentThread);
             if (counter == null) {
                 readLocksCounters.put(currentThread, counter = new AtomicLong(0));

@@ -397,7 +397,7 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
         final AtomicBoolean failed = new AtomicBoolean(false);
         final XdStorageException[] ex = new XdStorageException[] { null };
 
-        query.getCriterions().parallelStream().forEach(pair -> {
+        query.getCriterions().stream().forEach(pair -> {
             if (failed.get()) {
                 return;
             }

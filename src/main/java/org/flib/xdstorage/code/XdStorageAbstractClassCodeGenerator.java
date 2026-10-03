@@ -137,7 +137,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
                             ctx.parentGetter = method;
                         }
                     } catch (final NoSuchFieldException e) {
-                        log.debug(e);
+                        log.debug("field was not found", e);
                     }
                 } else if (name.startsWith("is")) {
                     if (XdStorageObjectUtils.isSimpleType(tmp, null)) {

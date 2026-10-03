@@ -157,7 +157,7 @@ public class XdStorageResourceCache {
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
         final List<T> result = Collections.synchronizedList(new LinkedList<>());
-        cache.values().parallelStream().forEach(record -> {
+        cache.values().stream().forEach(record -> {
             if (hasError.get()) {
                 return;
             }
@@ -218,7 +218,7 @@ public class XdStorageResourceCache {
         final Map<Object, IXdStorageIdObservableWrapper> unidentifiedObjects =
                 changesUnidentifiedObjectsByTransaction.get(transaction.getTransactionId());
         if (unidentifiedObjects != null) {
-            unidentifiedObjects.values().parallelStream().forEach(wrapper -> {
+            unidentifiedObjects.values().stream().forEach(wrapper -> {
                 if (hasError.get()) {
                     return;
                 }

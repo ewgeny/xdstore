@@ -13,8 +13,10 @@ import org.flib.xdstorage.resource.XdStorageResourceNamingService;
 import org.flib.xdstorage.resource.XdStorageResourcesManager;
 import org.flib.xdstorage.search.IXdStorageSearchManager;
 import org.flib.xdstorage.search.XdStorageSearchManager;
+import org.flib.xdstorage.serialization.FilesFormat;
 import org.flib.xdstorage.serialization.IXdStorageIOFactory;
 import org.flib.xdstorage.serialization.XdStorageDefaultIOFactory;
+import org.flib.xdstorage.serialization.XdStorageIOFactory;
 import org.flib.xdstorage.structure.XdStorageStructureManager;
 import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.transaction.XdStorageTransactionManager;
@@ -49,12 +51,13 @@ public class XdStorageServicesLocator {
 
     private IXdStorageCloner cloner;
 
-    public void initFileConfiguration(final IXdStorage storage, final String folder, final int fragmentSize) {
+    public void initFileConfiguration(final IXdStorage storage, final String folder, final int fragmentSize, FilesFormat format) {
         this.storage = storage;
-        this.executor = Executors.newFixedThreadPool(5);
+        this.executor = Executors.newFixedThreadPool(15);
         this.namingService = new XdStorageResourceNamingService(folder, "xml");
         this.idGenerator = new XdStorageDefaultIdGenerator(this);
-        this.ioFactory = new XdStorageDefaultIOFactory(this, idGenerator);
+//        this.ioFactory = new XdStorageDefaultIOFactory(this, idGenerator);
+        this.ioFactory = XdStorageIOFactory.instanceIOFactory(this, idGenerator, format);
         this.triggersManager = new XdStorageTriggerManager();
         this.transactionsManager = new XdStorageTransactionManager(this);
         this.resourcesManager = new XdStorageResourcesManager(this, fragmentSize);

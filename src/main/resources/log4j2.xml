@@ -9,10 +9,10 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="org.flib.xdstorage" level="info">
+        <Logger name="org.flib.xdstorage" level="debug">
             <AppenderRef ref="xdstorage"/>
         </Logger>
-        <Root level="info">
+        <Root level="debug">
             <AppenderRef ref="STDOUT"/>
         </Root>
     </Loggers>

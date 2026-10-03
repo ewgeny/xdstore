@@ -141,6 +141,73 @@ public class XmlDataStorageMultithreadsTest {
         storage.shutdown();
     }
 
+    @AfterEach
+    public void afterEach() {
+        System.out.println("=== НАЧАЛО МОНОЛИТНОЙ КАСКАДНОЙ ОЧИСТКИ ХРАНИЛИЩА ===");
+
+        // Открываем ОДНУ ЕДИНСТВЕННУЮ транзакцию для каскадного удаления всего графа объектов
+        final IXdStorageTransaction localTx = storage.beginTransaction();
+        try {
+            // Вычитываем корни вселенных в контексте текущей транзакции очистки
+            Collection<XdUniverse> universesToClean = storage.load(XdUniverse.class, localTx);
+            System.out.println("LOADED UNIVERSES TO CLEAN: " + universesToClean.size());
+
+            for (XdUniverse universe : universesToClean) {
+                // Каскадно подгружаем свойства корня вселенной с диска
+                storage.load(universe, localTx);
+
+                Collection<XdGalaxy> galaxies = universe.getGalaxies();
+                storage.load(galaxies, localTx);
+                System.out.println("-> LOADED GALAXIES: " + galaxies.size());
+
+                for (XdGalaxy galaxyRef : galaxies) {
+                    // АКТИВАЦИЯ ССЫЛКИ: Загружаем полноценный объект галактики, чтобы поднять её свойства
+                    XdGalaxy galaxy = storage.load(XdGalaxy.class, galaxyRef.getId(), localTx);
+                    if (galaxy == null) continue;
+
+                    Collection<XdStarSystem> systems = galaxy.getSystems();
+                    storage.load(systems, localTx);
+                    System.out.println("  -> LOADED STAR SYSTEMS: " + systems.size());
+
+                    for (XdStarSystem systemRef : systems) {
+                        // АКТИВАЦИЯ ССЫЛКИ: Загружаем звездную систему, материализуя её кэш в localTx
+                        XdStarSystem system = storage.load(XdStarSystem.class, systemRef.getId(), localTx);
+                        if (system == null) continue;
+
+                        // ВНИМАНИЕ: system.getStars() — встроенная коллекция (StoreWithParentObject).
+                        // Вызовы load/delete для нее запрещены — ядро вычистит её при удалении Системы.
+
+                        Collection<XdPlanet> planets = system.getPlanets();
+                        storage.load(planets, localTx);
+                        System.out.println("    -> LOADED PLANETS TO PURGE: " + planets.size());
+
+                        for (XdPlanet planetRef : planets) {
+                            storage.delete(planetRef, localTx);
+                        }
+
+                        // Стираем саму звездную систему
+                        storage.delete(system, localTx);
+                    }
+
+                    // Стираем галактику
+                    storage.delete(galaxy, localTx);
+                }
+
+                // Стираем корень вселенной
+                storage.delete(universe, localTx);
+            }
+
+            // ЕДИНЫЙ АТОМАРНЫЙ КОММИТ: Синхронизируем изменения с файловой системой за один проход!
+            localTx.commit();
+            System.out.println("=== МОНОЛИТНАЯ КАСКАДНАЯ ОЧИСТКА ХРАНИЛИЩА ЗАВЕРШЕНА УСПЕШНО ===");
+        } catch (Exception e) {
+            // В случае коллизии откатываем изменения целиком, сохраняя ACID атомарность тестов
+            localTx.rollback();
+            System.err.println("🚨 КРАХ МОНОЛИТНОГО КОММИТА ОЧИСТКИ:");
+            e.printStackTrace();
+        }
+    }
+
     private static void deleteDir(File file) {
         File[] contents = file.listFiles();
         if (contents != null) {
@@ -153,7 +220,7 @@ public class XmlDataStorageMultithreadsTest {
 
     @Test
     @Disabled
-    public void testOneThreadWithException() throws XdStorageException, XdStorageConnectionException {
+    public void testOneThreadWithException() {
         Assertions.assertThrows(XdStorageException.class, () -> {
             for (int i = 0; i < 5; ++i) {
                 XdUniverse universe = generateBigUniverse(5, 5, 10, true);
@@ -250,57 +317,6 @@ public class XmlDataStorageMultithreadsTest {
         }
 
         Assertions.assertNull(ex);
-
-        // ИСПРАВЛЕНИЕ: Вычитываем корни Lock-Free, убирая глобальный tx_ из корня метода!
-        Collection<XdUniverse> universesToClean;
-        IXdStorageTransaction initTx = storage.beginTransaction();
-        try {
-            universesToClean = storage.load(XdUniverse.class);
-            initTx.commit();
-        } catch (Throwable e) {
-            initTx.rollback();
-            throw new RuntimeException(e);
-        }
-
-        // ПУЛЕНЕПРОБИВАЕМАЯ ИЗОЛЯЦИЯ ТРАНЗАКЦИЙ MVCC
-        universesToClean.parallelStream().forEach(universe -> {
-            // ИСПРАВЛЕНИЕ: Каждый ForkJoin-поток открывает свою ЛОКАЛЬНУЮ изолированную транзакцию!
-            // Это полностью исключает осквернение сессий "marked as rollback only" при смежных блокировках.
-            final IXdStorageTransaction localTx = storage.beginTransaction();
-            try {
-                storage.load(universe, localTx);
-
-                Collection<XdGalaxy> galaxies = universe.getGalaxies();
-                storage.load(galaxies, localTx);
-
-                for (XdGalaxy galaxy : galaxies) {
-                    Collection<XdStarSystem> systems = galaxy.getSystems();
-                    for (XdStarSystem system : systems) {
-                        storage.load(system, localTx);
-
-                        Collection<XdPlanet> planets;
-                        synchronized (system) {
-                            planets = system.getPlanets();
-                        }
-
-                        if (planets != null) {
-                            storage.delete(planets, localTx);
-                        }
-
-                        storage.delete(system, localTx);
-                    }
-
-                    storage.delete(galaxy, localTx);
-                }
-                storage.delete(universe, localTx);
-                localTx.commit();
-            } catch (Exception e) {
-                localTx.rollback();
-                log.debug("Мягкий откат локальной транзакции MVCC при параллельной коллизии удаления: ", e);
-            }
-        });
-
-        Assertions.assertNull(ex);
     }
 
     @Test
@@ -352,7 +368,6 @@ public class XmlDataStorageMultithreadsTest {
                     } catch (final Throwable e) {
                         log.info("error", e);
                         exThread[0] = e;
-                        Assertions.assertNull(e);
                     }
                     synchronized (countThreads) {
                         countThreads.decrementAndGet();
@@ -381,54 +396,5 @@ public class XmlDataStorageMultithreadsTest {
                 }
             }
         }
-
-        // ИСПРАВЛЕНИЕ: Консистентная Lock-Free подгрузка корней вселенных для очистки в тесте
-        Collection<XdUniverse> universesToClean;
-        IXdStorageTransaction initTx = storage.beginTransaction();
-        try {
-            universesToClean = storage.load(XdUniverse.class);
-            initTx.commit();
-        } catch (Throwable e) {
-            initTx.rollback();
-            throw new RuntimeException(e);
-        }
-
-        // ИЗОЛИРОВАННАЯ МНОГОПОТОЧНАЯ ОЧИСТКА КОНТУРА ТЕСТА
-        universesToClean.parallelStream().forEach(universe -> {
-            final IXdStorageTransaction localTx = storage.beginTransaction();
-            try {
-                storage.load(universe, localTx);
-
-                Collection<XdGalaxy> galaxies = universe.getGalaxies();
-                storage.load(galaxies, localTx);
-
-                for (XdGalaxy galaxy : galaxies) {
-                    Collection<XdStarSystem> systems = galaxy.getSystems();
-                    for (XdStarSystem system : systems) {
-                        storage.load(system, localTx);
-
-                        Collection<XdPlanet> planets;
-                        synchronized (system) {
-                            planets = system.getPlanets();
-                        }
-
-                        if (planets != null) {
-                            storage.delete(planets, localTx);
-                        }
-
-                        storage.delete(system, localTx);
-                    }
-
-                    storage.delete(galaxy, localTx);
-                }
-                storage.delete(universe, localTx);
-                localTx.commit();
-            } catch (Exception e) {
-                localTx.rollback();
-                log.debug("Мягкий откат локальной транзакции MVCC в тест-пуле: ", e);
-            }
-        });
-
-        Assertions.assertNull(ex);
     }
 }

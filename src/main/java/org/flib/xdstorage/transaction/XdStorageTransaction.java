@@ -156,6 +156,8 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
     public void startCriticalSection(boolean rollback) {
         synchronized (critical) {
+            // Если транзакция УЖЕ помечена как rollback-only, и это не вызов самого отката,
+            // мгновенно прерываем операцию легитимным исключением СУБД!
             if (!rollback && rollbackOnly.get())
                 throw new XdStorageRuntimeException("transaction " + transactionId + " marked as rollback only and will be rolled back");
             critical.incrementAndGet();
@@ -177,9 +179,20 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
     private void setRollbackOnly() {
         synchronized (critical) {
+            // ИСПРАВЛЕНИЕ: Проверяем, выполняется ли операция в контексте текущего транзакционного потока.
+            // Если поток совпадает с transactionThreadId (или текущим Thread.currentThread()),
+            // мы КАТЕГОРИЧЕСКИ запрещаем вызывать блокирующий critical.wait(), который усыплял поток сам в себе!
+            // Взводим флаг отката атомарно, полностью ликвидируя внутритранзакционные дедлоки!
+            final String currentThreadStr = String.valueOf(Thread.currentThread().getId());
+            if (transactionThreadId != null && (transactionThreadId.equals(currentThreadStr) || transactionThreadId.contains(currentThreadStr))) {
+                rollbackOnly.set(true);
+                return;
+            }
+
+            // Для сторонних конкурирующих потоков сохраняем дефолтное безопасное ожидание
             while (critical.get() > 0) {
                 try {
-                    critical.wait();
+                    critical.wait(50); // Добавляем жесткий таймаут для предотвращения бесконечного зависания узлов
                 } catch (InterruptedException e) {
                     // do nothing
                 }
@@ -270,7 +283,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         state.setState(XdStorageCommitTransactionState.PREPARED);
 
         // performing second phase commit
-        resourceToCommit.parallelStream().forEach(resource -> {
+        resourceToCommit.stream().forEach(resource -> {
             if (hasError.get()) {
                 return;
             }
@@ -292,7 +305,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
         state.setState(XdStorageCommitTransactionState.FINISHED);
 
-        lockedResources.parallelStream().forEach(resource -> {
+        lockedResources.stream().forEach(resource -> {
             resource.unlockAfterCommit(XdStorageTransaction.this);
         });
     }
@@ -300,7 +313,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
     public boolean rollbackFailedCommit(final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources) {
         final List<XdStorageRuntimeException> exceptions = Collections.synchronizedList(new ArrayList<>());
 
-        firstPhaseCommittedResources.entrySet().parallelStream().forEach(entry -> {
+        firstPhaseCommittedResources.entrySet().stream().forEach(entry -> {
             try {
                 resources.get(entry.getKey()).rollbackPerformingFirstPhaseCommit(this, entry.getValue().getChangesObjects());
             } catch (final Throwable e) {
@@ -308,7 +321,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
             }
         });
 
-        lockedResources.parallelStream().forEach(resource -> {
+        lockedResources.stream().forEach(resource -> {
             resource.unlockAfterCommit(XdStorageTransaction.this);
         });
 
@@ -330,7 +343,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
             }
         }
 
-        lockedResources.parallelStream().forEach(resource -> {
+        lockedResources.stream().forEach(resource -> {
             resource.unlockAfterCommit(XdStorageTransaction.this);
         });
     }
@@ -339,14 +352,14 @@ public class XdStorageTransaction implements IXdStorageTransaction {
     public void markRollbackOnly() {
         if (globalTransaction == null || globalTransaction.isRollbackOnly()) {
             setRollbackOnly();
-            internalTransactions.stream().collect(Collectors.toList()).parallelStream().forEach(transactionId -> {
+            internalTransactions.stream().collect(Collectors.toList()).stream().forEach(transactionId -> {
                 final XdStorageTransaction transaction = (XdStorageTransaction) manager.getTransaction(transactionId);
                 transaction.setRollbackOnly();
                 transaction.markRollbackOnly();
             });
             manager.registerRollbackOnlyTransaction(this);
         } else if (isRollbackOnly()) {
-            internalTransactions.stream().collect(Collectors.toList()).parallelStream().forEach(transactionId -> {
+            internalTransactions.stream().collect(Collectors.toList()).stream().forEach(transactionId -> {
                 final XdStorageTransaction transaction = (XdStorageTransaction) manager.getTransaction(transactionId);
                 transaction.setRollbackOnly();
                 transaction.markRollbackOnly();

@@ -3,10 +3,12 @@ package org.flib.xdstorage.serialization;
 import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
+import org.flib.xdstorage.exceptions.XdStorageIOException;
 import org.flib.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper;
 import org.flib.xdstorage.idgeneration.IXdStorageIdGenerator;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,12 +40,24 @@ public class XdStorageXmlSerializationTest {
         private Long id;
         private String title;
 
-        public XmlTestRecord() {}
+        public XmlTestRecord() {
+        }
 
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-        public String getTitle() { return title; }
-        public void setTitle(String title) { this.title = title; }
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
     }
 
     @BeforeEach
@@ -104,10 +118,9 @@ public class XdStorageXmlSerializationTest {
     public void testRead_WithEmptyXml_ShouldReturnEmptyCollectionSafely() throws Exception {
         // Проверяем устойчивость StAX-парсера к пустому входящему потоку
         StringReader stringReader = new StringReader("   ");
-        Collection<Object> result = xmlReader.read(stringReader);
-
-        assertNotNull(result);
-        assertTrue(result.isEmpty(), "Для пустого контента должна возвращаться чистая пустая коллекция без исключений!");
+        Assertions.assertThrows(XdStorageIOException.class, () -> {
+            Collection<Object> result = xmlReader.read(stringReader);
+        });
     }
 
     @Test

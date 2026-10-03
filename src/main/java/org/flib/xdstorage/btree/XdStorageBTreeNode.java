@@ -435,12 +435,24 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         storage.update(right, transaction);
         storage.update(this, transaction);
 
+        // Вычисляем целевой разделительный ключ для родительского узла
+        Comparable midKey = findLeftKey(deepLockedNode, right, storage, transaction);
+
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ ЯДРА Б+ ДЕРЕВА:
+        // Если расщепление происходит на ВНУТРЕННЕМ (не-листовом) уровне, средний ключ (медиана)
+        // обязан быть выселен из правого поддерева right! На внутренних этажах дублирование
+        // разделителей запрещено спецификацией алгоритма, так как оно разрушает границы поиска find.
+        if (!right.getChildren().isEmpty() && !right.getKeys().isEmpty() && right.getKeys().get(0).equals(midKey)) {
+            right.getKeys().remove(0);
+            storage.update(right, transaction); // Фиксируем выселение ключа на диске
+        }
+
         final List<XdStorageBTreeNode> childrenOfParent = this.getParent().getChildren();
         for (int i = 0; i < childrenOfParent.size(); ++i) {
             final XdStorageBTreeNode child = childrenOfParent.get(i);
             final Object childId = child.getId();
             if ((childId != null && child.getId().equals(this.getId())) || child == this) {
-                this.getParent().getKeys().add(i, findLeftKey(deepLockedNode, right, storage, transaction));
+                this.getParent().getKeys().add(i, midKey);
                 if (i < childrenOfParent.size() - 1) {
                     childrenOfParent.add(i + 1, right);
                 } else {
@@ -526,7 +538,15 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         storage.update(right, transaction);
         storage.update(this, transaction);
 
-        newRoot.getKeys().add(findLeftKey(deepLockedNode, right, storage, transaction));
+        Comparable midKey = findLeftKey(deepLockedNode, right, storage, transaction);
+
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ ЯДРА Б+ ДЕРЕВА: Выселение медианы при создании нового не-листового корня
+        if (!right.getChildren().isEmpty() && !right.getKeys().isEmpty() && right.getKeys().get(0).equals(midKey)) {
+            right.getKeys().remove(0);
+            storage.update(right, transaction);
+        }
+
+        newRoot.getKeys().add(midKey);
         newRoot.getChildren().add(this);
         newRoot.getChildren().add(right);
 

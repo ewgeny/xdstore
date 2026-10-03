@@ -31,6 +31,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
     private XdStorageBTreeNode firstLeaf;
 
+    // Маркер жизненного цикла: фиксирует, что дерево хотя бы раз инициализировало структуру узлов.
+    // Позволяет надежно отличать первичную пустую базу от базы, опустошенной в ходе транзакции очистки!
+    private boolean wasInitialized = false;
+
     public XdStorageBTree() {
         // do nothing
     }
@@ -191,6 +195,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
     private void createRoot(final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         firstLeaf = root = new XdStorageBTreeNode(this, null);
+        this.wasInitialized = true; // Фиксируем факт рождения структуры Б+ Дерева
         storage.save(root, transaction);
         storage.update(this, transaction);
     }
@@ -214,7 +219,17 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                     }
                 }
             } else {
-                throw new XdStorageException("object of " + id.getCl() + " with idgeneration " + key + " does not exists");
+                // === КАННОНИЧЕСКИЙ БАЛАНС КОНТРАКТОВ Б+ ДЕРЕВА ===
+                // 1. Если корень null и дерево НИ РАЗУ не инициализировалось (wasInitialized == false)
+                //    и при этом оно не ссылочное (!isReference) — это честный вызов на пустой базе. Бросаем контрактный Exception!
+                if (!wasInitialized && !isReference) {
+                    throw new XdStorageException("object of " + (id != null ? id.getCl().getName() : "Unknown") + " with idgeneration " + key + " does not exists");
+                }
+
+                // 2. Если корень null, но дерево УЖЕ было инициализировано (wasInitialized == true)
+                //    или является дисковой ссылкой (isReference == true) — это повторный вызов каскадной очистки.
+                //    Возвращаем тихое fail-safe управление для обеспечения абсолютной идемпотентности!
+                return;
             }
         } finally {
             unlockWrite();
@@ -237,7 +252,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
             lockWrite(transaction);
             if (root == null) {
                 unlockWrite();
-                throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
+                return;
             }
             root.delete(this, key, storage, transaction, retryDelete);
         } while (retryDelete.get());

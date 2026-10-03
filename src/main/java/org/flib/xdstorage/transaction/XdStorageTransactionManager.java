@@ -166,7 +166,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         final String currentThreadId = transaction.getTransactionThreadId();
         transactionsByThreadId.remove(currentThreadId);
 
-        resources.parallelStream().forEach(resource -> {
+        resources.stream().forEach(resource -> {
             resource.release(transaction);
         });
 
@@ -225,7 +225,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
             transaction.finishCriticalSection();
         }
 
-        resources.parallelStream().forEach(resource -> {
+        resources.stream().forEach(resource -> {
             resource.release(transaction);
         });
 
@@ -270,7 +270,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
                     transaction.skipOrWaitForInternalTransactions();
                     transaction.rollbackInternal();
 
-                    resources.parallelStream().forEach(resource -> {
+                    resources.stream().forEach(resource -> {
                         resource.release(transaction);
                     });
 
