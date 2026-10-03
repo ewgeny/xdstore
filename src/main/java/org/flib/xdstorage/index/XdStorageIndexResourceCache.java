@@ -54,13 +54,20 @@ public class XdStorageIndexResourceCache {
     }
 
     public void deleteRecord(final Object objectId) {
-        final Object resourceId = index.get(objectId);
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД: Вырезаем указатель текущего объекта из мапы index
+        // БЕЗУСЛОВНО при каждом вызове удаления! Прежняя логика удаляла связь только если
+        // счетчик падал до нуля, что приводило к утечкам "призраков" указателей в оперативной памяти.
+        final Object resourceId = index.remove(objectId);
+
         if (resourceId != null) {
             final AtomicLong count = counters.get(resourceId);
-            if (count != null && count.decrementAndGet() == 0) {
-                index.remove(objectId);
-                counters.remove(resourceId);
+            if (count != null) {
+                // Если счетчик фрагментов действительно опустел, безопасно удаляем его дескриптор
+                if (count.decrementAndGet() <= 0) {
+                    counters.remove(resourceId);
+                }
             }
         }
     }
+
 }

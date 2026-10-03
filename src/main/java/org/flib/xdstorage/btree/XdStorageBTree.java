@@ -207,6 +207,19 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
         lockWrite(transaction);
         try {
+            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Корень дефекта 65 / 88):
+            // Если поле root вернуло null, но маркер wasInitialized равен true, это означает,
+            // что старый родитель был удален каскадным сжатием ярусов join, а новый корень
+            // находится в транзакционном кэше изменений сессии.
+            // Перегружаем состояние bTree из storage, чтобы восстановить живую ссылку на root!
+            if (root == null && wasInitialized) {
+                XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                if (freshTree != null && freshTree.getRoot() != null) {
+                    this.root = freshTree.getRoot();
+                    this.firstLeaf = freshTree.getFirstLeaf();
+                }
+            }
+
             if (root != null) {
                 if (XdStorageObjectUtils.isReference(root)) {
                     root.lockWrite(transaction);
@@ -219,16 +232,9 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                     }
                 }
             } else {
-                // === КАННОНИЧЕСКИЙ БАЛАНС КОНТРАКТОВ Б+ ДЕРЕВА ===
-                // 1. Если корень null и дерево НИ РАЗУ не инициализировалось (wasInitialized == false)
-                //    и при этом оно не ссылочное (!isReference) — это честный вызов на пустой базе. Бросаем контрактный Exception!
                 if (!wasInitialized && !isReference) {
                     throw new XdStorageException("object of " + (id != null ? id.getCl().getName() : "Unknown") + " with idgeneration " + key + " does not exists");
                 }
-
-                // 2. Если корень null, но дерево УЖЕ было инициализировано (wasInitialized == true)
-                //    или является дисковой ссылкой (isReference == true) — это повторный вызов каскадной очистки.
-                //    Возвращаем тихое fail-safe управление для обеспечения абсолютной идемпотентности!
                 return;
             }
         } finally {
@@ -250,6 +256,16 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryDelete.set(false);
             lockWrite(transaction);
+
+            // Защита от фантомного зануления внутриdo-while цикла
+            if (root == null && wasInitialized) {
+                XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                if (freshTree != null && freshTree.getRoot() != null) {
+                    this.root = freshTree.getRoot();
+                    this.firstLeaf = freshTree.getFirstLeaf();
+                }
+            }
+
             if (root == null) {
                 unlockWrite();
                 return;
@@ -265,6 +281,15 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
         lockWrite(transaction);
         try {
+            // Восстановление живого корня для операции обновления структуры
+            if (root == null && wasInitialized) {
+                XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                if (freshTree != null && freshTree.getRoot() != null) {
+                    this.root = freshTree.getRoot();
+                    this.firstLeaf = freshTree.getFirstLeaf();
+                }
+            }
+
             if (root == null) {
                 throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
             }
@@ -298,6 +323,15 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryUpdate.set(false);
             lockWrite(transaction);
+
+            if (root == null && wasInitialized) {
+                XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                if (freshTree != null && freshTree.getRoot() != null) {
+                    this.root = freshTree.getRoot();
+                    this.firstLeaf = freshTree.getFirstLeaf();
+                }
+            }
+
             if (root == null) {
                 unlockWrite();
                 throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
@@ -307,8 +341,22 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public List<Object> find(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        // ОПТИМИЗАЦИЯ: Захватываем WriteЛок исключительно если корень реально является незагруженной прокси-ссылкой СУБД.
-        // Если корень готов, пропускаем монопольную блокировку, открывая дорогу параллельным читателям!
+        // Восстановление живого корня для операции неблокирующего поиска find
+        if (root == null && wasInitialized) {
+            lockWrite(transaction);
+            try {
+                if (root == null) {
+                    XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                    if (freshTree != null && freshTree.getRoot() != null) {
+                        this.root = freshTree.getRoot();
+                        this.firstLeaf = freshTree.getFirstLeaf();
+                    }
+                }
+            } finally {
+                unlockWrite();
+            }
+        }
+
         if (root != null && XdStorageObjectUtils.isReference(root)) {
             lockWrite(transaction);
             try {

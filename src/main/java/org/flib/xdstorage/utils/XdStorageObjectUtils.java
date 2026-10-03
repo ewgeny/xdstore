@@ -739,22 +739,39 @@ public final class XdStorageObjectUtils {
 
     public static XdStorageClassInfo getClassInfo(Class<?> cl) {
         cl = getEntityClass(cl);
-        if (classesInfo.containsKey(cl))
-            return classesInfo.get(cl);
 
-        final XdStorageClassInfo info = new XdStorageClassInfo();
+        // Быстрый Lock-Free Read: если метаданные класса уже собраны — отдаем мгновенно
+        XdStorageClassInfo info = classesInfo.get(cl);
+        if (info != null) {
+            return info;
+        }
 
-        info.setClazz(cl);
+        // АТОМАРНЫЙ БАРЬЕР РЕФЛЕКСИИ: Защищаем фазу первоначального анализа JavaBeans-свойств класса.
+        // Это полностью блокирует race condition на несинхронизированных HashMap внутри методов
+        // getClassFields и getClassIndexes, ликвидируя бесконечные циклы параллельных потоков!
+        GLOBAL_COMPILATION_LOCK.lock();
+        try {
+            // Double-Check-Locking паттерн
+            info = classesInfo.get(cl);
+            if (info != null) {
+                return info;
+            }
 
-        info.setPolicy(getClassPolicy(cl));
-        setIndexInformation(info, cl);
-        info.setIdField(getClassIdField(cl));
-        final Map<String, XdStorageObjectField> fields;
-        info.setFields(fields = getClassFields(cl));
-        info.setIndexes(getClassIndexes(cl, fields));
+            final XdStorageClassInfo newInfo = new XdStorageClassInfo();
+            newInfo.setClazz(cl);
+            newInfo.setPolicy(getClassPolicy(cl));
+            setIndexInformation(newInfo, cl);
+            newInfo.setIdField(getClassIdField(cl));
 
-        classesInfo.putIfAbsent(cl, info);
-        return classesInfo.get(cl);
+            final Map<String, XdStorageObjectField> fields = getClassFields(cl);
+            newInfo.setFields(fields);
+            newInfo.setIndexes(getClassIndexes(cl, fields));
+
+            classesInfo.put(cl, newInfo);
+            return newInfo;
+        } finally {
+            GLOBAL_COMPILATION_LOCK.unlock();
+        }
     }
 
     private static void setIndexInformation(final XdStorageClassInfo info, final Class<?> cl) {

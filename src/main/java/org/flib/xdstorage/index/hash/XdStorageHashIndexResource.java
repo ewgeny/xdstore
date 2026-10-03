@@ -61,38 +61,28 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
     public void lockForCommit(final XdStorageTransaction transaction) {
         super.lockForCommit(transaction);
 
-        synchronized (locked) {
-            while (locked.get()) {
-                try {
-                    final String transactionId = transaction.getTransactionId();
-
-                    final long timeout = 2 * transaction.getTimeout();
-                    final Long startTime = blockingTime.remove(transactionId);
-                    final Long currentTime = System.currentTimeMillis();
-                    if (startTime == null) {
-                        blockingTime.put(transactionId, currentTime);
-                    } else if ( (currentTime - startTime) >= timeout ) {
-                        throw new XdStorageRuntimeException("resource " + getFileName() + " cannot be locked for commit by transaction "
-                                + transactionId + " and transaction should be rolled back");
-                    } else {
-                        blockingTime.put(transactionId, startTime);
-                    }
-
-                    locked.wait(timeout / 2);
-                } catch (final InterruptedException e) {
-                    throw new XdStorageRuntimeException("waiting for lock resource " + getFileName() + " has been interrupted", e);
-                }
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Ликвидируем synchronized(locked) и locked.wait() в Хеш-индексах!
+        // Задействуем ReentrantLock 'lock' с поддержкой tryLock() по таймауту транзакции.
+        final long timeout = transaction != null ? transaction.getTimeout() : 3000L;
+        try {
+            boolean acquired = lock.tryLock(timeout, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!acquired) {
+                throw new XdStorageRuntimeException("Hash Index Resource " + getFileName() + " cannot be locked for commit by transaction "
+                        + transaction.getTransactionId() + " (Timeout " + timeout + " ms expired)");
             }
-            locked.set(true);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new XdStorageRuntimeException("waiting for lock hash index resource " + getFileName() + " has been interrupted", e);
         }
     }
 
     @Override
     public void unlockAfterCommit(final XdStorageTransaction transaction) {
-        synchronized (locked) {
-            locked.set(false);
-            locked.notify();
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Освобождаем ReentrantLock хеш-индекса
+        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.unlock();
         }
+        super.unlockAfterCommit(transaction);
     }
 
     public String getFileName() {
@@ -217,6 +207,10 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
     }
 
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
+        // Гарантируем fail-safe отпуск ReentrantLock замка хеш-индекса при аварийном откате
+        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.unlock();
+        }
         cache.rollback(transaction);
         postRollback(transaction);
     }

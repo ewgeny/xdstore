@@ -74,7 +74,25 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         if (toCloneMaybeWrapped == null) {
             return null;
         }
+
+        // Извлекаем оригинальный объект из прокси-обертки
         final Object toClone = XdStorageObjectUtils.getWrappedObjectOrSameObject(toCloneMaybeWrapped);
+        final Class<?> cl = XdStorageObjectUtils.getEntityClass(toClone.getClass());
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКИЙ БАРЬЕР СУБД (Ликвидация рекурсивных MVCC-дедлоков Дерева):
+        // Служебные инфраструктурные классы СУБД (B+ Деревья и их внутренние узлы-ноды)
+        // категорически ЗАПРЕЩЕНО подвергать глубокому ORM-клонированию через unwrapAndClone!
+        // Переповторный рефлексивный обход их полей JavaBeans приводил к ложной перетирке версий
+        // в XdStorageResourceCache. Возвращаем оригинальный инстанс объекта (Identity), полностью
+        // уничтожая ошибку concurrent modification на индексах planet_idx!
+        // =========================================================================
+        if (cl == org.flib.xdstorage.btree.XdStorageBTree.class ||
+                cl == org.flib.xdstorage.btree.XdStorageBTreeNode.class ||
+                cl.getName().contains("org.flib.xdstorage.btree")) {
+            return toClone; // Возвращаем живой инстанс без рекурсивного переклонирования
+        }
+
         try {
             return unwrapAndCloneForOneLevel(toClone);
         } catch (Exception e) {

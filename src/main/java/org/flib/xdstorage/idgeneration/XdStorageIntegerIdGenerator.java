@@ -72,75 +72,94 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
     }
 
     private void initIdentifiers(final Class<?> cl, final IXdStorageTransaction tx) throws XdStorageException {
-        XdStorageException exception = null;
-        Integer newLastIdentifierOfPart = null;
         final Class<?> clRecord = XdStorageIntegerIdCounterRecord.class;
+        final int[] newLastIdentifierOfPart = new int[1];
 
-        final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+        java.util.concurrent.Callable<Void> task = () -> {
+            final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageTransaction transaction = transactionsManager.beginTransaction(10 * 1000);
+            try {
+                final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
+                final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
 
-        final IXdStorageTransaction transaction = transactionsManager.beginTransaction(10 * 1000);
-        try {
-            final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
-            final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
+                XdStorageIntegerIdCounterRecord record = (XdStorageIntegerIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
+                if (record == null) {
+                    newLastIdentifierOfPart[0] = PART_OF_IDENTIFIERS;
+                    record = new XdStorageIntegerIdCounterRecord();
+                    record.setCl(cl);
+                    record.setCounter(newLastIdentifierOfPart[0]);
+                    resource.insert(record, (XdStorageTransaction) transaction);
+                } else {
+                    newLastIdentifierOfPart[0] = record.getCounter() + PART_OF_IDENTIFIERS;
+                    record.setCounter(newLastIdentifierOfPart[0]);
+                    resource.update(record, (XdStorageTransaction) transaction);
+                }
 
-            XdStorageIntegerIdCounterRecord record = (XdStorageIntegerIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
-            if (record == null) {
-                newLastIdentifierOfPart = PART_OF_IDENTIFIERS;
-                record = new XdStorageIntegerIdCounterRecord();
-                record.setCl(cl);
-                record.setCounter(newLastIdentifierOfPart);
-                resource.insert(record, (XdStorageTransaction) transaction);
-            } else {
-                newLastIdentifierOfPart = record.getCounter() + PART_OF_IDENTIFIERS;
-                record.setCounter(newLastIdentifierOfPart);
-                resource.update(record, (XdStorageTransaction) transaction);
+                transaction.commit();
+            } catch (Throwable t) {
+                transaction.rollback();
+                throw t;
             }
+            return null;
+        };
 
-            transaction.commit();
-        } catch (final XdStorageConnectionException e) {
-            transaction.rollback();
-            exception = new XdStorageException(e);
-        } catch (final XdStorageException e) {
-            transaction.rollback();
-            exception = e;
+        try {
+            if (services != null && services.getExecutor() != null) {
+                services.getExecutor().submit(task).get();
+            } else {
+                task.call();
+            }
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof XdStorageException) throw (XdStorageException) cause;
+            if (cause instanceof org.flib.xdstorage.exceptions.XdStorageRuntimeException) throw (org.flib.xdstorage.exceptions.XdStorageRuntimeException) cause;
+            if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+            throw new XdStorageException("Критический сбой инициализации Hi-Lo буфера Integer", cause);
         }
 
-        if (exception != null) throw exception;
-
-        counters.put(cl, new AtomicInteger(newLastIdentifierOfPart - PART_OF_IDENTIFIERS));
-        lastIdentifierOfPart.put(cl, newLastIdentifierOfPart);
+        counters.put(cl, new AtomicInteger(newLastIdentifierOfPart[0] - PART_OF_IDENTIFIERS));
+        lastIdentifierOfPart.put(cl, newLastIdentifierOfPart[0]);
     }
 
     private void takeNextPartOfIdentifiers(final Class<?> cl, final IXdStorageTransaction tx) throws XdStorageException {
-        XdStorageException exception = null;
         final Class<?> clRecord = XdStorageIntegerIdCounterRecord.class;
+        final int newLastIdentifierOfPart = lastIdentifierOfPart.get(cl) + PART_OF_IDENTIFIERS;
 
-        final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
-        final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+        java.util.concurrent.Callable<Void> task = () -> {
+            final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageTransaction transaction = transactionsManager.beginTransaction(10 * 1000);
+            try {
+                final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
+                final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
 
-        final Integer newLastIdentifierOfPart = lastIdentifierOfPart.get(cl) + PART_OF_IDENTIFIERS;
-
-        final IXdStorageTransaction transaction = transactionsManager.beginTransaction(10 * 1000);
-        try {
-            final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
-            final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
-
-            final XdStorageIntegerIdCounterRecord record = (XdStorageIntegerIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
-            if (record != null) {
-                record.setCounter(newLastIdentifierOfPart);
-                resource.update(record, (XdStorageTransaction) transaction);
+                final XdStorageIntegerIdCounterRecord record = (XdStorageIntegerIdCounterRecord) resource.read(cl, (XdStorageTransaction) transaction);
+                if (record != null) {
+                    record.setCounter(newLastIdentifierOfPart);
+                    resource.update(record, (XdStorageTransaction) transaction);
+                }
+                transaction.commit();
+            } catch (Throwable t) {
+                transaction.rollback();
+                throw t;
             }
-            transaction.commit();
-        } catch (final XdStorageConnectionException e) {
-            transaction.rollback();
-            exception = new XdStorageException(e);
-        } catch (final XdStorageException e) {
-            transaction.rollback();
-            exception = e;
-        }
+            return null;
+        };
 
-        if (exception != null) throw exception;
+        try {
+            if (services != null && services.getExecutor() != null) {
+                services.getExecutor().submit(task).get();
+            } else {
+                task.call();
+            }
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof XdStorageException) throw (XdStorageException) cause;
+            if (cause instanceof org.flib.xdstorage.exceptions.XdStorageRuntimeException) throw (org.flib.xdstorage.exceptions.XdStorageRuntimeException) cause;
+            if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+            throw new XdStorageException("Критический сбой расширения пачки Hi-Lo Integer", cause);
+        }
 
         lastIdentifierOfPart.put(cl, newLastIdentifierOfPart);
     }

@@ -47,30 +47,41 @@ public class XdStorageWrapperBlockGettersGenerator {
             final String name = getter.getName();
             final String fieldName = name.substring(3, 4).toLowerCase() + name.substring(4);
 
-            builder.append("\r\n\tprivate boolean ").append(fieldName).append("Loaded;\r\n");
+            builder.append("\r\n\tprivate volatile boolean ").append(fieldName).append("Loaded;\r\n"); // Делаем поле volatile
             builder.append("\r\n\t@Override\r\n\t");
             builder.append(gen.buildMethodDefinition(getter.getModifiers(), name, getter.getTypeParameters(), returnType, getter.getGenericReturnType(), getter.getParameterTypes(), getter.getGenericParameterTypes(), getter.getExceptionTypes())).append(" {\r\n");
-            builder.append("\t\tif(!").append(fieldName).append("Loaded) {\r\n\t\t\ttry{\r\n");
+
+            // ВНЕДРЯЕМ DOUBLE-CHECKED LOCKING НА БАЗЕ ВНУТРЕННЕГО LOCK__ ПРОКСИ-КЛАССА
+            builder.append("\t\tif(!").append(fieldName).append("Loaded) {\r\n");
+            builder.append("\t\t\tlock__();\r\n");
+            builder.append("\t\t\ttry {\r\n");
+            builder.append("\t\t\t\tif(!").append(fieldName).append("Loaded) {\r\n");
+            builder.append("\t\t\t\t\ttry{\r\n");
 
             if (returnType.isArray()) {
-                builder.append("\t\t\t\t").append(returnType.getComponentType().getName()).append("[] toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
-                builder.append("\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\tif (toLoadObject != null) {\r\n\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t}\r\n\t\t\t\t\t}\r\n\t\t\t\t}\r\n");
+                builder.append("\t\t\t\t\t\t").append(returnType.getComponentType().getName()).append("[] toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
+                builder.append("\t\t\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\t\t\tif (toLoadObject != null) {\r\n\t\t\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t}\r\n");
             } else if (returnType.isAssignableFrom(Collection.class) || returnType.isAssignableFrom(List.class)) {
-                builder.append("\t\t\t\t").append(returnType.getName()).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
-                builder.append("\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t}\r\n\t\t\t\t\t}\r\n\t\t\t\t}\r\n");
+                builder.append("\t\t\t\t\t\t").append(returnType.getName()).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
+                builder.append("\t\t\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n\t\t\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t}\r\n");
             } else if (returnType.isAssignableFrom(Map.class)) {
-                builder.append("\t\t\t\t").append(Collection.class.getName()).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(".values();\r\n");
-                builder.append("\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t}\r\n\t\t\t\t\t}\r\n\t\t\t\t}\r\n");
+                builder.append("\t\t\t\t\t\t").append(Collection.class.getName()).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(".values();\r\n");
+                builder.append("\t\t\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n\t\t\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t}\r\n");
             } else {
-                builder.append("\t\t\t\tObject toLoadObject = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
-                builder.append("\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n");
-                builder.append("\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n");
-                builder.append("\t\t\t\t}\r\n");
+                builder.append("\t\t\t\t\t\tObject toLoadObject = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
+                builder.append("\t\t\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n");
+                builder.append("\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n");
+                builder.append("\t\t\t\t\t\t}\r\n");
             }
 
-            builder.append("\t\t\t\t").append(fieldName).append("Loaded = true;\r\n\t\t\t} catch(").append(Throwable.class.getName()).append(" e) {\r\n");
-            builder.append("\t\t\t\ttransaction.markRollbackOnly();\r\n\t\t\t\tthrow new ").append(XdStorageRuntimeException.class.getName());
-            builder.append("(\"couldn't load objects of field ").append(fieldName).append(", transaction \" + transaction.getTransactionId() + \" marked as rollback only\", e);\r\n\t\t\t}\r\n\t\t}\r\n");
+            builder.append("\t\t\t\t\t\t").append(fieldName).append("Loaded = true;\r\n\t\t\t\t\t} catch(").append(Throwable.class.getName()).append(" e) {\r\n");
+            builder.append("\t\t\t\t\t\ttransaction.markRollbackOnly();\r\n\t\t\t\t\t\tthrow new ").append(XdStorageRuntimeException.class.getName());
+            builder.append("(\"couldn't load objects of field ").append(fieldName).append(", transaction \" + transaction.getTransactionId() + \" marked as rollback only\", e);\r\n\t\t\t\t\t}\r\n");
+            builder.append("\t\t\t\t}\r\n");
+            builder.append("\t\t\t} finally {\r\n");
+            builder.append("\t\t\t\tunlock__();\r\n");
+            builder.append("\t\t\t}\r\n");
+            builder.append("\t\t}\r\n");
 
             if (getter == ctx.parentGetter) {
                 builder.append("\t\tif(parent != null) {\r\n\t\t\treturn (");

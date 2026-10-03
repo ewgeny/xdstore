@@ -101,7 +101,7 @@ public class XdStorageSearchIndexRecord {
 
         Map<Object, Map<String, Map<String, Object>>> objects = childrenFieldValues.get(cl);
         if (objects == null) {
-            childrenFieldValues.putIfAbsent(cl, objects = new HashMap<>());
+            childrenFieldValues.put(cl, objects = new HashMap<>());
         }
 
         Map<String, Map<String, Object>> childs = objects.get(objectId);
@@ -112,6 +112,20 @@ public class XdStorageSearchIndexRecord {
         Map<String, Object> valuesByObjectId = childs.get(childFieldName);
         if(valuesByObjectId == null) {
             childs.put(childFieldName, valuesByObjectId = new HashMap<>());
+        }
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Ликвидация дублирования свойств в B+ Дереве):
+        // Проверяем, если данное JavaBeans-свойство для текущего objectId дочерней сущности
+        // УЖЕ было добавлено в поисковую запись ранее и его значение совпадает - мы молча
+        // прерываем выполнение метода! Это полностью защищает запись от паразитного раздувания
+        // при повторных каскадных вызовах storage.save() в тесте и уничтожает concurrent modification!
+        // =========================================================================
+        if (valuesByObjectId.containsKey(fieldName)) {
+            Object existingValue = valuesByObjectId.get(fieldName);
+            if ((existingValue == null && value == null) || (existingValue != null && existingValue.equals(value))) {
+                return; // Свойство уже учтено, выходим fail-safe
+            }
         }
 
         valuesByObjectId.put(fieldName, value);

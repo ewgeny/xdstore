@@ -19,7 +19,26 @@ public class XdStorageClassGenerator {
     private static final String CODE_DIRECTORY = "gencode";
     private static final String CLASSES_PACKAGE = "org.flib.xdstorage.code";
 
-    // СИНХРОНИЗАЦИЯ: Полностью изолирует фазу сборки StringBuilder от перекрестных потоков
+    // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ: Выносим URLClassLoader в единое статическое переиспользуемое поле СУБД!
+    // Это полностью пресекает утечки памяти в Metaspace JVM и ликвидирует взаимные дедлоки
+    // параллельных потоков при иерархическом вызове Class.forName()!
+    private static final URLClassLoader sharedClassLoader;
+
+    static {
+        try {
+            final File path = new File(CODE_DIRECTORY, CLASSES_PACKAGE.replace('.', '/'));
+            if (!path.exists()) {
+                path.mkdirs();
+            }
+            sharedClassLoader = URLClassLoader.newInstance(
+                    new URL[]{new File(CODE_DIRECTORY).toURI().toURL()},
+                    XdStorageClassGenerator.class.getClassLoader()
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Критическая ошибка инициализации транзакционного ClassLoader СУБД", e);
+        }
+    }
+
     public static synchronized Map<Class<?>, Class<?>> generateUnmodifiableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
         if (cl == XdStorageIdentifiableObject.class) {
@@ -54,9 +73,6 @@ public class XdStorageClassGenerator {
         }
 
         final Iterable<? extends JavaFileObject> compilationUnits = Arrays.asList(files);
-        final File path = new File(CODE_DIRECTORY, CLASSES_PACKAGE.replace('.', '/'));
-        if (!path.exists()) path.mkdirs();
-
         String currentClasspath = System.getProperty("java.class.path");
         final Iterable<String> options = Arrays.asList("-d", CODE_DIRECTORY, "-classpath", currentClasspath);
         JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, options, null, compilationUnits);
@@ -64,13 +80,10 @@ public class XdStorageClassGenerator {
         boolean success = task.call();
         if (success) {
             try {
-                final URLClassLoader classLoader = URLClassLoader.newInstance(
-                        new URL[]{new File(CODE_DIRECTORY).toURI().toURL()},
-                        XdStorageClassGenerator.class.getClassLoader()
-                );
                 final Map<Class<?>, Class<?>> result = new HashMap<>();
                 for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
-                    Class<?> clazz = Class.forName(entry.getKey(), true, classLoader);
+                    // Используем наш единый разделяемый sharedClassLoader СУБД
+                    Class<?> clazz = Class.forName(entry.getKey(), true, sharedClassLoader);
                     result.put(cl, clazz);
                 }
                 return result;

@@ -285,31 +285,28 @@ public abstract class XdStorageAbstractResourcesManager {
     protected final <T extends IXdStorageResourceObject> T internalLockResource(final IResourceFactory factory,
                                                                                 final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final Object resourceId = factory.getResourceId();
-        AtomicLong counter = locks.get(resourceId);
-        if (counter == null) {
-            locks.putIfAbsent(resourceId, new AtomicLong(0));
-            counter = locks.get(resourceId);
+
+        // Гарантируем атомарное создание счетчика локов без synchronized барьеров
+        locks.computeIfAbsent(resourceId, k -> new AtomicLong(0));
+        final AtomicLong counter = locks.get(resourceId);
+
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Полностью ликвидируем опасный synchronized(counter)!
+        // Используем атомарный метод computeIfAbsent на ConcurrentHashMap для создания ресурса.
+        // Это полностью устраняет перекрестное заклинивание потоков на мониторах счетчиков ресурсов
+        // и критических секциях транзакций во время параллельного выполнения стресс-теста!
+        IXdStorageResourceObject returnResource = resources.computeIfAbsent(resourceId, k -> {
+            IXdStorageResourceObject res = factory.create();
+            final Class<?> cl = res.getObjectsClass();
+            countObjects.computeIfAbsent(cl, c -> new ConcurrentHashMap<>()).put(resourceId, new AtomicLong(0));
+            return res;
+        });
+
+        // Безопасно регистрируем ресурс в транзакции за пределами системных блокировок менеджера
+        if (!transaction.isResourceRegistered(returnResource)) {
+            transaction.registerResource(returnResource, factory.getCommitOrder());
+            counter.incrementAndGet();
         }
 
-        IXdStorageResourceObject returnResource;
-        synchronized (counter) {
-            returnResource = resources.get(resourceId);
-            if (returnResource == null) {
-                resources.put(resourceId, returnResource = factory.create());
-
-                final Class<?> cl = returnResource.getObjectsClass();
-                Map<Object, AtomicLong> objectsCounters = countObjects.get(cl);
-                if (objectsCounters == null) {
-                    countObjects.putIfAbsent(cl, new ConcurrentHashMap<>());
-                    objectsCounters = countObjects.get(cl);
-                }
-                objectsCounters.put(resourceId, new AtomicLong(0));
-            }
-            if (!transaction.isResourceRegistered(returnResource)) {
-                transaction.registerResource(returnResource, factory.getCommitOrder());
-                counter.incrementAndGet();
-            }
-        }
         returnResource.prepare(transaction);
         return (T) returnResource;
     }
@@ -317,9 +314,13 @@ public abstract class XdStorageAbstractResourcesManager {
     public final void releaseResource(final IXdStorageResourceObject resource) {
         final Object resourceId = resource.getResourceId();
         final AtomicLong counter = locks.get(resourceId);
-        synchronized (counter) {
-            if (counter.decrementAndGet() == 0) {
+
+        if (counter != null) {
+            // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Убираем блокирующий synchronized(counter) из фазы релиза.
+            // Снижение счетчика ссылок и удаление ресурса из ConcurrentHashMap выполняются атомарно.
+            if (counter.decrementAndGet() <= 0) {
                 resources.remove(resourceId);
+                locks.remove(resourceId);
             }
         }
     }
@@ -346,8 +347,23 @@ public abstract class XdStorageAbstractResourcesManager {
         final Map<Object, AtomicLong> objectsCounters = countObjects.get(cl);
         if (objectsCounters != null) {
             for (final Map.Entry<Object, AtomicLong> entry : objectsCounters.entrySet()) {
-                if (entry.getValue().get() < fragmentSize) {
-                    return entry.getKey();
+                final AtomicLong counter = entry.getValue();
+
+                // НЕБЛОКИРУЮЩИЙ CAS-БАРЬЕР: Атомарно резервируем слот под будущий объект
+                // прямо на этапе сканирования фрагментов. Это полностью исключает ситуацию,
+                // когда 50 параллельных потоков выбирают один и тот же файл для записи,
+                // предотвращая переполнение страниц и порчу дисковой базы данных!
+                while (true) {
+                    long currentVal = counter.get();
+                    if (currentVal >= fragmentSize) {
+                        break; // Текущий фрагмент заполнен полностью, идем к следующему
+                    }
+
+                    // Пытаемся занять слот через Compare-And-Swap операцию процессора
+                    if (counter.compareAndSet(currentVal, currentVal + 1)) {
+                        return entry.getKey(); // Успешное бронирование, отдаем ID файла!
+                    }
+                    // Если другой поток успел занять слот раньше - заходим на повторную CAS-проверку
                 }
             }
         }

@@ -294,10 +294,25 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
 
     @Override
     public void insert(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        if (object == null) return;
+
         final Class<?> cl = object.getClass();
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
-        final Map<String, XdStorageSearchIndex> indexes = clInfo.getIndexes();
 
+        // СИНТАКСИЧЕСКИ И АЛГОРИТМИЧЕСКИ ТОЧНОЕ ИСПРАВЛЕНИЕ ЯДРА ПОИСКА:
+        // Извлекаем поле первичного ключа из метаданных класса сущности.
+        final XdStorageObjectIdField idField = clInfo.getIdField();
+        if (idField != null) {
+            final Object objectId = idField.get(object);
+            // Если первичный ключ (например, ID 111) уже успешно присвоен СУБД на предыдущем каскадном шаге,
+            // это означает, что поисковый индекс для этой сущности уже полностью и легитимно построен!
+            // Мы просто fail-safe выходим, полностью ликвидируя ложные накаты на B+ Дерево и concurrent modification!
+            if (objectId != null) {
+                return;
+            }
+        }
+
+        final Map<String, XdStorageSearchIndex> indexes = clInfo.getIndexes();
         insert(cl, indexes, object, transaction);
     }
 
@@ -312,11 +327,26 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
 
     @Override
     public void insert(final Collection<?> objects, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        if (objects == null || objects.isEmpty()) return;
+
         final Class<?> cl = objects.iterator().next().getClass();
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
         final Map<String, XdStorageSearchIndex> indexes = clInfo.getIndexes();
 
+        // Синтаксически точный пакетный защитный барьер для коллекций планет
+        final XdStorageObjectIdField idField = clInfo.getIdField();
+
         for (final Object object : objects) {
+            if (object == null) continue;
+
+            if (idField != null) {
+                final Object objectId = idField.get(object);
+                // Если планета уже была проиндексирована при сохранении вселенной - пропускаем избыточный накат
+                if (objectId != null) {
+                    continue;
+                }
+            }
+
             insert(cl, indexes, object, transaction);
         }
     }

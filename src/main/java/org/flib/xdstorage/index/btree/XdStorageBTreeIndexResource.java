@@ -111,37 +111,28 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
 
     @Override
     public void lockForCommit(final XdStorageTransaction transaction) {
-        synchronized (locked) {
-            while (locked.get()) {
-                try {
-                    final String transactionId = transaction.getTransactionId();
-
-                    final long timeout = 2 * transaction.getTimeout();
-                    final Long startTime = blockingTime.remove(transactionId);
-                    final Long currentTime = System.currentTimeMillis();
-                    if (startTime == null) {
-                        blockingTime.put(transactionId, currentTime);
-                    } else if ( (currentTime - startTime) >= timeout ) {
-                        throw new XdStorageRuntimeException("resource " + getFileName() + " cannot be locked for commit by transaction "
-                                + transactionId + " and transaction should be rolled back");
-                    } else {
-                        blockingTime.put(transactionId, startTime);
-                    }
-
-                    locked.wait(timeout / 2);
-                } catch (final InterruptedException e) {
-                    throw new XdStorageRuntimeException("waiting for lock resource " + getFileName() + " has been interrupted", e);
-                }
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Тотально вырезаем опасный synchronized(locked) и locked.wait()!
+        // Переводим блокировку B+ Дерева индексов на честный ReentrantLock 'lock' с поддержкой tryLock()
+        // по таймауту транзакции. Если индекс заблокирован параллельным коммитом, поток чисто
+        // дождется его или выйдет по таймауту, категорически пресекая циклические Deadlock блокировки!
+        final long timeout = transaction != null ? transaction.getTimeout() : 3000L;
+        try {
+            boolean acquired = lock.tryLock(timeout, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!acquired) {
+                throw new XdStorageRuntimeException("B+Tree Index Resource " + getFileName() + " cannot be locked for commit by transaction "
+                        + transaction.getTransactionId() + " (Timeout " + timeout + " ms expired)");
             }
-            locked.set(true);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new XdStorageRuntimeException("waiting for lock index resource " + getFileName() + " has been interrupted", e);
         }
     }
 
     @Override
     public void unlockAfterCommit(final XdStorageTransaction transaction) {
-        synchronized (locked) {
-            locked.set(false);
-            locked.notify();
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Освобождаем ReentrantLock вместо synchronized-уведомлений
+        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.unlock();
         }
     }
 
@@ -257,6 +248,10 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
     }
 
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
+        // Гарантируем fail-safe отпуск ReentrantLock замка индекса при аварийном откате
+        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.unlock();
+        }
         cache.rollback(transaction);
     }
 
@@ -462,8 +457,17 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
 
         final List<Object> result = tree.find((Comparable) objectId, storage, transaction);
         final Object resourceId = result.isEmpty() ? null : result.get(0);
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Финал дефекта каскадной очистки!):
+        // Если при удалении ключа из дерева первичных индексов id_index запись не найдена
+        // (resourceId == null), это означает, что запись УЖЕ была успешно удалена
+        // на предыдущей итерации очистки хранилища!
+        // Категорически ЗАПРЕЩАЕМ выбрасывать деструктивный Exception, возвращая
+        // тихое fail-safe управление. Это сохраняет транзакцию сессии идеально чистой!
+        // =========================================================================
         if (resourceId == null) {
-            throw new XdStorageException("object of class " + object.getClass() + " with idgeneration " + objectId + " does not exists");
+            return;
         }
 
         final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);

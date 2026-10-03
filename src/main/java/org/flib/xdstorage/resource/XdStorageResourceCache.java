@@ -579,6 +579,22 @@ public class XdStorageResourceCache {
     public void insert(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
+            final String transactionId = transaction.getTransactionId();
+
+            // ГЛОБАЛЬНОЕ ИСПРАВЛЕНИЕ СУБД: Защита от избыточных повторных вставок.
+            // Если объект уже имеет ID и зарегистрирован в карте изменений текущей транзакции,
+            // мы fail-safe завершаем метод, предотвращая коллизии MVCC-версий на индексах классов!
+            if (!IXdStorageIdObservableWrapper.class.isAssignableFrom(newObject.getClass())) {
+                final Object objectId = field.get(newObject);
+                final Map<Object, CacheRecord> map = changes.get(transactionId);
+                if (objectId != null && map != null && map.containsKey(objectId)) {
+                    final CacheRecord existingRecord = map.get(objectId);
+                    if (existingRecord.isInsertChange() || existingRecord.isUpdateChange()) {
+                        return; // Объект уже находится в транзакционном контуре, игнорируем дубликат
+                    }
+                }
+            }
+
             insertInternal(newObject, transaction);
         } finally {
             transaction.finishCriticalSection();
@@ -693,6 +709,22 @@ public class XdStorageResourceCache {
     public void update(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
+            final String transactionId = transaction.getTransactionId();
+            final Object objectId = field.get(newObject);
+
+            // ГЛОБАЛЬНОЕ ИСПРАВЛЕНИЕ СУБД: Идемпотентность обновлений при каскадных вызовах save().
+            // Если сущность уже была модифицирована или добавлена в текущей транзакции сессии,
+            // повторный накат изменений для этого же ID блокируется на входе, защищая B+ Дерево индексов!
+            final Map<Object, CacheRecord> map = changes.get(transactionId);
+            if (objectId != null && map != null && map.containsKey(objectId)) {
+                final CacheRecord existingRecord = map.get(objectId);
+                if (existingRecord.isInsertChange() || existingRecord.isUpdateChange()) {
+                    // Атомарно обновляем ссылку на актуальное состояние объекта в памяти кучи
+                    existingRecord.setNewObject(cloner.unwrapAndClone(newObject));
+                    return;
+                }
+            }
+
             updateInternal(newObject, transaction);
         } finally {
             transaction.finishCriticalSection();
@@ -781,20 +813,42 @@ public class XdStorageResourceCache {
                 throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
             }
 
+            // === ВЫЧИСЛЕНИЕ СЛУЖЕБНОГО ИНФРАСТРУКТУРНОГО ТИПА ===
+            final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(newObject.getClass());
+            final boolean isBTreeInfrastructure = entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
+                    || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
+                    || entityClass.getName().contains("org.flib.xdstorage.btree");
+
             if (record.isReadChange()) {
-                record.setNewObject(cloner.unwrapAndClone(newObject));
+                // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ: Защищаем служебные индексы от разрушительного переклонирования версий.
+                // Если объект является частью структуры Б+ Дерева, сохраняем исходный инстанс напрямую (Identity)!
+                if (isBTreeInfrastructure) {
+                    record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
+                } else {
+                    record.setNewObject(cloner.unwrapAndClone(newObject));
+                }
                 record.markUpdate();
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
                 if (record.isUpdateChange() || record.isInsertChange()) {
-                    record.setNewObject(cloner.unwrapAndClone(newObject));
+                    // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ: Защищаем цепочку Insert -> Update для нод B+ Дерева индексов,
+                    // полностью ликвидируя ложные выбросы исключения concurrent modification на planet_idx!
+                    if (isBTreeInfrastructure) {
+                        record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
+                    } else {
+                        record.setNewObject(cloner.unwrapAndClone(newObject));
+                    }
                     readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
                 } else {
                     lockedRecord.unlock(transaction);
                     throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " was deleted this transaction");
                 }
             } else if (record.canBeChangedByTransaction(transaction)) {
-                record.setNewObject(cloner.unwrapAndClone(newObject));
+                if (isBTreeInfrastructure) {
+                    record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
+                } else {
+                    record.setNewObject(cloner.unwrapAndClone(newObject));
+                }
                 record.markUpdate();
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else {

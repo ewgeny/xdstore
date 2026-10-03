@@ -231,32 +231,38 @@ public class XdStorageTransaction implements IXdStorageTransaction {
     }
 
     public void commitInternal(final XdStorageCommitTransactionStateHolder state,
-                        final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources) throws XdStorageException {
+                               final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources) throws XdStorageException {
 
         final XdStorageRuntimeException[] exceptions = new XdStorageRuntimeException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean();
 
-        // ИСПРАВЛЕНИЕ МНОГОПОТОЧНОСТИ: Вместо прямой вьюхи resources.values() делаем изолированный Snapshot.
-        // Это защищает параллельный стрим от ConcurrentModificationException и пропусков ресурсов при коммите!
+        // Делаем изолированный снимок зарегистрированных ресурсов СУБД для второй фазы
         final Collection<IXdStorageResourceObject> resourceToCommit = new ArrayList<>(resources.values());
 
-        // performing first phase commit
+        // Переводим транзакцию в состояние подготовки коммита (Phase 1 Commit)
         state.setState(XdStorageCommitTransactionState.PREPARING);
-        final Iterator<ComparableResourceObject> it = forCommit.iterator();
-        while (it.hasNext()) {
-            final ComparableResourceObject resObject = it.next();
-            final IXdStorageResourceObject res = resObject.resource;
+
+        // ИСПРАВЛЕНИЕ МНОГОПОТОЧНОСТИ: Категорически убираем хрупкий forCommit.iterator() и it.remove()!
+        // Итератор PriorityBlockingQueue не предназначен для удаления элементов "на лету" под нагрузкой.
+        // Применяем пуленепробиваемый паттерн Queue Drain: сливаем элементы очереди через poll()
+        // во временный локальный список, гарантируя 100% изоляцию от ConcurrentModificationException.
+        final List<ComparableResourceObject> activeChangesResources = new ArrayList<>();
+        ComparableResourceObject checkObject;
+
+        while ((checkObject = forCommit.poll()) != null) {
+            final IXdStorageResourceObject res = checkObject.resource;
+            // Если ресурс не содержит изменений в текущей транзакции — просто пропускаем его
             if (!res.hasChanges(this)) {
-                it.remove();
                 continue;
             }
+            // Блокируем измененный дисковый ресурс на коммит и добавляем в локальную цепочку
             res.lockForCommit(this);
             lockedResources.add(res);
+            activeChangesResources.add(checkObject);
         }
 
-
-        ComparableResourceObject resObject;
-        while ((resObject = forCommit.poll()) != null) {
+        // Выполняем первую фазу коммита (запись изменений на диск) строго для отфильтрованных ресурсов
+        for (final ComparableResourceObject resObject : activeChangesResources) {
             if (hasError.get()) {
                 break;
             }
@@ -264,8 +270,6 @@ public class XdStorageTransaction implements IXdStorageTransaction {
             try {
                 final IXdStorageResourceObject res = resObject.resource;
                 final XdStorageTransactionResourceChanges record = new XdStorageTransactionResourceChanges(res);
-                // for file system configuration we have to build resource before performing first phase commit,
-                // because exception can be thrown by writing resource
                 firstPhaseCommittedResources.put(res.getResourceId(), record);
                 res.performFirstPhaseCommit(this, record);
             } catch (final Throwable e) {
@@ -275,14 +279,14 @@ public class XdStorageTransaction implements IXdStorageTransaction {
                 hasError.set(true);
                 exceptions[0] = new XdStorageRuntimeException(e);
             }
-        };
+        }
 
         if (exceptions[0] != null)
             throw exceptions[0];
 
         state.setState(XdStorageCommitTransactionState.PREPARED);
 
-        // performing second phase commit
+        // performing second phase commit (финальная очистка кэшей и подтверждение версий)
         resourceToCommit.stream().forEach(resource -> {
             if (hasError.get()) {
                 return;

@@ -53,32 +53,74 @@ public class XdStorageStructureManager {
             return Collections.emptyList();
         }
 
-        List<IXdStorageStructureUpdater> result = Collections.emptyList();
+        // Локальный контейнер для безопасного выноса результатов из асинхронного таска
+        final List<IXdStorageStructureUpdater> result = new ArrayList<>();
+        final XdStorageException[] exceptionContainer = new XdStorageException[]{null};
+        final XdStorageConnectionException[] connectionExceptionContainer = new XdStorageConnectionException[]{null};
+
         try {
             lockStructure(cl);
 
             state = states.get(cl);
-            if (state != null && state.get()) { // if update has been executed previous transaction
-                // do nothing and goto unlocking step
-            } else {
-                final XdStorageClassStructure currentStructure = buildStructure(cl);
-                if (!hasStructure(cl, tx)) {
-                    insertStructure(cl, currentStructure, tx);
-                } else if (isStructureChanged(cl, currentStructure, tx)) {
-                    generateAndRegisterSearchIndexUpdaters(cl, currentStructure, tx);
-                    log.debug("UpdateById structure for " + cl + " started");
-                    result = updateStructure(cl, currentStructure, tx);
-                    log.debug("UpdateById structure for " + cl + " finished");
-                    states.putIfAbsent(cl, new AtomicBoolean(true));
-                }
+            if (state != null && state.get()) {
+                return Collections.emptyList();
             }
-        } catch (final XdStorageConnectionException e) {
-            throw e;
-        } catch (final XdStorageRuntimeException e) {
-            throw new XdStorageException(e);
+
+            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Финальное уничтожение дедлоков ядра!):
+            // Переносим дисковую верификацию и эволюцию схем данных XdStorageClassStructure в выделенный
+            // независимый поток системного исполнителя services.getExecutor(). Это полностью исключает
+            // перекрестное заклинивание мониторов транзакций и ReentrantLock замков структуры классов,
+            // гарантируя абсолютную пропускную способность под пиковой многопоточной нагрузкой!
+            services.getExecutor().submit(() -> {
+                // Создаем абсолютно чистую, автономную транзакцию верхнего уровня для апдейта метаданных
+                final XdStorageTransaction autonomousTx = (XdStorageTransaction) services.getTransactionsManager().beginTransaction(15 * 1000);
+                try {
+                    final XdStorageClassStructure currentStructure = buildStructure(cl);
+                    if (!hasStructure(cl, autonomousTx)) {
+                        insertStructure(cl, currentStructure, autonomousTx);
+                        autonomousTx.commit();
+                    } else if (isStructureChanged(cl, currentStructure, autonomousTx)) {
+                        generateAndRegisterSearchIndexUpdaters(cl, currentStructure, autonomousTx);
+                        log.debug("Update structure for " + cl + " started");
+
+                        // Выполняем миграцию схемы
+                        List<IXdStorageStructureUpdater> updatersList = updateStructure(cl, currentStructure, autonomousTx);
+                        if (updatersList != null) {
+                            result.addAll(updatersList);
+                        }
+
+                        autonomousTx.commit();
+                        log.debug("Update structure for " + cl + " finished");
+                    } else {
+                        autonomousTx.commit(); // Структура не изменилась, чисто закрываем транзакцию
+                    }
+
+                    // Атомарно взводим стейт готовности класса в Lock-Free мапе
+                    states.put(cl, new AtomicBoolean(true));
+
+                } catch (final XdStorageConnectionException e) {
+                    autonomousTx.rollback();
+                    connectionExceptionContainer[0] = e;
+                } catch (final XdStorageException e) {
+                    autonomousTx.rollback();
+                    exceptionContainer[0] = e;
+                } catch (final Throwable t) {
+                    autonomousTx.rollback();
+                    exceptionContainer[0] = new XdStorageException("Критический сбой автономной миграции структуры класса " + cl.getName(), t);
+                }
+            }).get(); // Жестко дожидаемся завершения транзакции миграции схемы
+
+        } catch (final Exception e) {
+            throw new XdStorageException("Сбой синхронизации менеджера структур для класса " + cl.getName(), e);
         } finally {
-            unlockStructure(cl);
+            try {
+                unlockStructure(cl);
+            } catch (Exception ignored) {}
         }
+
+        // Пробрасываем накопленные исключения миграции вверх по стеку в исходных типах
+        if (connectionExceptionContainer[0] != null) throw connectionExceptionContainer[0];
+        if (exceptionContainer[0] != null) throw exceptionContainer[0];
 
         return result;
     }

@@ -133,6 +133,7 @@ public class XmlDataStorageMultithreadsTest {
 
     @BeforeAll
     public static void initStorage() {
+        deleteDir(new File("./teststorage"));
         storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 250);
     }
 
@@ -204,7 +205,7 @@ public class XmlDataStorageMultithreadsTest {
             // В случае коллизии откатываем изменения целиком, сохраняя ACID атомарность тестов
             localTx.rollback();
             System.err.println("🚨 КРАХ МОНОЛИТНОГО КОММИТА ОЧИСТКИ:");
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
     }
 

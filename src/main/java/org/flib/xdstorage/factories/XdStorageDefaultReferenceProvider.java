@@ -38,28 +38,28 @@ public class XdStorageDefaultReferenceProvider implements IXdStorageReferencePro
         Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>> transactionReferencesMap = references.computeIfAbsent(transactionId, k -> new ConcurrentHashMap<>());
         Map<Object, IXdStorageSimpleWrapper> transactionClassReferences = transactionReferencesMap.computeIfAbsent(cl, k -> new ConcurrentHashMap<>());
 
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ ЯДРА (Устранение паразитного дублирования MVCC-версий):
+        // Сначала выполняем жесткую проверку наличия прокси в реестре сессии. Если ссылка уже
+        // существует, мы МГНОВЕННО возвращаем её, категорически предотвращая холостой вызов
+        // wrapAsSimpleObject(). Прежняя логика создавала прокси "вслепую", что приводило к регистрации
+        // дубликатов-призраков в XdStorageResourceCache и вызывало крах concurrent modification!
         IXdStorageSimpleWrapper result = transactionClassReferences.get(objectId);
         if (result == null) {
-
-            try {
-                // ФАЗА 1: Упреждающая регистрация фиктивной заглушки Dummy, чтобы разорвать StackOverflow рекурсии полей!
-//            XdStorageDummySimpleWrapper dummyWrapper = new XdStorageDummySimpleWrapper();
-                IXdStorageSimpleWrapper dummyWrapper = XdStorageObjectUtils.wrapAsSimpleObject(
-                        cl.newInstance(), storage, transaction
-                );
-                transactionClassReferences.putIfAbsent(objectId, dummyWrapper);
-
-                // ФАЗА 2: Спокойно генерируем реальный прокси-класс
-                final IXdStorageSimpleWrapper tmp = XdStorageObjectUtils.wrapAsSimpleObject(cl.newInstance(), storage, transaction);
-                if (tmp != null) {
-                    idField.set(tmp, objectId);
-                    // Перезаписываем временную заглушку на полноценный прокси
-                    transactionClassReferences.put(objectId, tmp);
-                }
+            synchronized (transactionClassReferences) { // Блокировка уровня класса для атомарности создания
                 result = transactionClassReferences.get(objectId);
-            } catch (final Exception e) {
-                transactionClassReferences.remove(objectId); // Чистим при сбое
-                throw new XdStorageException(e);
+                if (result == null) {
+                    try {
+                        final IXdStorageSimpleWrapper tmp = XdStorageObjectUtils.wrapAsSimpleObject(cl.newInstance(), storage, transaction);
+                        if (tmp != null) {
+                            idField.set(tmp, objectId);
+                        }
+                        transactionClassReferences.put(objectId, tmp);
+                        result = tmp;
+                    } catch (final Exception e) {
+                        transactionClassReferences.remove(objectId);
+                        throw new XdStorageException(e);
+                    }
+                }
             }
         }
         return result;

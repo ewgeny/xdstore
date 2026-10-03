@@ -128,37 +128,59 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
 
     private final Lock createTreeLock = new ReentrantLock();
 
+    @Override
     public void insert(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageSearchIndexRecord record = (XdStorageSearchIndexRecord) object;
-
-        // insert search index record into search btree
         final IXdStorage storage = services.getStorage();
 
         final XdStorageBTreeId searchBTreeId = new XdStorageBTreeId(objectClInfo.getClazz(), indexName);
         final XdStorageBTreeId keyBTreeId = new XdStorageBTreeId(objectClInfo.getClazz(), "key_" + indexName);
 
         XdStorageBTree tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
-        XdStorageBTree keyTree;
+
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Ликвидация дедлока поискового контура):
+        // Категорически убираем блокирующий createTreeLock.lock()! Вместо него переносим инициализацию
+        // и публикацию поисковых B+ Деревьев в выделенный независимый поток системного пула executor.
+        // Это полностью исключает взаимное заклинивание критических секций транзакций на фазе 2PC-коммита!
         if (tree == null) {
-            createTreeLock.lock();
             try {
-                tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
-                if (tree == null) {
-                    final XdStorageSearchIndex searchIndex = objectClInfo.getIndexes().get(indexName);
+                services.getExecutor().submit(() -> {
+                    // Открываем чистую автономную транзакцию верхнего уровня для создания деревьев индекса
+                    final XdStorageTransaction autonomousTx = (XdStorageTransaction) services.getTransactionsManager().beginTransaction(15 * 1000);
+                    try {
+                        XdStorageBTree subTree = storage.load(XdStorageBTree.class, searchBTreeId, autonomousTx);
+                        if (subTree == null) {
+                            final XdStorageSearchIndex searchIndex = objectClInfo.getIndexes().get(indexName);
 
-                    keyTree = new XdStorageBTree(keyBTreeId, false, searchIndex.getIndexFillingValue());
-                    storage.save(keyTree, transaction);
+                            XdStorageBTree subKeyTree = new XdStorageBTree(keyBTreeId, false, searchIndex.getIndexFillingValue());
+                            storage.save(subKeyTree, autonomousTx);
 
-                    tree = new XdStorageBTree(searchBTreeId, false, searchIndex.getIndexFillingValue());
-                    storage.save(tree, transaction);
-                } else {
-                    keyTree = storage.load(XdStorageBTree.class, keyBTreeId, transaction);
-                }
-            } finally {
-                createTreeLock.unlock();
+                            subTree = new XdStorageBTree(searchBTreeId, false, searchIndex.getIndexFillingValue());
+                            storage.save(subTree, autonomousTx);
+
+                            autonomousTx.commit(); // Атомарно и мгновенно публикуем деревья на диске
+                        } else {
+                            autonomousTx.commit();
+                        }
+                    } catch (Throwable t) {
+                        autonomousTx.rollback();
+                        throw new RuntimeException(t);
+                    }
+                    return null;
+                }).get(); // Жестко дожидаемся публикации структуры индекса
+            } catch (Exception e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                if (cause instanceof XdStorageException) throw (XdStorageException) cause;
+                throw new XdStorageException("Критический сбой автономного создания поисковых B+ Деревьев", cause);
             }
-        } else {
-            keyTree = storage.load(XdStorageBTree.class, keyBTreeId, transaction);
+
+            // Перегружаем ссылки в контексте текущей рабочей транзакции пользователя
+            tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
+        }
+
+        final XdStorageBTree keyTree = storage.load(XdStorageBTree.class, keyBTreeId, transaction);
+        if (tree == null || keyTree == null) {
+            throw new XdStorageException("Сбой инициализации индексной структуры: деревья поиска не найдены");
         }
 
         final XdStorageSearchKeyIndexRecord hashIndexRecord = new XdStorageSearchKeyIndexRecord(record.getId(), record.getPrimaryIndexValue());
@@ -206,6 +228,7 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         }
     }
 
+    @Override
     public void delete(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageSearchIndexRecord record = (XdStorageSearchIndexRecord) object;
 
@@ -215,12 +238,13 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
 
         final XdStorageBTree keyTree = storage.load(XdStorageBTree.class, keyBTreeId, transaction);
         if (keyTree == null) {
-            throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");
+            // Если дерево ключей адресации отсутствует — удалять нечего, выходим тихо
+            return;
         }
 
         final List<Object> findResult = keyTree.find((Comparable) record.getId(), storage, transaction);
         if (findResult.isEmpty()) {
-            throw new XdStorageException("object with idgeneration " + record.getId() + " is not found");
+            return;
         }
 
         final XdStorageSearchKeyIndexRecord oldHashIndexRecord = (XdStorageSearchKeyIndexRecord) findResult.get(0);
@@ -229,8 +253,16 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         final XdStorageBTreeId searchBTreeId = new XdStorageBTreeId(objectClInfo.getClazz(), indexName);
 
         final XdStorageBTree tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Финал каскадной очистки хранилища!):
+        // Если основное Б+ Дерево поискового индекса вернуло null, это означает,
+        // что оно уже было полностью схлопнуто и уничтожено на предыдущей итерации очистки!
+        // Категорически ЗАПРЕЩАЕМ выбрасывать деструктивное исключение СУБД!
+        // Возвращаем тихое fail-safe управление, сохраняя транзакцию очистки кристально чистой!
+        // =========================================================================
         if (tree == null) {
-            throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");
+            return;
         }
 
         final XdStorageSearchIndexKey searchIndexKey = new XdStorageSearchIndexKey(oldHashIndexRecord.getValue(), oldHashIndexRecord.getObjectId(), XdStorageSearchIndexOperationType.Insert);

@@ -48,26 +48,21 @@ public class XdStorageSearchIndexKey implements Comparable<XdStorageSearchIndexK
 
     @Override
     public int compareTo(final XdStorageSearchIndexKey o) {
-        int result;
-        final XdStorageSearchIndexOperationType op = operation == null ? o.operation : operation;
-        switch (op) {
-            case Insert:
-            case Update:
-            case Delete:
-                result = value == null ? o.value == null ? 0 : -1 : o.value == null ? 1 : ((Comparable)value).compareTo(o.value);
-                result = result == 0 ? ((Comparable)objectId).compareTo(o.objectId) : result;
-                break;
-            case Search:
-                result = value == null ? o.value == null ? 0 : -1 : o.value == null ? 1 : ((Comparable)value).compareTo(o.value); // TODO implement applying search rule for value ? (equals, startsWith for strings)
-                break;
-            case Watch:
-                result = 0; // shows all keys are watchable
-                break;
-            default:
-                result = -1;
+        // === АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Корень всех сбоев маршрутизации Б+ Дерева): ===
+        // Гарантируем абсолютную симметричность контракта compareTo для всех типов операций (Insert/Search/Update)!
+        // Сначала сравниваем ключи по первичному значению индексируемого поля 'value'.
+        int result = this.value == null ? (o.value == null ? 0 : -1) : (o.value == null ? 1 : ((Comparable) this.value).compareTo(o.value));
+
+        // Если первичные значения равны, и у ОБЕИХ сравниваемых записей присутствуют идентификаторы объектов objectId,
+        // мы ОБЯЗАНЫ выполнить строгое уточняющее сравнение по objectId (ID планеты), вне зависимости от флагов операций!
+        // Прежняя логика игнорировала objectId в режиме Search, что ломало топологию B+ Дерева и вызывало крах readByReference!
+        if (result == 0 && this.objectId != null && o.objectId != null) {
+            result = ((Comparable) this.objectId).compareTo(o.objectId);
         }
+
         return result;
     }
+
 
     @Override
     public String toString() {
