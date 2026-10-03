@@ -59,37 +59,28 @@ public class XdStorageResource extends XdStorageAbstractResource {
     public void lockForCommit(final XdStorageTransaction transaction) {
         super.lockForCommit(transaction);
 
-        synchronized (locked) {
-            while (locked.get()) {
-                try {
-                    final String transactionId = transaction.getTransactionId();
-
-                    final long timeout = 2 * transaction.getTimeout();
-                    final Long startTime = blockingTime.remove(transactionId);
-                    final Long currentTime = System.currentTimeMillis();
-                    if (startTime == null) {
-                        blockingTime.put(transactionId, currentTime);
-                    } else if ( (currentTime - startTime) >= timeout ) {
-                        throw new XdStorageRuntimeException("resource " + getFileName() + " cannot be locked for commit by transaction "
-                                + transactionId + " and transaction should be rolled back");
-                    } else {
-                        blockingTime.put(transactionId, startTime);
-                    }
-
-                    locked.wait(timeout / 2);
-                } catch (final InterruptedException e) {
-                    throw new XdStorageRuntimeException("waiting for lock resource " + getFileName() + " has been interrupted", e);
-                }
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Полностью ликвидируем опасный synchronized(locked) и locked.wait()!
+        // Вместо кустарного монитора используем промышленный ReentrantLock 'lock' с поддержкой
+        // tryLock() по таймауту транзакции. Если ресурс занят другим коммитом, поток чисто
+        // дождется его или выбросит контролируемый таймаут, не утягивая ядро в циклический Deadlock!
+        final long timeout = transaction != null ? transaction.getTimeout() : 3000L;
+        try {
+            boolean acquired = lock.tryLock(timeout, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!acquired) {
+                throw new XdStorageRuntimeException("resource " + getFileName() + " cannot be locked for commit by transaction "
+                        + transaction.getTransactionId() + " (Timeout " + timeout + " ms expired)");
             }
-            locked.set(true);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new XdStorageRuntimeException("waiting for lock resource " + getFileName() + " has been interrupted", e);
         }
     }
 
     @Override
     public void unlockAfterCommit(final XdStorageTransaction transaction) {
-        synchronized (locked) {
-            locked.set(false);
-            locked.notify();
+        // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Освобождаем ReentrantLock вместо synchronized-уведомлений
+        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.unlock();
         }
 
         super.unlockAfterCommit(transaction);
@@ -216,7 +207,12 @@ public class XdStorageResource extends XdStorageAbstractResource {
         postRollback(transaction);
     }
 
+    @Override
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
+        // Гарантируем fail-safe отпуск ReentrantLock замка при откате изменений страницы
+        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+            lock.unlock();
+        }
         cache.rollback(transaction);
         postRollback(transaction);
     }
