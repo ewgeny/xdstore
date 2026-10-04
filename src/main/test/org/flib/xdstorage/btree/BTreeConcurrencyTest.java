@@ -238,4 +238,98 @@ public class BTreeConcurrencyTest extends AbstractBTreeTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("Ультра-стресс сценарий 3: 2000 хаотичных параллельных вставок со случайным распределением ключей")
+    public void testConcurrent_RandomMassInsert_ShouldMaintainTreeTopology() {
+        XdStorageBTreeId btreeId = new XdStorageBTreeId(String.class, "btree_random_insert");
+        XdStorageBTree tree = new XdStorageBTree(btreeId, true, 8); // Уменьшаем размер ноды для каскадных сплитов
+
+        final int count = 2000;
+        final List<Integer> keys = new ArrayList<>(count);
+        for (int i = 1; i <= count; ++i) {
+            keys.add(i);
+        }
+
+        // Рандомизируем порядок ключей, чтобы имитировать хаотичную запись в СУБД
+        Collections.shuffle(keys, new Random(1337));
+
+        List<Throwable> exceptions = Collections.synchronizedList(new ArrayList<>());
+
+        // Штурмуем дерево: 2000 ForkJoin-потоков рвут структуру вставками на случайных позициях
+        keys.parallelStream().forEach(key -> {
+            try {
+                MockTransaction txWorker = createTx("tx-rand-insert-" + key);
+                tree.insert(key, "Random_Payload_" + key, storage, txWorker);
+            } catch (Throwable t) {
+                exceptions.add(t);
+            }
+        });
+
+        // 1. Проверяем, что хаотичные сплиты под перекрестной нагрузкой не вызвали гонок памяти и таймаутов
+        assertTrue(exceptions.isEmpty(), "Воркеры случайной массовой вставки упали с ошибками: " + exceptions);
+
+        // 2. Проверяем тотальную консистентность и навигацию по получившейся хаотичной структуре Б+ Дерева
+        MockTransaction txReader = createTx("tx-rand-insert-reader");
+        for (int i = 1; i <= count; ++i) {
+            try {
+                List<Object> result = tree.find(i, storage, txReader);
+                assertEquals(1, result.size(), "Ключ безвозвратно утерян при коллизии сплита страниц: " + i);
+                assertEquals("Random_Payload_" + i, result.get(0));
+            } catch (Throwable t) {
+                fail("Крах поискового навигатора find при валидации случайного графа для ключа: " + i, t);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Ультра-стресс сценарий 4: Полное хаотичное выкашивание (Пурдж) 2000 элементов до пустого корня")
+    public void testConcurrent_RandomMassDelete_ShouldCollapseTreeToEmptyRoot() {
+        XdStorageBTreeId btreeId = new XdStorageBTreeId(String.class, "btree_random_delete");
+        XdStorageBTree tree = new XdStorageBTree(btreeId, true, 8);
+
+        final int count = 2000;
+        final List<Integer> keys = new ArrayList<>(count);
+
+        // Фаза 1: Однопоточное предзаполнение дерева стабильной структурой
+        MockTransaction txInit = createTx("tx-rand-delete-init");
+        for (int i = 1; i <= count; ++i) {
+            keys.add(i);
+            try {
+                tree.insert(i, "Data_" + i, storage, txInit);
+            } catch (XdStorageException | XdStorageConnectionException e) {
+                fail("Ошибка предзаполнения дерева перед тестом пурджа", e);
+            }
+        }
+
+        // Перемешиваем ключи хаотично, чтобы потоки вырезали страницы со случайных позиций,
+        // заставляя алгоритмы move и join балансировать дерево в экстремальных условиях коллизий
+        Collections.shuffle(keys, new Random(777));
+
+        List<Throwable> exceptions = Collections.synchronizedList(new ArrayList<>());
+
+        // Фаза 2: Нагрузочный залп — 2000 параллельных воркеров лавинообразно выкашивают дерево
+        keys.parallelStream().forEach(key -> {
+            try {
+                MockTransaction txWorker = createTx("tx-rand-delete-" + key);
+                tree.delete(key, storage, txWorker);
+            } catch (Throwable t) {
+                exceptions.add(t);
+            }
+        });
+
+        // 1. Проверяем, что лавинообразная аннигиляция ярусов не вызвала дедлоков и IndexOutOfBoundsException
+        assertTrue(exceptions.isEmpty(), "Воркеры хаотичного пурджа упали с ошибками: " + exceptions);
+
+        // 2. Верифицируем конечный инвариант СУБД — дерево обязано полностью и чисто схлопнуться до пустого состояния
+        MockTransaction txFinal = createTx("tx-rand-delete-final");
+        for (int i = 1; i <= count; ++i) {
+            try {
+                List<Object> result = tree.find(i, storage, txFinal);
+                assertTrue(result.isEmpty(), "Критическая ошибка! Ключ уцелел после тотальной аннигиляции дерева: " + i);
+            } catch (Throwable t) {
+                fail("Крах навигации find в пустом хаотично схлопнувшемся дереве для ключа: " + i, t);
+            }
+        }
+    }
 }
