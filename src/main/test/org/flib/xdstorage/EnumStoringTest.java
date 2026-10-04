@@ -9,6 +9,7 @@ import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
 
 import java.util.Collection;
 import java.util.HashMap;

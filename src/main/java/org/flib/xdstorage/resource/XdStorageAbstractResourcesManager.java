@@ -311,7 +311,7 @@ public abstract class XdStorageAbstractResourcesManager {
         return (T) returnResource;
     }
 
-    public final void releaseResource(final IXdStorageResourceObject resource) {
+    public void releaseResource(final IXdStorageResourceObject resource) {
         final Object resourceId = resource.getResourceId();
         final AtomicLong counter = locks.get(resourceId);
 

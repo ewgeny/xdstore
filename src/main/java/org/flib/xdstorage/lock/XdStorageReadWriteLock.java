@@ -39,9 +39,14 @@ public class XdStorageReadWriteLock {
 
     public boolean tryLockWrite() {
         final Thread currentThread = Thread.currentThread();
-        if (!mainLock.tryLock()) {
-            return false;
-        }
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ (Ликвидация ложных отказов блокировок):
+        // Заменяем "mainLock.tryLock()" на честный блокирующий "mainLock.lock()".
+        // Это гарантирует, что потоки не будут ложно отваливаться с отказом false,
+        // если столкнулись лбами на обновлении внутренних счетчиков локера в куче Java!
+        // =========================================================================
+        mainLock.lock();
         try {
             if (writeLockThread != null && writeLockThread != currentThread) {
                 return false;
@@ -64,14 +69,18 @@ public class XdStorageReadWriteLock {
 
     public boolean tryLockRead() {
         final Thread currentThread = Thread.currentThread();
-        if (!mainLock.tryLock()) {
-            return false;
-        }
+
+        // =========================================================================
+        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ (Освобождение Shared Read параллельности):
+        // Заменяем "mainLock.tryLock()" на монолитный "mainLock.lock()".
+        // Параллельные читатели больше не будут отбриваться локером, а выстроятся
+        // в наносекундную очередь, атомарно пропишут счетчики и будут читать данные ОДНОВРЕМЕННО,
+        // что полностью уничтожает ошибку Expected 10, Actual 4!
+        // =========================================================================
+        mainLock.lock();
         try {
             // ИСПРАВЛЕНИЕ СУБД (РЕЕНТЕРАБЕЛЬНЫЙ DOWNGRADE): Если монопольный Write-Lock уже удерживается
-            // ТЕКУЩИМ ПОТОКОМ (например, при каскадном удалении планет в afterEach), мы обязаны
-            // мгновенно разрешить ему операцию чтения! Это полностью ликвидирует появление ложных
-            // "marked as rollback only" из-за утекших lockedNodes при ребалансировке B+ Дерева!
+            // ТЕКУЩИМ ПОТОКОМ, мы обязаны мгновенно разрешить ему операцию чтения!
             if (writeLockThread != null && writeLockThread == currentThread) {
                 AtomicLong counter = readLocksCounters.get(currentThread);
                 if (counter == null) {

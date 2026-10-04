@@ -4,6 +4,7 @@ import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.search.query.XdStorageSearchQuery;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
 
 import java.util.Collection;
@@ -158,6 +159,11 @@ public class MockStorage implements IXdStorage {
     @Override
     public void delete(Collection<?> references, IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
 
+    }
+
+    @Override
+    public IXdStorageTransactionManager getTransactionManager() {
+        return null;
     }
 
     @Override

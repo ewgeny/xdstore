@@ -1,5 +1,6 @@
 package org.flib.xdstorage.code;
 
+import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import java.lang.reflect.Method;
@@ -56,6 +57,7 @@ public class XdStorageWrapperBlockGettersGenerator {
             builder.append("\t\t\tlock__();\r\n");
             builder.append("\t\t\ttry {\r\n");
             builder.append("\t\t\t\tif(!").append(fieldName).append("Loaded) {\r\n");
+            builder.append("\t\t\t\t\t" + IXdStorageTransaction.class.getName() + " transaction = storage.getTransactionManager().getCurrentTransaction();\r\n");
             builder.append("\t\t\t\t\ttry{\r\n");
 
             if (returnType.isArray()) {

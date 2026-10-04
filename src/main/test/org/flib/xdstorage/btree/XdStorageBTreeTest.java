@@ -4,6 +4,7 @@ import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -848,6 +849,12 @@ public class XdStorageBTreeTest {
             }
 
             @Override public IXdStorageTransaction beginTransaction(long timeout) { return null; }
+
+            @Override
+            public IXdStorageTransactionManager getTransactionManager() {
+                return null;
+            }
+
             @Override public void shutdown() {}
         };
 
@@ -932,4 +939,64 @@ public class XdStorageBTreeTest {
         assertTrue(exceptions.isEmpty(), "🚨 Зафиксированы падения потоков из-за ложного Lock Upgrade: " + exceptions);
         assertTrue(totalReadsExecuted.get() > 0, "Ни один поток-читатель не успел выполнить операцию find!");
     }
+
+    /**
+     * ТЕСТ 22: Алгоритмическая верификация размашистого B+ Дерева (Deep Tree Splitting and Collapsing Bound).
+     * При параметре t = 2 емкость одной ноды составляет всего 3 ключа (2t - 1).
+     * Тест последовательно вставляет 40 уникальных элементов, вынуждая дерево вырасти
+     * глубоко вверх на несколько ярусов, создавая сложную структуру внутренних маршрутизаторов.
+     * Затем элементы удаляются, что заставляет дерево каскадно схлопывать узлы и перевязывать ссылки.
+     */
+    @Test
+    public void testDelete_DeepSweepingTreeChallenge_ShouldInsertAndCollapsePerfectly() throws Exception {
+        IXdStorage mockStorage = mock(IXdStorage.class);
+        IXdStorageTransaction mockTx = mock(IXdStorageTransaction.class);
+        when(mockTx.getTimeout()).thenReturn(5000L);
+
+        // Настраиваем мок на сквозной fail-safe возврат инстансов страниц в оперативной памяти
+        doAnswer(invocation -> invocation.getArgument(0))
+                .when(mockStorage).load(any(Object.class), any(IXdStorageTransaction.class));
+
+        int totalObjects = 40;
+        List<Integer> insertOrder = new ArrayList<>();
+        for (int i = 1; i <= totalObjects; i++) {
+            insertOrder.add(i);
+        }
+
+        // === ФАЗА 1: ЛАВИННОЕ НАСЫЩЕНИЕ (Строим размашистое многоярусное дерево) ===
+        assertDoesNotThrow(() -> {
+            for (Integer key : insertOrder) {
+                bTree.insert(key, "DeepSpaceObject_" + key, mockStorage, mockTx);
+            }
+        }, "Вставка 40 элементов на t=2 вызвала крах интервалов split или findChildAndInsert!");
+
+        // Проверяем, что корень дерева успешно инициализирован и дерево выросло вглубь
+        assertNotNull(bTree.getRoot(), "После вставки 40 элементов корень дерева не должен быть null!");
+
+        // Проверяем сквозную доступность всех вставленных элементов до начала удаления
+        for (int i = 1; i <= totalObjects; i++) {
+            List<Object> searchResult = bTree.find(i, mockStorage, mockTx);
+            assertFalse(searchResult.isEmpty(), "Потеряна сквозная маршрутизация для ключа: " + i);
+            assertEquals("DeepSpaceObject_" + i, searchResult.get(0), "Данные в листе искажены!");
+        }
+
+        // Перемешиваем ключи хаотично, чтобы проверить алгоритмы move/join со случайных позиций страниц
+        Collections.shuffle(insertOrder, new Random(1337));
+
+        // === ФАЗА 2: ЛАВИННАЯ ДЕСТРУКЦИЯ (Каскадное схлопывание ярусов до нуля) ===
+        assertDoesNotThrow(() -> {
+            for (Integer key : insertOrder) {
+                bTree.delete(key, mockStorage, mockTx);
+            }
+        }, "Удаление элементов из размашистого дерева вызвало сбой в алгоритмах заимствования move или слияния join!");
+
+        // === ФАЗА 3: ВЕРИФИКАЦИЯ КОНЕЧНОГО ИНВАРИАНТА ===
+        // После удаления абсолютно всех ключей дерево обязано полностью очистить рантайм-указатели
+        assertNull(bTree.getRoot(), "После полного удаления ключей корень размашистого дерева обязан схлопнуться в null!");
+        assertNull(bTree.getFirstLeaf(), "Указатель на первый лист дерева обязан обнулиться!");
+
+        // Любой повторный поиск в пустом дереве должен возвращать пустой список без IndexOutOfBoundsException и NPE
+        assertTrue(bTree.find(20, mockStorage, mockTx).isEmpty(), "Поиск в пустом схлопнувшемся дереве обязан возвращать пустой список!");
+    }
+
 }

@@ -54,7 +54,6 @@ public class XdStorageSimpleWrapperClassCodeGenerator extends XdStorageAbstractC
         builder.append("\r\n\tprivate ").append(cl.getName()).append(" object;\r\n");
         builder.append("\r\n\tprivate ").append(Object.class.getName()).append(" parent;\r\n");
         builder.append("\r\n\tprivate ").append(IXdStorage.class.getName()).append(" storage;\r\n");
-        builder.append("\r\n\tprivate ").append(IXdStorageTransaction.class.getName()).append(" transaction;\r\n");
         builder.append("\r\n\tprivate volatile boolean reference__ = true;\r\n");
         builder.append("\r\n\tprivate ").append(Lock.class.getName()).append(" lock__ = new ").append(ReentrantLock.class.getName()).append("();\r\n");
     }
@@ -63,13 +62,11 @@ public class XdStorageSimpleWrapperClassCodeGenerator extends XdStorageAbstractC
         builder.append("\r\n\tpublic ").append(className).append("(");
         builder.append(Object.class.getName()).append(" parent, ");
         builder.append(cl.getName()).append(" object, ");
-        builder.append(IXdStorage.class.getName()).append(" storage, ");
-        builder.append(IXdStorageTransaction.class.getName()).append(" transaction");
+        builder.append(IXdStorage.class.getName()).append(" storage");
         builder.append(") {\r\n");
         builder.append("\t\tthis.object = object;\r\n");
         builder.append("\t\tthis.parent = parent;\r\n");
         builder.append("\t\tthis.storage = storage;\r\n");
-        builder.append("\t\tthis.transaction = transaction;\r\n");
         builder.append("\t}\r\n");
     }
 

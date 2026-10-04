@@ -10,6 +10,7 @@ import org.flib.xdstorage.serialization.FilesFormat;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.structure.update.IXdStorageStructureUpdater;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
@@ -1238,6 +1239,11 @@ class XdStorage implements IXdFileStorage {
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
+    }
+
+    @Override
+    public IXdStorageTransactionManager getTransactionManager() {
+        return services.getTransactionsManager();
     }
 
     public void shutdown() {

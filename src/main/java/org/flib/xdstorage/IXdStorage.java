@@ -5,6 +5,7 @@ import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.search.query.IXdStorageCriterion;
 import org.flib.xdstorage.search.query.XdStorageSearchQuery;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
 
 import java.util.Collection;
@@ -73,6 +74,8 @@ public interface IXdStorage {
     void delete(Collection<?> references) throws XdStorageException, XdStorageConnectionException;
 
     void delete(Collection<?> references, IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException;
+
+    IXdStorageTransactionManager getTransactionManager();
 
     void shutdown();
 }

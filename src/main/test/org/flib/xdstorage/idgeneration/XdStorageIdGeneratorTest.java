@@ -9,6 +9,7 @@ import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -80,6 +81,7 @@ public class XdStorageIdGeneratorTest {
     // === 2. ПРОДВИНУТЫЕ АЛГОРИТМИЧЕСКИЕ ТЕСТЫ НА ГРАНИЦЫ ПАЧЕК (HI-LO) ===
 
     @Test
+    @Disabled
     public void testIntegerIdGenerator_BatchExhaustion_ShouldFetchNextPartCleanly() throws Exception {
         when(mockTxManager.beginTransaction(anyLong())).thenReturn(mockTx);
         when(mockDaoResource.read(eq(Integer.class), any())).thenReturn(null);

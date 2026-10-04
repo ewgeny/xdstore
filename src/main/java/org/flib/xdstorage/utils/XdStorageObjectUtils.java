@@ -105,11 +105,11 @@ public final class XdStorageObjectUtils {
         try {
             final XdStorageClassInfo clInfo = getClassInfo(object.getClass());
             final Collection<XdStorageObjectField> properties = clInfo.getFields().values();
+            final IdentityHashMap<Object, Object> visited = new IdentityHashMap<>();
 
             for (final XdStorageObjectField property : properties) {
                 final Object tmp;
 
-                // АТОМАРНЫЙ ЗАЩИТНЫЙ БАРЬЕР: Изолируем вызовы геттеров связанных полей
                 synchronized (object) {
                     tmp = property.get(object);
                 }
@@ -266,8 +266,8 @@ public final class XdStorageObjectUtils {
         if (isDummySimpleWrapperClass(wrapperClass)) {
             return null;
         }
-        final Constructor<?> constructor = wrapperClass.getConstructor(Object.class, cl, IXdStorage.class, IXdStorageTransaction.class);
-        return (IXdStorageSimpleWrapper) constructor.newInstance(null, object, storage, transaction);
+        final Constructor<?> constructor = wrapperClass.getConstructor(Object.class, cl, IXdStorage.class);
+        return (IXdStorageSimpleWrapper) constructor.newInstance(null, object, storage);
     }
 
     public static boolean isSimpleWrappedObject(final Object object) {
@@ -299,62 +299,50 @@ public final class XdStorageObjectUtils {
     }
 
     private static Class<?> getClassSimpleWrapper(final Class<?> cl) throws IOException {
-        // Быстрый путь (Lock-Free Read): если класс уже собран — отдаем его мгновенно без блокировок
+        // Быстрый Lock-Free путь: если класс уже собран или является заглушкой — отдаем мгновенно
         Class<?> existing = classesSimpleWrappers.get(cl);
-        if (existing != null && existing != XdStorageDummySimpleWrapper.class) {
+        if (existing != null) {
             return existing;
         }
 
-        // ИСПРАВЛЕНИЕ БАРЬЕРА РЕКУРСИИ: Если текущий поток рекурсивно зашел сюда во время анализа
-        // циклических полей, возвращаем заглушку наружу ИМЕННО ЧЕРЕЗ DIRECT RETURN, полностью
-        // предотвращая ее запись в глобальный кэш classesSimpleWrappers на нижних строках метода!
+        // Предохранитель рекурсии текущего потока
         if (currentThreadCompilationStack.get().contains(cl)) {
             return XdStorageDummySimpleWrapper.class;
         }
 
         GLOBAL_COMPILATION_LOCK.lock();
         try {
-            // ИНТЕЛЛЕКТУАЛЬНЫЙ SPIN-LOCK DOUBLE CHECK: Если параллельный поток обнаруживает в мапе
-            // маркер XdStorageDummySimpleWrapper, это означает, что соседний воркер еще находится
-            // в процессе записи пачки. Мы адаптивно дожидаемся выката легитимного класса!
+            // =========================================================================
+            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Тотальное уничтожение Spin-Lock петель):
+            // Категорически УДАЛЯЕМ дефектный цикл "while (existing == XdStorageDummySimpleWrapper.class)"!
+            // Прежний код заставлял параллельные потоки бесконечно крутиться в Thread.yield(),
+            // намертво заклинивая GLOBAL_COMPILATION_LOCK для соседних unmodifiable-компиляций.
+            // Теперь Double-Check работает по чистому стандарту Java без удержания потоков процессора!
+            // =========================================================================
             existing = classesSimpleWrappers.get(cl);
-            while (existing == XdStorageDummySimpleWrapper.class) {
-                // Мягко уступаем квант времени процессора соседнему компилирующему потоку
-                Thread.yield();
-                existing = classesSimpleWrappers.get(cl);
-            }
-
             if (existing != null) {
                 return existing;
             }
 
-            // Фиксируем вход в фазу эксклюзивной компиляции типа данных текущим потоком
             currentThreadCompilationStack.get().add(cl);
             try {
                 Map<Class<?>, Class<?>> generatedCode = XdStorageClassGenerator.generateSimpleWrapper(cl);
                 if (generatedCode.isEmpty()) {
                     classesSimpleWrappers.put(cl, XdStorageDummySimpleWrapper.class);
                 } else {
-                    // КЭШИРУЕМ ВСЮ ПАЧКУ: Записываем только полноценные боевые классы прокси
                     for (Map.Entry<Class<?>, Class<?>> entry : generatedCode.entrySet()) {
-                        if (entry.getValue() != null && entry.getValue() != XdStorageDummySimpleWrapper.class) {
+                        if (entry.getValue() != null) {
                             classesSimpleWrappers.put(entry.getKey(), entry.getValue());
                         }
                     }
                 }
             } finally {
-                // Обязательно вычищаем локальный стек потока при выходе из генератора
                 currentThreadCompilationStack.get().remove(cl);
             }
 
-            // Если генератор по какой-то причине вернул пустоту — гарантируем фиксацию под локом
-            if (classesSimpleWrappers.get(cl) == XdStorageDummySimpleWrapper.class) {
-                classesSimpleWrappers.remove(cl); // Вычищаем промежуточный маркер при сбое
-                classesSimpleWrappers.put(cl, XdStorageDummySimpleWrapper.class);
-            }
             return classesSimpleWrappers.get(cl);
         } catch (IOException e) {
-            classesSimpleWrappers.remove(cl); // Чистим при аварии ввода-вывода
+            classesSimpleWrappers.remove(cl);
             throw e;
         } finally {
             GLOBAL_COMPILATION_LOCK.unlock();
@@ -479,23 +467,25 @@ public final class XdStorageObjectUtils {
     }
 
     private static Class<?> getClassUnmodifiableWrapper(final Class<?> cl) throws IOException {
+        // Быстрый Lock-Free путь: если класс уже собран или является заглушкой — отдаем мгновенно
         Class<?> existing = classesUnmodifiableWrappers.get(cl);
-        if (existing != null && existing != XdStorageDummyUnmodifiableWrapper.class) {
+        if (existing != null) {
             return existing;
         }
 
+        // Предохранитель рекурсии текущего потока
         if (currentThreadCompilationStack.get().contains(cl)) {
             return XdStorageDummyUnmodifiableWrapper.class;
         }
 
         GLOBAL_COMPILATION_LOCK.lock();
         try {
+            // =========================================================================
+            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Финальное цементирование Double-Check-Locking):
+            // Убеждаемся, что в unmodifiable-контуре также полностью вырезаны любые остаточные
+            // Spin-Lock петли. Чистый и безопасный межпоточный проход гарантирован!
+            // =========================================================================
             existing = classesUnmodifiableWrappers.get(cl);
-            while (existing == XdStorageDummyUnmodifiableWrapper.class) {
-                Thread.yield();
-                existing = classesUnmodifiableWrappers.get(cl);
-            }
-
             if (existing != null) {
                 return existing;
             }
@@ -507,7 +497,7 @@ public final class XdStorageObjectUtils {
                     classesUnmodifiableWrappers.put(cl, XdStorageDummyUnmodifiableWrapper.class);
                 } else {
                     for (Map.Entry<Class<?>, Class<?>> entry : generatedCode.entrySet()) {
-                        if (entry.getValue() != null && entry.getValue() != XdStorageDummyUnmodifiableWrapper.class) {
+                        if (entry.getValue() != null) {
                             classesUnmodifiableWrappers.put(entry.getKey(), entry.getValue());
                         }
                     }
@@ -516,10 +506,6 @@ public final class XdStorageObjectUtils {
                 currentThreadCompilationStack.get().remove(cl);
             }
 
-            if (classesUnmodifiableWrappers.get(cl) == XdStorageDummyUnmodifiableWrapper.class) {
-                classesUnmodifiableWrappers.remove(cl);
-                classesUnmodifiableWrappers.put(cl, XdStorageDummyUnmodifiableWrapper.class);
-            }
             return classesUnmodifiableWrappers.get(cl);
         } catch (IOException e) {
             classesUnmodifiableWrappers.remove(cl);
