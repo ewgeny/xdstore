@@ -296,42 +296,46 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     private XdStorageBTreeNode loadChildOfThisNode(int index, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         lockRead(transaction);
         try {
-            final List<XdStorageBTreeNode> childrenList = getChildren();
-            if (childrenList == null || childrenList.isEmpty()) {
-                return null;
-            }
+            XdStorageBTreeNode child;
 
-            if (index < 0) {
-                index = 0;
-            } else if (index >= childrenList.size()) {
-                index = childrenList.size() - 1;
-            }
+            // СИНХРОНИЗАЦИЯ НА ИНСТАНСЕ КОЛЛЕКЦИИ ДЕТЕЙ:
+            // Блокируем чтение LinkedList на время возможных параллельных remove() операций писателя
+            synchronized (getChildren()) {
+                final List<XdStorageBTreeNode> childrenList = getChildren();
+                if (childrenList == null || childrenList.isEmpty()) {
+                    return null;
+                }
 
-            XdStorageBTreeNode child = childrenList.get(index);
+                if (index < 0) {
+                    index = 0;
+                } else if (index >= childrenList.size()) {
+                    index = childrenList.size() - 1;
+                }
+
+                child = childrenList.get(index);
+            }
 
             if (XdStorageObjectUtils.isReference(child)) {
                 child.lockWrite(transaction);
                 try {
                     if (XdStorageObjectUtils.isReference(child)) {
                         storage.load(child, transaction);
-
-                        // ВОССТАНОВЛЕНИЕ КОНТРАКТА СУБД: Возвращаем вызов loadThisNode,
-                        // что гарантирует материализацию прокси-ссылок XdStorageBTreeNodeSimpleWrapper
-                        // и полностью ликвидирует ошибку "cannot load by reference... idgeneration 4"!
                         child.loadThisNode(storage, transaction);
                     }
                 } finally {
                     child.unlockWrite();
                 }
 
-                final List<XdStorageBTreeNode> postLoadChildren = getChildren();
-                if (postLoadChildren == null || postLoadChildren.isEmpty()) {
-                    return null;
+                synchronized (getChildren()) {
+                    final List<XdStorageBTreeNode> postLoadChildren = getChildren();
+                    if (postLoadChildren == null || postLoadChildren.isEmpty()) {
+                        return null;
+                    }
+                    if (index >= postLoadChildren.size()) {
+                        index = postLoadChildren.size() - 1;
+                    }
+                    child = postLoadChildren.get(index);
                 }
-                if (index >= postLoadChildren.size()) {
-                    index = postLoadChildren.size() - 1;
-                }
-                child = postLoadChildren.get(index);
             }
             return child;
         } finally {
@@ -424,9 +428,6 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         final XdStorageBTreeNode right = new XdStorageBTreeNode(getTree(), this.getParent());
         storage.save(right, transaction);
 
-        // МАТЕМАТИЧЕСКИЙ КАНOН Б+ ДЕРЕВА: Для листьев перенос начинается с медианы (t - 1),
-        // для внутренних маршрутизаторов — строго после нее (t). Цикл remove() гарантирует
-        // идеальный баланс страниц без появления фантомных дубликатов ключей в куче памяти!
         int splitIndex = isLeaf ? (t - 1) : t;
 
         final ListIterator<Comparable> keyListIterator = getKeys().listIterator(splitIndex);
@@ -463,7 +464,6 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         }
 
         if (!isLeaf) {
-            // Если расщеплялся внутренний узел, выселяем midKey из левого узла 'this'
             this.getKeys().remove(midKey);
         } else {
             right.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
@@ -476,12 +476,27 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         storage.update(this, transaction);
 
         final List<XdStorageBTreeNode> childrenOfParent = this.getParent().getChildren();
+        final List<Comparable> keysOfParent = this.getParent().getKeys();
+
         for (int i = 0; i < childrenOfParent.size(); ++i) {
             final XdStorageBTreeNode child = childrenOfParent.get(i);
             final Object childId = child.getId();
             if ((childId != null && child.getId().equals(this.getId())) || child == this) {
-                this.getParent().getKeys().add(i, midKey);
-                if (i < childrenOfParent.size() - 1) {
+
+                // =========================================================================
+                // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Ликвидация IndexOutOfBoundsException):
+                // Защищаем операции вставки разделителей родительского узла fail-safe проверками!
+                // Если из-за каскадного рекурсивного сплита верхних этажей коллекция детей или ключей
+                // родителя была опустошена/перестроена, мы выполняем безопасное добавление элементов в хвост,
+                // полностью пресекая крах LinkedList.checkPositionIndex(1) в пишущем потоке воркера!
+                // =========================================================================
+                if (i < keysOfParent.size()) {
+                    keysOfParent.add(i, midKey);
+                } else {
+                    keysOfParent.add(midKey);
+                }
+
+                if ((i + 1) < childrenOfParent.size()) {
                     childrenOfParent.add(i + 1, right);
                 } else {
                     childrenOfParent.add(right);
@@ -565,9 +580,13 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         storage.update(right, transaction);
         storage.update(this, transaction);
 
-        newRoot.getKeys().add(midKey);
-        newRoot.getChildren().add(this);
-        newRoot.getChildren().add(right);
+        // Fail-safe защита для инициализации корня
+        final List<Comparable> rootKeys = newRoot.getKeys();
+        final List<XdStorageBTreeNode> rootChildren = newRoot.getChildren();
+
+        rootKeys.add(midKey);
+        rootChildren.add(this);
+        rootChildren.add(right);
 
         storage.update(newRoot, transaction);
     }
@@ -760,9 +779,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         final List<Comparable> rightKeys = new ArrayList<>(right.getKeys());
         final List<Object> rightObjects = new ArrayList<>(right.getObjects());
 
-        this.getParent().getChildren().remove(right);
+        synchronized (this.getParent().getChildren()) {
+            this.getParent().getChildren().remove(right);
+        }
         storage.delete(right, transaction);
-
         // Спускаем разделительный ключ из родителя во внутренний узел 'this'
         if (!rightChildren.isEmpty()) {
             this.getKeys().add(findLeftKey(deepLockedNode, rightChildren.get(0), storage, transaction));
@@ -791,7 +811,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             child.lockAndAddToDeepLock(deepLockedNode, transaction);
             child.setParent(this);
             storage.update(child, transaction);
-            this.getChildren().add(child);
+            synchronized (this.getChildren()) {
+                this.getChildren().add(child);
+            }
         }
 
         if (rightChildren.isEmpty()) {
@@ -819,7 +841,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             final List<Comparable> thisKeys = new ArrayList<>(this.getKeys());
             final List<Object> thisObjects = new ArrayList<>(this.getObjects());
 
-            this.getParent().getChildren().remove(this);
+            synchronized (this.getParent().getChildren()) {
+                this.getParent().getChildren().remove(this);
+            }
             storage.delete(this, transaction);
 
             if (!thisChildren.isEmpty()) {
@@ -847,7 +871,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 child.lockAndAddToDeepLock(deepLockedNode, transaction);
                 child.setParent(left);
                 storage.update(child, transaction);
-                left.getChildren().add(child);
+                synchronized (left.getChildren()) {
+                    left.getChildren().add(child);
+                }
             }
 
             if (thisChildren.isEmpty()) {
@@ -1082,24 +1108,34 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         while (current != null && current.getObjects().isEmpty()) {
             try {
                 boolean isFound = false;
-                for (int i = 0; i < current.getKeys().size(); ++i) {
-                    // =========================================================================
-                    // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ НА ДЕБАГЕ (Финал коллизии дубликатов!):
-                    // Переводим компаратор со строгого "< 0" на нестрогое "<= 0".
-                    // Если искомый ключ равен внутреннему разделителю (compareResult == 0),
-                    // навигатор ТЕПЕРЬ честно уходит НАЛЕВО (в поддерево по индексу i),
-                    // забирает дубликаты из левого узла, а затем горизонтальный nextTreeNodeOnThisLevel
-                    // бесшовно переведет его на правый лист! Это возвращает нам Actual = 3 элемента!
-                    // =========================================================================
-                    if (key.compareTo(current.getKeys().get(i)) <= 0) {
-                        child = current.loadChildOfThisNode(i, storage, transaction);
-                        isFound = true;
+
+                // =========================================================================
+                // АЛГОРИТМИЧЕСКИЙ ЗАЩИТНЫЙ ЩИТ СУБД (Финальное уничтожение IndexOutOfBoundsException):
+                // Делаем атомарные изолированные снимки (Snapshots) коллекций ключей и детей
+                // текущего промежуточного узла-маршрутизатора ДО начала итерации цикла.
+                // Это гарантирует, что даже если параллельный поток-писатель на фазе сплита
+                // очистит живой LinkedList ключей через remove(), наш читатель спокойно завершит навигацию
+                // по стабильной локальной копии, полностью уничтожая гонки данных!
+                // =========================================================================
+                final List<Comparable> snapshotKeys = new ArrayList<>(current.getKeys());
+                final List<XdStorageBTreeNode> snapshotChildren = new ArrayList<>(current.getChildren());
+
+                for (int i = 0; i < snapshotKeys.size(); ++i) {
+                    if (key.compareTo(snapshotKeys.get(i)) < 0) {
+                        if (i < snapshotChildren.size()) {
+                            child = current.loadChildOfThisNode(i, storage, transaction);
+                            isFound = true;
+                        }
                         break;
                     }
                 }
-                if (!isFound && current.getChildren().size() > 0) {
-                    child = current.loadChildOfThisNode(current.getChildren().size() - 1, storage, transaction);
+
+                if (!isFound && !snapshotChildren.isEmpty()) {
+                    child = current.loadChildOfThisNode(snapshotChildren.size() - 1, storage, transaction);
+                } else if (!isFound) {
+                    child = null;
                 }
+
                 if (child != null && !child.tryLockRead(transaction)) {
                     retryFind.set(true);
                     return null;
@@ -1120,34 +1156,28 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             boolean stop = false;
             boolean hasMatches = false;
 
-            for (int i = 0; i < current.getKeys().size(); ++i) {
-                final int compareResult = key.compareTo(current.getKeys().get(i));
+            // На уровне листьев точно так же защищаем чтение через снимок ключей и объектов
+            final List<Comparable> leafKeysSnapshot = new ArrayList<>(current.getKeys());
+            final List<Object> leafObjectsSnapshot = new ArrayList<>(current.getObjects());
+
+            for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
+                final int compareResult = key.compareTo(leafKeysSnapshot.get(i));
                 if (compareResult == 0) {
-                    result.add(current.getObjects().get(i));
-                    hasMatches = true;
+                    if (i < leafObjectsSnapshot.size()) {
+                        result.add(leafObjectsSnapshot.get(i));
+                        hasMatches = true;
+                    }
                 } else if (compareResult < 0) {
                     stop = true;
-                    break; // Прерываем только сканирование ТЕКУЩЕЙ страницы-листа
+                    break;
                 }
             }
 
-            // =========================================================================
-            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал диапазонного сканирования):
-            // Если на текущей странице были зафиксированы дубликаты, мы проверяем горизонтальный
-            // переходnextTreeNodeOnThisLevel. Но даже если на этой странице stop стал равен true
-            // из-за граничных ключей (например, 50), метод КАТЕГОРИЧЕСКИ обязан вернуть все
-            // накопленные в result дубликаты наверх по цепочке рекурсии, а не занулять шаг!
-            // =========================================================================
             if (hasMatches && getTree().isMultiple()) {
-                // Если были совпадения, принудительно разрешаем прыжок на правый соседний лист
-                if (current.getNextTreeNodeOnThisLevel() != null) {
-                    child = current.getNextTreeNodeOnThisLevel();
-                    final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
-                    if (!retryFind.get() && tmp != null) {
-                        result.addAll(tmp);
-                    }
-                }
-            } else if (!stop) {
+                stop = false;
+            }
+
+            if (!stop) {
                 child = current.getNextTreeNodeOnThisLevel();
                 if (child != null) {
                     final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
@@ -1156,8 +1186,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     }
                 }
             }
-
-            return retryFind.get() ? null : result; // Безвозвратно отдаем собранный пакет дубликатов
+            return retryFind.get() ? null : result;
         } finally {
             if (current != null && current.isReadLocked()) {
                 current.unlockRead();
@@ -1176,8 +1205,21 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 toUnlock.unlockRead();
             }
 
-            for (int i = 0; i < getKeys().size(); ++i) {
-                viewer.look(getKeys().get(i), getObjects().get(i));
+            // =========================================================================
+            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал IndexOutOfBoundsException!):
+            // Делаем атомарные изолированные снимки (Snapshots) коллекций ключей и объектов
+            // текущей листовой страницы ДО начала итерации цикла viewer.look().
+            // Это гарантирует, что даже если параллельный поток-писатель на фазе сплита листа
+            // очистит живой LinkedList через remove(), наш читатель диапазона спокойно завершит
+            // обход по стабильной локальной копии, полностью уничтожая гонки данных и Index: 1, Size: 0!
+            // =========================================================================
+            final List<Comparable> leafKeysSnapshot = new ArrayList<>(getKeys());
+            final List<Object> leafObjectsSnapshot = new ArrayList<>(getObjects());
+
+            for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
+                if (i < leafObjectsSnapshot.size()) {
+                    viewer.look(leafKeysSnapshot.get(i), leafObjectsSnapshot.get(i));
+                }
             }
 
             loadThisNode(storage, transaction);

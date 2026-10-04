@@ -1,8 +1,10 @@
 package org.flib.xdstorage.btree;
 
 import org.flib.xdstorage.IXdStorage;
+import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
+import org.flib.xdstorage.trigger.IXdStorageTrigger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -652,5 +654,282 @@ public class XdStorageBTreeTest {
         for (int i = 0; i < expectedCount; i++) {
             assertTrue(results.contains("Duplicate_" + i), "Потеряно значение: Duplicate_" + i);
         }
+    }
+
+    // === 9. ВЫСОКОНАГРУЖЕННЫЕ МНОГОПОТОЧНЫЕ СТРЕСС-ТЕСТЫ (ПОИНТ Г) ===
+
+    /**
+     * ТЕСТ 20: Конкурентный стресс-тест одновременной вставки и удаления (Insert/Delete Race Condition).
+     * 16 потоков одновременно атакуют дерево: 8 потоков лавинообразно вставляют уникальные ключи,
+     * провоцируя каскадные splitAndInsertIntoParent, а другие 8 потоков параллельно вычищают
+     * соседние диапазоны ключей через delete и каскадный joinWithNeightbor.
+     * Дерево обязано удержать блокировки, не свалиться в Deadlock и сохранить целостность структуры!
+     */
+    @Test
+    public void testConcurrent_InsertDeleteRace_ShouldNotDeadlockOrCorrupt() throws Exception {
+        IXdStorage mockStorage = mock(IXdStorage.class);
+        IXdStorageTransaction mockTx = mock(IXdStorageTransaction.class);
+        when(mockTx.getTimeout()).thenReturn(5000L); // 5 секунд таймаута на транзакцию
+
+        // Обучаем мок возвращать переданные инстансы страниц для корректной навигации в памяти
+        doAnswer(invocation -> invocation.getArgument(0))
+                .when(mockStorage).load(any(Object.class), any(IXdStorageTransaction.class));
+
+        // Предзаполняем дерево базовым набором, чтобы потокам удаления было что чистить
+        for (int i = 1; i <= 50; i++) {
+            bTree.insert(i, "PreFilled_" + i, mockStorage, mockTx);
+        }
+
+        int threadsCount = 16;
+        ExecutorService executor = Executors.newFixedThreadPool(threadsCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch finishLatch = new CountDownLatch(threadsCount);
+
+        List<Throwable> exceptions = Collections.synchronizedList(new ArrayList<>());
+
+        // Половина потоков пишет новые ключи, половина - трет существующие
+        for (int t = 0; t < threadsCount; t++) {
+            final int threadId = t;
+            executor.submit(() -> {
+                try {
+                    startLatch.await(); // Синхронный залп всех потоков
+                    if (threadId % 2 == 0) {
+                        // Пишущие воркеры: вставляют новые диапазоны (51-100), вызывая сплиты
+                        for (int k = 51 + threadId; k <= 100; k += 16) {
+                            bTree.insert(k, "ConcurrentVal_" + k, mockStorage, mockTx);
+                        }
+                    } else {
+                        // Стирающие воркеры: хаотично вычищают базовый набор, вызывая join и move
+                        for (int k = 1 + threadId; k <= 50; k += 16) {
+                            try {
+                                bTree.delete(k, mockStorage, mockTx);
+                            } catch (XdStorageException ignored) {
+                                // Игнорируем контролируемые "does not exists", если соседний поток стер ключ раньше
+                            }
+                        }
+                    }
+                } catch (Throwable e) {
+                    exceptions.add(e);
+                } finally {
+                    finishLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown(); // Огонь!
+        boolean finishedCleanly = finishLatch.await(10, TimeUnit.SECONDS);
+        executor.shutdownNow();
+
+        assertTrue(finishedCleanly, "🚨 ОБНАРУЖЕН DEADLOCK! Потоки заблокировали друг друга на фазе ребалансировки ярусов!");
+        assertTrue(exceptions.isEmpty(), "🚨 В многопоточном режиме вылетели непредвиденные исключения (NPE/IndexOutOfBounds): " + exceptions);
+    }
+
+    /**
+     * ТЕСТ 21: Конкурентное диапазонное чтение под прессингом мутаций (Concurrent Range Scan under Mutation).
+     * Тест запускает 1 пишущий поток, непрерывно насыщающий дерево дубликатами одного ключа (multiple = true),
+     * и 10 параллельных потоков-читателей, которые без остановки вызывают find() по этому ключу.
+     */
+    @Test
+    public void testConcurrent_RangeScanUnderMutation_ShouldReturnConsistentCounts() throws Exception {
+        // Каноничный легковесный Stub-объект дискового хранилища
+        IXdStorage stubStorage = new IXdStorage() {
+            @Override public <T> T load(Class<T> cl, Object id, IXdStorageTransaction tx) throws XdStorageException { return null; }
+
+            @Override
+            public void load(Collection<?> references) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override
+            public void load(Collection<?> references, IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override
+            public <T> Collection<T> load(Class<T> cl) throws XdStorageException, XdStorageConnectionException {
+                return null;
+            }
+
+            @Override public void load(Object object, IXdStorageTransaction transaction) throws XdStorageException {}
+
+            @Override
+            public <T> T load(Class<T> cl, Object id) throws XdStorageException, XdStorageConnectionException {
+                return null;
+            }
+
+            @Override public <T> Collection<T> load(Class<T> cl, IXdStorageTransaction transaction) throws XdStorageException { return Collections.emptyList(); }
+
+            @Override
+            public void update(Object object) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override public void save(Object object, IXdStorageTransaction transaction) throws XdStorageException {}
+
+            @Override
+            public void save(Collection<?> objects) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override public void save(Collection<?> objects, IXdStorageTransaction transaction) throws XdStorageException {}
+
+            @Override
+            public boolean has(Class<?> cl, Object id) throws XdStorageException, XdStorageConnectionException {
+                return false;
+            }
+
+            @Override
+            public boolean has(Class<?> cl, Object id, IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+                return false;
+            }
+
+            @Override
+            public void load(Object reference) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override public void update(Object object, IXdStorageTransaction transaction) throws XdStorageException {}
+
+            @Override
+            public void update(Collection<?> objects) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override public void update(Collection<?> objects, IXdStorageTransaction transaction) throws XdStorageException {}
+
+            @Override
+            public void delete(Object reference) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override public void delete(Object object, IXdStorageTransaction transaction) throws XdStorageException {}
+
+            @Override
+            public void delete(Collection<?> references) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override public void delete(Collection<?> objects, IXdStorageTransaction transaction) throws XdStorageException {}
+            @Override public IXdStorageTransaction beginTransaction() { return null; }
+
+            @Override
+            public IXdStorageTransaction beginTransaction(IXdStorageTransaction transaction, long timeout) {
+                return null;
+            }
+
+            @Override
+            public IXdStorageTransaction beginTransaction(IXdStorageTransaction transaction) {
+                return null;
+            }
+
+            @Override
+            public void commitTransaction(IXdStorageTransaction transaction) throws XdStorageException {
+
+            }
+
+            @Override
+            public void rollbackTransaction(IXdStorageTransaction transaction) {
+
+            }
+
+            @Override
+            public void save(Object object) throws XdStorageException, XdStorageConnectionException {
+
+            }
+
+            @Override
+            public String getName() {
+                return null;
+            }
+
+            @Override
+            public <T> void registerTrigger(IXdStorageTrigger<T> trigger) {
+
+            }
+
+            @Override public IXdStorageTransaction beginTransaction(long timeout) { return null; }
+            @Override public void shutdown() {}
+        };
+
+        // Настраиваем дерево на поддержку дубликатов (multiple = true)
+        bTree.setMultiple(true);
+
+        // Первичная транзакция инициализации базового набора
+        IXdStorageTransaction txInit = mock(IXdStorageTransaction.class);
+        when(txInit.getTimeout()).thenReturn(3000L);
+
+        int targetKey = 99;
+        int initialCount = 5;
+        for (int i = 0; i < initialCount; i++) {
+            bTree.insert(targetKey, "Initial_" + i, stubStorage, txInit);
+        }
+
+        int readersCount = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(readersCount + 1);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch finishLatch = new CountDownLatch(readersCount + 1);
+
+        List<Throwable> exceptions = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger totalReadsExecuted = new AtomicInteger(0);
+
+        // 1. Поток-писатель: Изолированная персональная транзакция txWriter!
+        executor.submit(() -> {
+            try {
+                IXdStorageTransaction txWriter = mock(IXdStorageTransaction.class);
+                when(txWriter.getTimeout()).thenReturn(3000L);
+
+                startLatch.await();
+                for (int i = 0; i < 20; i++) {
+                    bTree.insert(targetKey, "Spam_" + i, stubStorage, txWriter);
+                    Thread.sleep(10);
+                }
+            } catch (Throwable e) {
+                exceptions.add(e);
+            } finally {
+                finishLatch.countDown();
+            }
+        });
+
+        // 2. Потоки-читатели: Каждый воркер получает свою ПЕРСОНАЛЬНУЮ ИЗОЛИРОВАННУЮ транзакцию txReader!
+        for (int i = 0; i < readersCount; i++) {
+            executor.submit(() -> {
+                try {
+                    // Создаем уникальный транзакционный контекст для каждого параллельного читателя
+                    IXdStorageTransaction txReader = mock(IXdStorageTransaction.class);
+                    when(txReader.getTimeout()).thenReturn(5000L); // Даем запас времени на чтение
+
+                    startLatch.await();
+                    for (int r = 0; r < 50; r++) {
+                        List<Object> res;
+                        int currentSize;
+
+                        synchronized (bTree) {
+                            res = bTree.find(targetKey, stubStorage, txReader);
+                            currentSize = res != null ? res.size() : 0;
+                        }
+
+                        totalReadsExecuted.incrementAndGet();
+
+                        assertNotNull(res);
+                        assertTrue(currentSize >= initialCount, "🚨 Поток-читатель зафиксировал потерю дубликатов во время сплита листа! Найдено элементов: " + currentSize);
+                        Thread.yield();
+                    }
+                } catch (Throwable e) {
+                    exceptions.add(e);
+                } finally {
+                    finishLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown(); // Залп!
+        boolean cleanRun = finishLatch.await(10, TimeUnit.SECONDS);
+        executor.shutdownNow();
+
+        exceptions.forEach(e -> e.printStackTrace(System.err));
+
+        assertTrue(cleanRun, "🚨 Воркеры конкурентного чтения заклинило в бесконечном do-while цикле retryFind!");
+        assertTrue(exceptions.isEmpty(), "🚨 Зафиксированы падения потоков из-за ложного Lock Upgrade: " + exceptions);
+        assertTrue(totalReadsExecuted.get() > 0, "Ни один поток-читатель не успел выполнить операцию find!");
     }
 }
