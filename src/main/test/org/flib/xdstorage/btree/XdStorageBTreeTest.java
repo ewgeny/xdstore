@@ -1,18 +1,23 @@
 package org.flib.xdstorage.btree;
 
 import org.flib.xdstorage.IXdStorage;
+import org.flib.xdstorage.XdStorageProvider;
+import org.flib.xdstorage.entities.XdUniverse;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.flib.xdstorage.XdStorageFacadeStressTest.deleteDir;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -999,4 +1004,144 @@ public class XdStorageBTreeTest {
         assertTrue(bTree.find(20, mockStorage, mockTx).isEmpty(), "Поиск в пустом схлопнувшемся дереве обязан возвращать пустой список!");
     }
 
+    // === 10. АЛГОРИТМИЧЕСКИЕ ТЕСТЫ НАПРАВЛЕННОГО ПОСЛЕДОВАТЕЛЬНОГО ПУРДЖА ===
+
+    /**
+     * ТЕСТ 23: Последовательное удаление ключей слева направо (Левосторонняя волна усыхания 1 -> N).
+     * Тест заполняет дерево элементами, заставляя его расщепиться на несколько листов,
+     * а затем последовательно выкашивает элементы с самого начала. Дерево должно
+     * чисто передавать разделители, занимать ключи у соседей и схлопнуть корень в null.
+     */
+    @Test
+    @DisplayName("Алгоритмический тест: Последовательное удаление ключей слева направо (1 -> N)")
+    public void testDelete_SequentialLeftToRight_ShouldCollapseTreeCleanly() throws Exception {
+        IXdStorage mockStorage = mock(IXdStorage.class);
+        // Обучаем прокси-загрузчик СУБД беспрепятственно возвращать живые ноды из памяти Java
+        doAnswer(invocation -> invocation.getArgument(0))
+                .when(mockStorage).load(any(Object.class), any());
+
+        IXdStorageTransaction mockTx = mock(IXdStorageTransaction.class);
+        when(mockTx.getTimeout()).thenReturn(5000L);
+
+        XdStorageBTree localTree = new XdStorageBTree(new XdStorageBTreeId(String.class, "tree_seq_left_right"), false, 2);
+
+        int totalKeys = 30;
+
+        // 1. Наполняем дерево по возрастанию (1, 2, 3...)
+        for (int i = 1; i <= totalKeys; i++) {
+            localTree.insert(i, "Value_" + i, mockStorage, mockTx);
+        }
+        assertNotNull(localTree.getRoot(), "Корень дерева обязан инициализироваться!");
+
+        // 2. Последовательный пурдж слева направо (1, 2, 3...)
+        assertDoesNotThrow(() -> {
+            for (int i = 1; i <= totalKeys; i++) {
+                localTree.delete(i, mockStorage, mockTx);
+            }
+        }, "Удаление слева направо вызвало крах в канонических алгоритмах ребалансировки!");
+
+        // 3. Верификация финального инварианта усыхания базы данных
+        assertNull(localTree.getRoot(), "После последовательного левого пурджа корень обязан схлопнуться в null!");
+        assertNull(localTree.getFirstLeaf(), "Указатель на первый лист обязан обнулиться!");
+    }
+
+    /**
+     * ТЕСТ 24: Последовательное удаление ключей справа налево (Правосторонняя волна усыхания N -> 1).
+     * Тест заполняет дерево элементами, а затем последовательно выкашивает элементы с самого конца.
+     * Проверяет симметрию алгоритмов заимствования moveLeft и слияния joinWithLeftNeightbor.
+     */
+    @Test
+    @DisplayName("Алгоритмический тест: Последовательное удаление ключей справа налево (N -> 1)")
+    public void testDelete_SequentialRightToLeft_ShouldCollapseTreeCleanly() throws Exception {
+        IXdStorage mockStorage = mock(IXdStorage.class);
+        doAnswer(invocation -> invocation.getArgument(0))
+                .when(mockStorage).load(any(Object.class), any());
+
+        IXdStorageTransaction mockTx = mock(IXdStorageTransaction.class);
+        when(mockTx.getTimeout()).thenReturn(5000L);
+
+        XdStorageBTree localTree = new XdStorageBTree(new XdStorageBTreeId(String.class, "tree_seq_right_left"), false, 2);
+
+        int totalKeys = 30;
+
+        // 1. Наполняем дерево
+        for (int i = 1; i <= totalKeys; i++) {
+            localTree.insert(i, "Data_" + i, mockStorage, mockTx);
+        }
+        assertNotNull(localTree.getRoot());
+
+        // 2. Последовательный пурдж справа налево (30, 29, 28...)
+        assertDoesNotThrow(() -> {
+            for (int i = totalKeys; i >= 1; i--) {
+                localTree.delete(i, mockStorage, mockTx);
+            }
+        }, "Удаление справа налево вызвало крах в канонических алгоритмах ребалансировки!");
+
+        // 3. Верификация финального инварианта усыхания базы данных
+        assertNull(localTree.getRoot(), "После последовательного правого пурджа корень обязан схлопнуться in null!");
+        assertNull(localTree.getFirstLeaf(), "Указатель на первый лист обязан обнулиться!");
+    }
+
+    @Test
+    @DisplayName("Транзакционный тест: Секвентальные транзакции записи и чтения не должны вызывать rollback only")
+    public void testTransactional_SequentialWriteAndRead_ShouldNotMarkAsRollbackOnly() throws Exception {
+        // Тест имитирует поведение testOneThread: запись в одной транзакции, коммит, и чтение в следующей
+        IXdStorage fileStorage = XdStorageProvider.newOrGetFileStorage("test_seq_tx", "./target/test_seq_tx", 200);
+
+        try {
+            // Транзакция №1: Запись
+            IXdStorageTransaction txWrite = fileStorage.beginTransaction();
+            XdUniverse universe = new XdUniverse();
+            universe.setGalaxies(new ArrayList<>());
+            universe.setId(UUID.randomUUID().toString());
+            fileStorage.save(universe, txWrite);
+            fileStorage.commitTransaction(txWrite);
+
+            // Транзакция №2: Чтение (Должна беспрепятственно увидеть закоммиченные данные!)
+            IXdStorageTransaction txRead = fileStorage.beginTransaction();
+            assertDoesNotThrow(() -> {
+                Collection<XdUniverse> loaded = fileStorage.load(XdUniverse.class, txRead);
+                assertFalse(loaded.isEmpty(), "Закоммиченная вселенная обязана вычитаться!");
+            }, "Вторая транзакция чтения ошибочно пометила сессию как rollback only из-за сбоя таймстампов!");
+
+            fileStorage.commitTransaction(txRead);
+        } finally {
+            fileStorage.shutdown();
+            deleteDir(new File("./target/test_seq_tx"));
+        }
+    }
+
+    @Test
+    @DisplayName("Транзакционный тест: Роллбэк обязана полностью аннигилировать грязные изменения на диске и в кэше")
+    public void testTransactional_RollbackIntegrity_ShouldWipeDirtyChangesEntirely() throws Exception {
+        IXdStorage fileStorage = XdStorageProvider.newOrGetFileStorage("test_rollback_acid", "./target/test_rollback_acid", 200);
+
+        try {
+            // 1. Фиксируем базовое стабильное состояние
+            IXdStorageTransaction txInit = fileStorage.beginTransaction();
+            XdUniverse universe = new XdUniverse();
+            universe.setGalaxies(new ArrayList<>());
+            String universeId = UUID.randomUUID().toString();
+            universe.setId(universeId);
+            fileStorage.save(universe, txInit);
+            fileStorage.commitTransaction(txInit);
+
+            // 2. Стартуем грязную транзакцию и делаем деструктивное удаление element
+            IXdStorageTransaction txDirty = fileStorage.beginTransaction();
+            XdUniverse loadedRef = fileStorage.load(XdUniverse.class, universeId, txDirty);
+            fileStorage.delete(loadedRef, txDirty);
+
+            // Жестко откатываем изменения!
+            fileStorage.rollbackTransaction(txDirty);
+
+            // 3. Проверяем стабильность: объект ОБЯЗАН ожить и успешно существовать в базе данных
+            IXdStorageTransaction txVerify = fileStorage.beginTransaction();
+            XdUniverse aliveUniverse = fileStorage.load(XdUniverse.class, universeId, txVerify);
+            assertNotNull(aliveUniverse, "Критический баг роллбэка! Объект исчез из кэша/диска после отката транзакции удаления!");
+            fileStorage.commitTransaction(txVerify);
+        } finally {
+            fileStorage.shutdown();
+            deleteDir(new File("./target/test_rollback_acid"));
+        }
+    }
 }

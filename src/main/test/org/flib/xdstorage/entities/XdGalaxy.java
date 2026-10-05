@@ -27,8 +27,6 @@ public class XdGalaxy {
 
     private Collection<XdStarSystem> systems;
 
-    private XdObject object;
-
     public String getId() {
         return id;
     }
@@ -80,14 +78,6 @@ public class XdGalaxy {
             }
         }
         return null;
-    }
-
-    public XdObject getObject() {
-        return object;
-    }
-
-    public void setObject(final XdObject object) {
-        this.object = object;
     }
 
     @Override

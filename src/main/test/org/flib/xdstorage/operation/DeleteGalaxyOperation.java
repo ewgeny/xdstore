@@ -4,7 +4,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.entities.XdGalaxy;
-import org.flib.xdstorage.entities.XdObject;
 import org.flib.xdstorage.entities.XdStarSystem;
 import org.flib.xdstorage.entities.XdUniverse;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;

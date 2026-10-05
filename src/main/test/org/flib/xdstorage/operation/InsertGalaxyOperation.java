@@ -62,11 +62,7 @@ public class InsertGalaxyOperation implements Runnable {
         final XdBlackHole hole = new XdBlackHole();
         hole.setId(nextStringId());
 
-        final XdObject object = new XdObject();
-//        object.setObjectId(Math.abs(new Random(System.currentTimeMillis()).nextLong()));
-
         galaxy.setHole(hole);
-//        galaxy.setObject(object);
 
         return galaxy;
     }

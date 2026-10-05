@@ -1215,9 +1215,11 @@ public class XdStorageResourceCache {
         }
 
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction) {
+            long commitMs = this.timestamp / 1_000_000;
+
             boolean result = this.state == State.undefined
                     || (this.state == State.locked && this.transaction == transaction)
-                    || (this.state == State.committed && transaction.getTimestart() > timestamp);
+                    || (this.state == State.committed && transaction.getTimestart() > commitMs);
 
             if (log.isDebugEnabled()) {
                 log.debug("canBeChangedByTransaction state: " + this.state
@@ -1230,9 +1232,11 @@ public class XdStorageResourceCache {
         }
 
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction, final long readObjectByTransactionTimestamp) {
+            long commitMs = this.timestamp / 1_000_000;
+
             boolean result = this.state == State.undefined
                     || (this.state == State.locked && this.transaction == transaction)
-                    || (this.state == State.committed && readObjectByTransactionTimestamp > timestamp);
+                    || (this.state == State.committed && readObjectByTransactionTimestamp > commitMs);
 
             if (log.isDebugEnabled()) {
                 log.debug("canBeChangedByTransaction state: " + this.state
