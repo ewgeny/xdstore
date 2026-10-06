@@ -57,7 +57,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         this.globalTransaction = globalTransaction;
         this.timeout = timeout;
         this.transactionId = transactionId;
-        this.timestart = System.nanoTime();
+        this.timestart = System.currentTimeMillis();
         this.resourcesIds = Collections.synchronizedSet(new HashSet<>());
         this.resources = new ConcurrentHashMap<>();
         this.forCommit = new PriorityBlockingQueue<>();

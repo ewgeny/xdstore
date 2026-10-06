@@ -89,7 +89,7 @@ public class XdStorageResourceCache {
         for (final T object : objects) {
             final Object objectId = field.get(object);
             final Object clonedObject = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-            tmpReadObjects.putIfAbsent(objectId, new ObjectChange(clonedObject, Change.read, System.nanoTime()));
+            tmpReadObjects.putIfAbsent(objectId, new ObjectChange(clonedObject, Change.read, System.currentTimeMillis()));
             result.add((T) tmpReadObjects.get(objectId).object);
             cache.putIfAbsent(field.get(object), createReadRecord(object));
         }
@@ -191,7 +191,7 @@ public class XdStorageResourceCache {
                         final Object objectId = field.get(object);
                         if (!readObjects.containsKey(objectId)) {
                             Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.currentTimeMillis()));
                         }
                         Object objectToReturn = readObjects.get(objectId).object;
 
@@ -391,7 +391,7 @@ public class XdStorageResourceCache {
                 synchronized (result) {
                     synchronized (record) {
                         if (!readObjects.containsKey(objectId)) {
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.currentTimeMillis()));
                         }
                     }
                     result.add((T) readObjects.get(objectId).object);
@@ -514,7 +514,7 @@ public class XdStorageResourceCache {
             }
 
             if (object != null) {
-                readObjects.putIfAbsent(id, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
+                readObjects.putIfAbsent(id, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.currentTimeMillis()));
                 return readObjects.get(id).object;
             }
         }
@@ -574,7 +574,7 @@ public class XdStorageResourceCache {
                     cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
                 } else {
                     cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
-                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));   // reading by reference - only last read object is cached for this transaction
+                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.currentTimeMillis()));   // reading by reference - only last read object is cached for this transaction
                 }
                 return;
             }
@@ -1257,8 +1257,6 @@ public class XdStorageResourceCache {
         }
 
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction) {
-            long commitMs = this.timestamp / 1_000_000;
-
             boolean isOwnerTxAlive = this.transaction != null &&
                     services.getTransactionsManager().isTransactionAlive(this.transaction);
 
@@ -1269,7 +1267,7 @@ public class XdStorageResourceCache {
             boolean result = this.state == State.undefined
                     || !isOwnerTxAlive
                     || (this.state == State.locked && this.transaction == transaction)
-                    || (this.state == State.committed && transaction.getTimestart() > commitMs);
+                    || (this.state == State.committed && transaction.getTimestart() > timestamp);
 
             if (log.isDebugEnabled()) {
                 log.debug("canBeChangedByTransaction state: " + this.state
@@ -1282,15 +1280,13 @@ public class XdStorageResourceCache {
         }
 
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction, final long readObjectByTransactionTimestamp) {
-            long commitMs = this.timestamp / 1_000_000;
-
             boolean isOwnerTxAlive = this.transaction != null &&
                     services.getTransactionsManager().isTransactionAlive(this.transaction);
 
             boolean result = this.state == State.undefined
                     || !isOwnerTxAlive
                     || (this.state == State.locked && this.transaction == transaction)
-                    || (this.state == State.committed && readObjectByTransactionTimestamp > commitMs);
+                    || (this.state == State.committed && readObjectByTransactionTimestamp > timestamp);
 
             if (log.isDebugEnabled()) {
                 log.debug("canBeChangedByTransaction state: " + this.state
@@ -1432,7 +1428,7 @@ public class XdStorageResourceCache {
             firstPhaseCommit = false;
             secondPhaseCommit = false;
 
-            this.timestamp = System.nanoTime();
+            this.timestamp = System.currentTimeMillis();
         }
 
         public void rollback() {

@@ -241,6 +241,8 @@ public class BTreeResourceCacheIntegrationTest {
         boolean finishedCleanly = finishLatch.await(20, TimeUnit.SECONDS);
         executor.shutdownNow();
 
+        caughtExceptions.forEach(e -> e.printStackTrace(System.err));
+
         // === ГЕНЕРАЛЬНАЯ ПРOВЕРКА СТАБИЛЬНOСТИ ЯДРА ===
         assertTrue(finishedCleanly, "🚨 СУБД заклинило! Потоки ушли в глухой дедлок блокировок кучи Java!");
         assertTrue(caughtExceptions.isEmpty(), "Фиксация падений по таймаутам или гонкам данных: " + caughtExceptions);
