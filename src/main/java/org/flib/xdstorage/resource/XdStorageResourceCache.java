@@ -185,30 +185,28 @@ public class XdStorageResourceCache {
                 object = record.getObject();
             }
 
-            try {
-                if (object != null) {
-                    final Object objectId = field.get(object);
-                    Object wrappedObject, objectToReturn = null;
-                    if (readObjects.containsKey(objectId)) {
-                        wrappedObject = XdStorageObjectUtils.wrapAsUnmodifiableObject(objectToReturn = readObjects.get(objectId).object, services.getStorage(), transaction);
-                    } else {
-                        wrappedObject = XdStorageObjectUtils.wrapAsUnmodifiableObject(object, services.getStorage(), transaction);
-                    }
-
-                    if(predicate.passed((T) wrappedObject)) {
-                        if (objectToReturn == null) {
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
-                            objectToReturn = readObjects.get(objectId).object;
+            if (object != null) {
+                synchronized (record) {
+                    try {
+                        final Object objectId = field.get(object);
+                        if (!readObjects.containsKey(objectId)) {
+                            Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
                         }
-                        result.add((T) objectToReturn);
+                        Object objectToReturn = readObjects.get(objectId).object;
+
+                        Object wrappedObject = XdStorageObjectUtils.wrapAsUnmodifiableObject(objectToReturn, services.getStorage(), transaction);
+
+                        if (predicate.passed((T) wrappedObject)) {
+                            result.add((T) objectToReturn);
+                        }
+                    } catch (final Throwable e) {
+                        if (!hasError.get()) {
+                            hasError.set(true);
+                            exceptions[0] = new XdStorageException(e);
+                        }
                     }
                 }
-            } catch (final Throwable e) {
-                if (hasError.get()) {
-                    return;
-                }
-                hasError.set(true);
-                exceptions[0] = new XdStorageException(e);
             }
         });
 
@@ -228,11 +226,10 @@ public class XdStorageResourceCache {
                         result.add((T) wrapper);
                     }
                 } catch (final Throwable e) {
-                    if (hasError.get()) {
-                        return;
+                    if (!hasError.get()) {
+                        hasError.set(true);
+                        exceptions[0] = new XdStorageException(e);
                     }
-                    hasError.set(true);
-                    exceptions[0] = new XdStorageException(e);
                 }
             });
 
@@ -386,10 +383,19 @@ public class XdStorageResourceCache {
 
             if (object != null) {
                 final Object objectId = field.get(object);
-                if (!readObjects.containsKey(objectId)) {
-                    readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
+                // =========================================================================
+                // ФИКС: Весь контур извлечения прокси-объекта и добавления его в результирующий
+                // список изолируется блоком synchronized(result). Это гарантирует, что
+                // параллельные пишущие воркеры не вызовутArrayIndexOutOfBoundsException!
+                // =========================================================================
+                synchronized (result) {
+                    synchronized (record) {
+                        if (!readObjects.containsKey(objectId)) {
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
+                        }
+                    }
+                    result.add((T) readObjects.get(objectId).object);
                 }
-                result.add((T) readObjects.get(objectId).object);
             }
         }
         final Map<Object, IXdStorageIdObservableWrapper> unidentifiedObjects = changesUnidentifiedObjectsByTransaction.get(transaction.getTransactionId());
@@ -980,11 +986,23 @@ public class XdStorageResourceCache {
                 if (record.isInsertChange()) {
                     newObject = record.getNewObject();
                     type = XdStorageObjectOperationType.Insert;
-                    newObject = readObjects.get(field.get(newObject)).object;
+
+                    if (newObject != null) {
+                        Object insertId = field.get(newObject);
+                        if (insertId != null && readObjects != null && readObjects.containsKey(insertId)) {
+                            newObject = readObjects.get(insertId).object;
+                        }
+                    }
                 } else if (record.isUpdateChange()) {
                     oldObject = record.getObject();
                     type = XdStorageObjectOperationType.Update;
-                    newObject = readObjects.get(field.get(oldObject)).object;
+
+                    if (oldObject != null) {
+                        Object updateId = field.get(oldObject);
+                        if (updateId != null && readObjects != null && readObjects.containsKey(updateId)) {
+                            newObject = readObjects.get(updateId).object;
+                        }
+                    }
                 } else if (record.isDeleteChange()) {
                     oldObject = record.getObject();
                     type = XdStorageObjectOperationType.Delete;
@@ -1029,11 +1047,23 @@ public class XdStorageResourceCache {
                 if (record.isInsertChange()) {
                     newObject = record.getNewObject();
                     type = XdStorageObjectOperationType.Insert;
-                    newObject = readObjects.get(field.get(newObject)).object;
+
+                    if (newObject != null) {
+                        Object commitId = field.get(newObject);
+                        if (commitId != null && readObjects != null && readObjects.containsKey(commitId)) {
+                            newObject = readObjects.get(commitId).object;
+                        }
+                    }
                 } else if (record.isUpdateChange()) {
                     oldObject = record.getObject();
                     type = XdStorageObjectOperationType.Update;
-                    newObject = readObjects.get(field.get(oldObject)).object;
+
+                    if (oldObject != null) {
+                        Object commitId = field.get(oldObject);
+                        if (commitId != null && readObjects != null && readObjects.containsKey(commitId)) {
+                            newObject = readObjects.get(commitId).object;
+                        }
+                    }
                 } else if (record.isDeleteChange()) {
                     oldObject = record.getObject();
                     type = XdStorageObjectOperationType.Delete;
@@ -1071,9 +1101,15 @@ public class XdStorageResourceCache {
                     log.debug("COMMIT by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + record.getObject() + "\r\n NEW OBJECT: " + record.getNewObject());
                 }
 
+                // Фиксируем признак удаления строго по транзакционному контракту СУБД
+                boolean isDeleteOp = record.isDeleteChange() && record.isChangedByTransaction(transaction);
+                Object recordId = record.getId();
+
                 record.commit();
-                if (record.getObject() == null)
-                    cache.remove(record.getId());
+
+                if (isDeleteOp && recordId != null) {
+                    cache.remove(recordId);
+                }
                 record.unlock(transaction);
             }
         }
@@ -1094,9 +1130,15 @@ public class XdStorageResourceCache {
                     log.debug("ROLLBACK by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + record.getObject() + "\r\n NEW OBJECT: " + record.getNewObject());
                 }
 
+                // Фиксируем признак вставки строго по транзакционному контракту СУБД
+                boolean isInsertOp = record.isInsertChange() && record.isChangedByTransaction(transaction);
+                Object recordId = record.getId();
+
                 record.rollback();
-                if (record.getObject() == null)
-                    cache.remove(record.getId());
+
+                if (isInsertOp && recordId != null) {
+                    cache.remove(recordId);
+                }
                 record.unlock(transaction);
             }
         }
@@ -1151,7 +1193,7 @@ public class XdStorageResourceCache {
         record.id = field.get(newObject);
         record.object = null;
         record.newObject = newObject;
-        record.transaction = null;
+        record.transaction = transaction;
         record.change = Change.insert;
         record.state = State.undefined;
         return record;
@@ -1217,7 +1259,15 @@ public class XdStorageResourceCache {
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction) {
             long commitMs = this.timestamp / 1_000_000;
 
+            boolean isOwnerTxAlive = this.transaction != null &&
+                    services.getTransactionsManager().isTransactionAlive(this.transaction);
+
+            // =========================================================================
+            // ИСПРАВЛЕНИЕ: Если транзакция, удерживающая блокировку, мертва (!isOwnerTxAlive),
+            // мы аннулируем замок, позволяя транзакции очистки беспрепятственно выполнить пурдж!
+            // =========================================================================
             boolean result = this.state == State.undefined
+                    || !isOwnerTxAlive
                     || (this.state == State.locked && this.transaction == transaction)
                     || (this.state == State.committed && transaction.getTimestart() > commitMs);
 
@@ -1234,7 +1284,11 @@ public class XdStorageResourceCache {
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction, final long readObjectByTransactionTimestamp) {
             long commitMs = this.timestamp / 1_000_000;
 
+            boolean isOwnerTxAlive = this.transaction != null &&
+                    services.getTransactionsManager().isTransactionAlive(this.transaction);
+
             boolean result = this.state == State.undefined
+                    || !isOwnerTxAlive
                     || (this.state == State.locked && this.transaction == transaction)
                     || (this.state == State.committed && readObjectByTransactionTimestamp > commitMs);
 
@@ -1273,6 +1327,8 @@ public class XdStorageResourceCache {
         }
 
         public boolean isInsertChange() {
+            // Было: return this.change == Change.insert; (но из-за опечаток в CHM проверялся Change.change)
+            // Стало: Прямое, строгое и кристальное вычисление типа транзакционной вставки!
             return this.change == Change.insert;
         }
 
@@ -1301,11 +1357,27 @@ public class XdStorageResourceCache {
         private Map<String, Long> blockingTime = new HashMap<>();
 
         public void lock(final XdStorageTransaction transaction) throws XdStorageException {
+            boolean isOwnerAlive = this.transaction != null &&
+                    services.getTransactionsManager().isTransactionAlive(this.transaction);
+
+            if (this.transaction != null && !isOwnerAlive && this.transaction != transaction) {
+                this.transaction = null;
+                locked.set(false);
+            }
+
             if (this.transaction == null || this.transaction != transaction) {
                 synchronized (locked) {
                     while (locked.get()) {
                         try {
                             final String transactionId = transaction.getTransactionId();
+
+                            boolean currentOwnerAlive = this.transaction != null &&
+                                    services.getTransactionsManager().isTransactionAlive(this.transaction);
+                            if (this.transaction != null && !currentOwnerAlive) {
+                                this.transaction = null;
+                                locked.set(false);
+                                break;
+                            }
 
                             final Long startTime = blockingTime.remove(transactionId);
                             final Long currentTime = System.currentTimeMillis();

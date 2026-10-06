@@ -43,7 +43,37 @@ public class BTreeResourceCacheIntegrationTest {
         mockStorage = mock(IXdStorage.class);
         mockServices = mock(XdStorageServicesLocator.class);
 
+        // =========================================================================
+        // ИСПРАВЛЕНИЕ: Интегрируем потокобезопасный анонимный Stub менеджера транзакций,
+        // чтобы Guard-барьеры ядра СУБД не падали в NullPointerException!
+        // =========================================================================
+        org.flib.xdstorage.transaction.IXdStorageTransactionManager mockTxManager =
+                new org.flib.xdstorage.transaction.IXdStorageTransactionManager() {
+                    @Override
+                    public boolean isTransactionAlive(org.flib.xdstorage.transaction.IXdStorageTransaction transaction) {
+                        return true;
+                    }
+                    @Override
+                    public IXdStorage getStorage() { return mockStorage; }
+                    @Override
+                    public org.flib.xdstorage.transaction.IXdStorageTransaction beginTransaction(long timeout) { return null; }
+                    @Override
+                    public org.flib.xdstorage.transaction.IXdStorageTransaction beginTransaction(org.flib.xdstorage.transaction.IXdStorageTransaction transaction, long timeout) { return null; }
+                    @Override
+                    public org.flib.xdstorage.transaction.IXdStorageTransaction getTransaction(String transactionId) { return null; }
+                    @Override
+                    public void commitTransaction(org.flib.xdstorage.transaction.IXdStorageTransaction transaction) {}
+                    @Override
+                    public void rollbackTransaction(org.flib.xdstorage.transaction.IXdStorageTransaction transaction) {}
+                    @Override
+                    public XdStorageTransaction getCurrentTransaction() { return null; }
+                    @Override
+                    public void registerRollbackOnlyTransaction(org.flib.xdstorage.transaction.IXdStorageTransaction transaction) {}
+                };
+        when(mockServices.getTransactionsManager()).thenReturn(mockTxManager);
+
         // Настраиваем реальный или симулированный клонер ORM графа
+        // (Остальной код метода оставляем без изменений)
         IXdStorageCloner realCloner = new XdStorageSmartCloner(mock(org.flib.xdstorage.factories.IXdStorageReferenceProvider.class));
         when(mockServices.getCloner()).thenReturn(realCloner);
         when(mockServices.getStorage()).thenReturn(mockStorage);

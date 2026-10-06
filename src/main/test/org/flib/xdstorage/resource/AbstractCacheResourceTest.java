@@ -24,6 +24,16 @@ public abstract class AbstractCacheResourceTest {
         mockIdField = mock(XdStorageObjectIdField.class);
         mockStorage = mock(IXdStorage.class);
 
+        // =========================================================================
+        // ИСПРАВЛЕНИЕ: Создаем и обучаем мок менеджера транзакций СУБД.
+        // Для всех лабораторных юнит-тестов изоляции он будет возвращать true,
+        // предотвращая NullPointerException при Guard-проверках активности!
+        // =========================================================================
+        org.flib.xdstorage.transaction.IXdStorageTransactionManager mockTxManager =
+                mock(org.flib.xdstorage.transaction.IXdStorageTransactionManager.class);
+        when(mockTxManager.isTransactionAlive(any())).thenReturn(true);
+        when(mockServices.getTransactionsManager()).thenReturn(mockTxManager);
+
         when(mockServices.getCloner()).thenReturn(mockCloner);
         when(mockServices.getStorage()).thenReturn(mockStorage);
 

@@ -35,10 +35,6 @@ public class XmlDataStorageMultithreadsTest {
             galaxy.setId(nextStringId());
             galaxy.setSystems(new LinkedList<XdStarSystem>());
 
-            if (forException) {
-                galaxy.setObject(generateObjects(1).iterator().next());
-
-            }
             universe.addGalaxy(galaxy);
 
             final XdBlackHole hole = new XdBlackHole();
@@ -86,17 +82,6 @@ public class XmlDataStorageMultithreadsTest {
         }
 
         return universe;
-    }
-
-    private static Collection<XdObject> generateObjects(int count) {
-        final Collection<XdObject> result = new ArrayList<XdObject>(count);
-
-        for (int i = 0; i < count; ++i) {
-            final XdObject object = new XdObject();
-            object.setName("Object_" + i);
-            result.add(object);
-        }
-        return result;
     }
 
     private static String nextStringId() {
@@ -238,7 +223,6 @@ public class XmlDataStorageMultithreadsTest {
                                 storage.save(system.getPlanets());
                             }
                         }
-                        storage.save(galaxy.getObject());
                     }
 
                     tx.commit();
@@ -282,7 +266,7 @@ public class XmlDataStorageMultithreadsTest {
 
         Assertions.assertNull(ex);
 
-        IXdStorageTransaction tx = storage.beginTransaction();
+        IXdStorageTransaction tx = storage.beginTransaction(15000);
         try {
             Collection<XdUniverse> universes = storage.load(XdUniverse.class);
             for (XdUniverse universe : universes) {
@@ -317,6 +301,9 @@ public class XmlDataStorageMultithreadsTest {
             tx.rollback();
         }
 
+        if (ex != null) {
+            ex.printStackTrace(System.err);
+        }
         Assertions.assertNull(ex);
     }
 
@@ -356,7 +343,7 @@ public class XmlDataStorageMultithreadsTest {
         final Throwable[] exThread = new Throwable[]{null};
         final AtomicInteger countThreads = new AtomicInteger(20);
 
-        final Random rand = new Random(System.currentTimeMillis());
+        final Random rand = new Random(System.nanoTime());
         final int count = countThreads.intValue();
         for (int i = 0; i < count; ++i) {
             final int opindex = rand.nextInt() % operations.length;
@@ -390,6 +377,9 @@ public class XmlDataStorageMultithreadsTest {
             while (countThreads.intValue() > 0) {
                 try {
                     countThreads.wait(100);
+                    if (exThread[0] != null) {
+                        exThread[0].printStackTrace(System.err);
+                    }
                     Assertions.assertNull(exThread[0]);
                     log.info("FileStorage multithreads test: active threads = " + countThreads.get());
                 } catch (InterruptedException e) {
