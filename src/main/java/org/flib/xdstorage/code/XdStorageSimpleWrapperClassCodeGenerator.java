@@ -98,9 +98,37 @@ public class XdStorageSimpleWrapperClassCodeGenerator extends XdStorageAbstractC
 
     private void generateObjectMethods(final StringBuilder builder) {
         builder.append("\r\n\t@Override\r\n\tpublic int hashCode() {\r\n\t\treturn object.hashCode();\r\n\t}\r\n");
-        builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n\t\treturn object.equals(obj);\r\n\t}\r\n");
+
+        // =========================================================================
+        // ЭТАЛОННЫЙ ФИКС КОДОГЕНЕРАЦИИ (Строгий алгоритм распаковки по твоему канону):
+        // Генерируем equals() в строгом соответствии с транзакционным инвариантом СУБД.
+        // Сравнение идет СТРОГО враппер-к-врапперу. Любой чистый доменный объект
+        // гарантированно возвращает false, пресекая рассинхронизацию ссылок в куче Java!
+        // =========================================================================
+        builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n");
+        builder.append("\t\tif (this == obj) return true;\r\n");
+        builder.append("\t\tif (obj == null) return false;\r\n\r\n");
+
+        // 1) Проверяем объект-параметр: является ли он SimpleWrapper?
+        builder.append("\t\tif (obj instanceof ").append(IXdStorageSimpleWrapper.class.getName()).append(") {\r\n");
+        // 1.1) Если да — вытаскиваем обёрнутый объект через Java Reflection и сравниваем со своим
+        builder.append("\t\t\ttry {\r\n");
+        builder.append("\t\t\t\tjava.lang.reflect.Field f__ = obj.getClass().getDeclaredField(\"object\");\r\n");
+        builder.append("\t\t\t\tf__.setAccessible(true);\r\n");
+        builder.append("\t\t\t\tObject otherInner__ = f__.get(obj);\r\n");
+        builder.append("\t\t\t\treturn this.object.equals(otherInner__);\r\n");
+        builder.append("\t\t\t} catch (Exception e__) {\r\n");
+        builder.append("\t\t\t\treturn false;\r\n");
+        builder.append("\t\t\t}\r\n");
+        builder.append("\t\t}\r\n\r\n");
+
+        // 1.2) Если нет (прилетел чистый объект или другой тип) — эти объекты НЕ равны!
+        builder.append("\t\treturn false;\r\n");
+        builder.append("\t}\r\n");
+
         builder.append("\r\n\t@Override\r\n\tpublic String toString() {\r\n\t\treturn object.toString();\r\n\t}\r\n");
     }
+
 
     protected String buildClassName(final String classesPackage, final Class<?> cl) {
         return cl.getSimpleName() + "SimpleWrapper";

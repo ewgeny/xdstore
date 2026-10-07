@@ -104,16 +104,15 @@ public class XdStorageGiantGraphPurgeStressTest {
         int maxSystemsPerGalaxy = 10;
         int maxPlanetsPerSystem = 15;
 
-        System.out.println("⏳ [1/4] Генерация развесистого случайного графа в памяти...");
+        System.out.println("⏳ [1/5] Генерация развесистого случайного графа в памяти...");
         XdUniverse giantUniverse = generateGiantRandomGraph(numGalaxies, maxSystemsPerGalaxy, maxPlanetsPerSystem);
 
         // =========================================================================
         // ФАЗА 1: МАССОВАЯ ТРАНЗАКЦИОННАЯ ВСТАВКА ГРАФА
         // =========================================================================
-        System.out.println("⏳ [2/4] Сохранение графа на диск и фиксация транзакции...");
+        System.out.println("⏳ [2/5] Сохранение графа на диск и фиксация транзакции...");
         IXdStorageTransaction txInsert = storage.beginTransaction();
 
-        // КАТЕГОРИЧЕСКИ НЕ ГЛУШИМ ИСКЛЮЧЕНИЯ — пускай любое падение летит наверх в JUnit!
         storage.save(giantUniverse, txInsert);
         storage.save(giantUniverse.getGalaxies(), txInsert);
         for (XdGalaxy galaxy : giantUniverse.getGalaxies()) {
@@ -128,12 +127,49 @@ public class XdStorageGiantGraphPurgeStressTest {
         System.out.println("✅ Граф успешно сериализован и сохранен в B+Tree индексы СУБД.");
 
         // =========================================================================
+        // ФАЗА 1.5: ИНСАЙТ-ВЕРИФИКАЦИЯ ВСТАВКИ И БАЛАНСИРОВКИ (Новая фаза!)
+        // Проверяем полную загрузку всего графа до начала удаления.
+        // Если упадет здесь — значит, баг сидит в алгоритмах расщепления split!
+        // =========================================================================
+        System.out.println("⏳ [2.5/5] ТОТАЛЬНАЯ ВЕРИФИКАЦИЯ СТРУКТУРЫ ВСТАВКИ (Диагностика сплитов)...");
+        IXdStorageTransaction txVerifyInsert = storage.beginTransaction();
+        try {
+            Collection<XdUniverse> universes = storage.load(XdUniverse.class, txVerifyInsert);
+            for (XdUniverse universe : universes) {
+                storage.load(universe, txVerifyInsert);
+                for (XdGalaxy galaxyRef : universe.getGalaxies()) {
+                    XdGalaxy galaxy = storage.load(XdGalaxy.class, galaxyRef.getId(), txVerifyInsert);
+                    assertNotNull(galaxy, "Ошибка вставки: Галактика не найдена в индексе Б+ Дерева!");
+
+                    storage.load(galaxy.getSystems(), txVerifyInsert);
+                    for (XdStarSystem systemRef : galaxy.getSystems()) {
+                        XdStarSystem system = storage.load(XdStarSystem.class, systemRef.getId(), txVerifyInsert);
+                        assertNotNull(system, "Ошибка вставки: Звездная система потеряна в индексе Б+ Дерева!");
+
+                        // Пытаемся лениво материализовать все до единой планеты
+                        Collection<XdPlanet> planets = system.getPlanets();
+                        storage.load(planets, txVerifyInsert);
+                        for (XdPlanet planetRef : planets) {
+                            XdPlanet planet = storage.load(XdPlanet.class, planetRef.getId(), txVerifyInsert);
+                            assertNotNull(planet, "Ошибка вставки: Планета потеряна из-за неверного сплита Б+ Дерева!");
+                        }
+                    }
+                }
+            }
+            txVerifyInsert.commit();
+            System.out.println("⭐ ФАЗА ВСТАВКИ ИДЕАЛЬНА! Все ноды дерева сбалансированы правильно. Баг сидит строго в слиянии (Delete/Join)!");
+        } catch (Throwable t) {
+            txVerifyInsert.rollback();
+            System.err.println("🚨 КРАХ НА ФАЗЕ ВСТАВКИ! Балансировка при разделении страниц повреждает разделители Кнута!");
+            throw t;
+        }
+
+        // =========================================================================
         // ФАЗА 2: ТОТАЛЬНОЕ КАСКАДНОЕ УДАЛЕНИЕ В ОДНУ МОНОЛИТНУЮ ТРАНЗАКЦИЮ
         // =========================================================================
-        System.out.println("⏳ [3/4] Стартуем монолитную каскадную зачистку всего графа объектов...");
+        System.out.println("⏳ [3/5] Стартуем монолитную каскадную зачистку всего графа объектов...");
         IXdStorageTransaction txPurge = storage.beginTransaction();
 
-        // Намеренно обходим весь развесистый граф по дисковым ссылкам в рамках одной транзакции
         Collection<XdUniverse> universesToClean = storage.load(XdUniverse.class, txPurge);
         assertFalse(universesToClean.isEmpty(), "База данных пуста перед пурджем!");
 
@@ -156,29 +192,24 @@ public class XdStorageGiantGraphPurgeStressTest {
                     Collection<XdPlanet> planets = system.getPlanets();
                     storage.load(planets, txPurge);
 
-                    // Каскадно вырезаем планеты через B+Tree индекс удаления
                     for (XdPlanet planetRef : planets) {
                         storage.delete(planetRef, txPurge);
+                        System.err.println("DELETED PLANET " + planetRef.getId());
                     }
-                    // Удаляем звездную систему
                     storage.delete(system, txPurge);
                 }
-                // Удаляем галактику
                 storage.delete(galaxy, txPurge);
             }
-            // Удаляем корень вселенной
             storage.delete(universe, txPurge);
         }
 
-        // Выполняем финальный монолитный коммит пурджа.
-        // Любые скрытые гонки, дефекты сплитов, Null-ключи или ClassCastException взорвут эту строку!
         txPurge.commit();
         System.out.println("✅ Монолитный каскадный коммит пурджа завершен успешно.");
 
         // =========================================================================
         // ФАЗА 3: ВЕРИФИКАЦИЯ ФИНАЛЬНОГО ИНВАРЕАНТА (ЧИСТАЯ СУБД)
         // =========================================================================
-        System.out.println("⏳ [4/4] Верификация финального инварианта пустой базы данных...");
+        System.out.println("⏳ [4/5] Верификация финального инварианта пустой базы данных...");
         IXdStorageTransaction txVerify = storage.beginTransaction();
 
         Collection<XdUniverse> checkUniverses = storage.load(XdUniverse.class, txVerify);
