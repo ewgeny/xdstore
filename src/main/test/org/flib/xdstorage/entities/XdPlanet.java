@@ -13,7 +13,7 @@ import java.util.*;
         @XdStorageObjectChildSearchIndex(childFieldName = "satellite", childClassIndexName = "satellite_idx"),
         @XdStorageObjectChildSearchIndex(childFieldName = "colSatellites", childClassIndexName = "satellite_idx")
 })
-@XdStorageObjectIdIndexType(indexType = XdStorageIndexType.BTree, t = 50)
+@XdStorageObjectIdIndexType(indexType = XdStorageIndexType.BTree, t = 20)
 public class XdPlanet {
 
     @XdStorageObjectId
