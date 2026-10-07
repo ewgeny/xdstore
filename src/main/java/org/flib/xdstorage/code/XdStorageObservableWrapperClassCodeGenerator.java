@@ -129,12 +129,35 @@ public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstr
     }
 
     private void generateObjectMethods(final StringBuilder builder, final String className) {
-        builder.append("\r\n\t@Override\r\n\tpublic int hashCode() {\r\n\t\treturn 1;\r\n\t}\r\n");
-        builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n")
-                .append("\t\tif (this == obj) return true;\r\n")
-                .append("\t\tif (obj == null || getClass() != obj.getClass()) return false;\r\n")
-                .append("\t\tfinal ").append(className).append(" that = (").append(className).append(") obj;\r\n")
-                .append("\t\treturn object == that.object;\r\n\t}\r\n");
+        builder.append("\r\n\t@Override\r\n\tpublic int hashCode() {\r\n\t\treturn object.hashCode();\r\n\t}\r\n");
+
+        // =========================================================================
+        // ЭТАЛОННЫЙ ФИКС КОДОГЕНЕРАЦИИ RECTIVE WRAPPER (По твоему канону без прикрас):
+        // Сравнение идет СТРОГО враппер-к-врапперу. Любой чистый доменный объект или
+        // прокси другого типа гарантированно возвращает false, полностью защищая
+        // реактивный контур СУБД от утечек симметрии!
+        // =========================================================================
+        builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n");
+        builder.append("\t\tif (this == obj) return true;\r\n");
+        builder.append("\t\tif (obj == null) return false;\r\n\r\n");
+
+        // 1) Проверяем объект-параметр: является ли он IXdStorageIdObservableWrapper?
+        builder.append("\t\tif (obj instanceof ").append(IXdStorageIdObservableWrapper.class.getName()).append(") {\r\n");
+        // 1.1) Если да — вытаскиваем обёрнутый объект через Java Reflection и сравниваем через .equals()
+        builder.append("\t\t\ttry {\r\n");
+        builder.append("\t\t\t\tjava.lang.reflect.Field f__ = obj.getClass().getDeclaredField(\"object\");\r\n");
+        builder.append("\t\t\t\tf__.setAccessible(true);\r\n");
+        builder.append("\t\t\t\tObject otherInner__ = f__.get(obj);\r\n");
+        builder.append("\t\t\t\treturn this.object.equals(otherInner__);\r\n");
+        builder.append("\t\t\t} catch (Exception e__) {\r\n");
+        builder.append("\t\t\t\treturn false;\r\n");
+        builder.append("\t\t\t}\r\n");
+        builder.append("\t\t}\r\n\r\n");
+
+        // 1.2) Если нет — объекты ГАРАНТИРОВАННО не равны!
+        builder.append("\t\treturn false;\r\n");
+        builder.append("\t}\r\n");
+
         builder.append("\r\n\t@Override\r\n\tpublic String toString() {\r\n\t\treturn object.toString();\r\n\t}\r\n");
     }
 
