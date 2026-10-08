@@ -54,7 +54,7 @@ public class XdStorageServicesLocator {
     public void initFileConfiguration(final IXdStorage storage, final String folder, final int fragmentSize, FilesFormat format) {
         this.storage = storage;
         this.executor = Executors.newFixedThreadPool(15);
-        this.namingService = new XdStorageResourceNamingService(folder, "xml");
+        this.namingService = new XdStorageResourceNamingService(folder, format.name().toLowerCase());
         this.idGenerator = new XdStorageDefaultIdGenerator(this);
 //        this.ioFactory = new XdStorageDefaultIOFactory(this, idGenerator);
         this.ioFactory = XdStorageIOFactory.instanceIOFactory(this, idGenerator, format);

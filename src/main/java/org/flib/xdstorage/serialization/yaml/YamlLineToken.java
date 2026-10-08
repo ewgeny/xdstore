@@ -12,4 +12,14 @@ public class YamlLineToken {
         this.value = value;
         this.isListItem = isListItem;
     }
+
+    @Override
+    public String toString() {
+        return "YamlLineToken{" +
+                "level=" + level +
+                ", key='" + key + '\'' +
+                ", value='" + value + '\'' +
+                ", isListItem=" + isListItem +
+                '}';
+    }
 }

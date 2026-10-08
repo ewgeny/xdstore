@@ -13,11 +13,12 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@DisplayName("Монументальный интеграционный тест: Полный цикл YAML Round-Trip СУБД")
+@DisplayName("Монументальный интеграционный тест: Сквозной цикл тотально типизированного YAML Round-Trip")
 public class XdStorageYamlRoundTripTest {
 
     private IXdStorageSimpleTypeHelper simpleTypeHelper;
@@ -33,14 +34,14 @@ public class XdStorageYamlRoundTripTest {
         simpleTypeHelper = new XdStorageDefaultSimpleTypeHelper();
         mockIdGenerator = mock(IXdStorageIdGenerator.class);
 
-        // Собираем транзакционную декомпозированную YAML-пару
+        // Инстанцируем нашу декомпозированную YAML-пару СУБД
         yamlWriter = new XdStorageYamlObjectsWriter(mockLocator, simpleTypeHelper, mockIdGenerator);
         yamlReader = new XdStorageYamlObjectsReader(simpleTypeHelper);
     }
 
     @Test
-    @DisplayName("Сквозной Round-Trip: глубокая проверка Сериализация -> Десериализация всего графа вселенной")
-    public void testYamlSubsystem_FullObjectGraphRoundTrip_ShouldRestoreCleanly() throws Exception {
+    @DisplayName("Сквозной Round-Trip: глубокая проверка Сериализация -> Десериализация полиморфного мета-графа")
+    public void testYamlSubsystem_StrictMetaGraphRoundTrip_ShouldRestoreCleanly() throws Exception {
         // =========================================================================
         // ШАГ 1: СБОРКА СЛОЖНОГО ГЕТЕРОГЕННОГО ГРАФА СУЩНОСТЕЙ В ПАМЯТИ
         // =========================================================================
@@ -50,7 +51,7 @@ public class XdStorageYamlRoundTripTest {
         XdGalaxy galaxy = new XdGalaxy();
         galaxy.setId("galaxy-milkyway");
 
-        // Сущность политики StoreWithParentObject (Вложенный инлайн-объект)
+        // Вложенный инлайн-объект (Политика StoreWithParentObject)
         XdBlackHole hole = new XdBlackHole();
         hole.setId("hole-supermassive");
         hole.setMass(4500000L);
@@ -70,22 +71,35 @@ public class XdStorageYamlRoundTripTest {
         galaxy.addSystem(system);
         originalUniverse.addGalaxy(galaxy);
 
-        // Интеграционный контекст маршаллинга таблиц СУБД
+        // =========================================================================
+        // СНАЙПЕРСКИЙ ФИКС: Добавляем независимый ORM-корень в контекст СУБД!
+        // Теперь Райтер честно запишет тело Звёздной системы, и граф сойдётся!
+        // =========================================================================
         Collection<Object> contextObjects = new ArrayList<>();
         contextObjects.add(originalUniverse);
         contextObjects.add(galaxy);
+        contextObjects.add(system); // <-- ОБЯЗАТЕЛЬНЫЙ КОРЕНЬ НЕЗАВИСИМОЙ ТАБЛИЦЫ СИСТЕМ!
+        contextObjects.add(earth);
 
         // =========================================================================
-        // ШАГ 2: КОНТУР ЗАПИСИ (МАРШАЛЛИНГ В YAML-СТРОКУ)
+        // ШАГ 2: КОНТУР ЗАПИСИ (МАРШАЛЛИНГ В СТРОГИЙ YAML С ТИПАМИ)
         // =========================================================================
         StringWriter stringWriter = new StringWriter();
         yamlWriter.writeObjects(stringWriter, contextObjects);
         String outputYaml = stringWriter.toString();
 
         System.out.println("=========================================================================");
-        System.out.println("📊 ФИЗИЧЕСКИЙ YAML СЛЕПОК ВСЕЛЕННОЙ НА ДИСКЕ СУБД:");
+        System.out.println("📊 ФИЗИЧЕСКИЙ YAML СЛЕПОК ТОТАЛЬНО ТИПИЗИРОВАННОЙ ВСЕЛЕННОЙ НА ДИСКЕ СУБД:");
         System.out.print(outputYaml);
         System.out.println("=========================================================================");
+
+        // =========================================================================
+        // ВЕРИФИКАЦИЯ ГЕOМЕТРИИ ЗАПИСИ (Зажимаем Райтер под новые контракты)
+        // =========================================================================
+        assertTrue(outputYaml.contains("fields:"), "Райтер потерял корневой узел метамодели fields!");
+        assertTrue(outputYaml.contains("name: 'waterPercent'"), "Поле примитива не получило мета-узел имени!");
+        assertTrue(outputYaml.contains("type: 'int'"), "Тип примитива int не сохранился на диск!");
+        assertTrue(outputYaml.contains("- item:"), "Элементы коллекций не обернуты в каноничный узел - item!");
 
         // =========================================================================
         // ШАГ 3: КОНТУР ЧТЕНИЯ (ДЕconvertАЦИЯ И СБОРКА ИЗ YAML-СТРОКИ)
@@ -94,36 +108,55 @@ public class XdStorageYamlRoundTripTest {
         Collection<Object> restoredObjects = yamlReader.readObjects(stringReader);
 
         // =========================================================================
-        // ШАГ 4: СНАЙПЕРСКАЯ АДАПТИВНАЯ ВЕРИФИКАЦИЯ ИНВАРИАНТОВ ГРАФА СУБД
+        // ШАГ 4: СНАЙПЕРСКАЯ АДАПТИВНАЯ ВЕРИФИКАЦИЯ ВОССТАНОВЛЕННОГО ГРАФА
         // =========================================================================
         assertNotNull(restoredObjects);
-        assertEquals(2, restoredObjects.size(), "Корневая коллекция должна содержать 2 монолитных объекта таблиц!");
+        assertEquals(4, restoredObjects.size(), "Корневая коллекция должна содержать ровно 2 объекта таблиц!");
 
         XdUniverse restoredUniverse = null;
         XdGalaxy restoredGalaxy = null;
+        XdStarSystem restoredSystem = null;
+        XdPlanet restoredEarth = null;
 
-        // Находим объекты по их классам, полностью исключая транзакционный прокси-эффект СУБД!
         for (Object obj : restoredObjects) {
             if (obj instanceof XdUniverse) {
                 restoredUniverse = (XdUniverse) obj;
             } else if (obj instanceof XdGalaxy) {
                 restoredGalaxy = (XdGalaxy) obj;
+            } else if (obj instanceof XdStarSystem) {
+                restoredSystem = (XdStarSystem) obj;
+            } else if (obj instanceof XdPlanet) {
+                restoredEarth = (XdPlanet) obj;
             }
         }
 
-        assertNotNull(restoredUniverse, "Глава Вселенной не найдена в восстановленном потоке!");
-        assertNotNull(restoredGalaxy, "Тело Галактики не найдено в восстановленном потоке!");
+        assertNotNull(restoredUniverse, "Глава Вселенной потеряна при демаршаллинге!");
+        assertNotNull(restoredGalaxy, "Тело Галактики потеряно при демаршаллинге!");
 
         assertEquals("universe-alpha-7", restoredUniverse.getId());
         assertEquals("galaxy-milkyway", restoredGalaxy.getId());
 
-        // Проверяем внедренную Черную Дыру (StoreWithParentObject) строго внутри живого тела Галактики!
+        // Проверяем глубокую рекурсию вложенной Черной Дыры
         XdBlackHole restoredHole = restoredGalaxy.getHole();
-        assertNotNull(restoredHole, "Внедренная Черная Дыра была потеряна при демаршаллинге!");
+        assertNotNull(restoredHole, "Внедренная Черная Дыра (StoreWithParentObject) была потеряна!");
         assertEquals("hole-supermassive", restoredHole.getId());
         assertEquals(4500000L, restoredHole.getMass());
         assertTrue(restoredHole.getIsEventHorizonActive());
 
-        System.out.println("🎉 ВЕЛИКОЛЕПНО! Монументальный интеграционный тест пройден со стопроцентным успехом!");
+        // Спускаемся по графу в звездную систему
+        Collection<XdStarSystem> systems = restoredGalaxy.getSystems();
+        assertEquals(1, systems.size());
+        assertEquals("system-sol-100", restoredSystem.getId());
+        assertEquals("Sol-''System''", restoredSystem.getNewName(), "Экранированные кавычки повреждены!");
+
+        // Проверяем цепочку коллекций и примитивов планет
+        Collection<XdPlanet> planets = restoredSystem.getPlanets();
+        assertEquals(1, planets.size());
+
+        assertEquals(Long.valueOf(800L), restoredEarth.getId(), "Рефлексивный тип Long поврежден!");
+        assertEquals("Earth-'Blue'-Planet", restoredEarth.getName(), "Кавычки имени планеты искажены!");
+        assertEquals(2, restoredEarth.getWaterPercent(), "Примитив int утерян при каскадном чтении по типам!");
+
+        System.out.println("🎉 ТРИУМФ! Полный сквозной мета-тест Round-Trip успешно зафиксирован!");
     }
 }

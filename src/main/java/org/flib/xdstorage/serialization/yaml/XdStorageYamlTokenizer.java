@@ -107,7 +107,7 @@ public class XdStorageYamlTokenizer {
         // Распаковка одинарных кавычек по твоему алгоритму без прикрас
         if (rawValue.startsWith("'") && rawValue.endsWith("'") && rawValue.length() >= 2) {
             String content = rawValue.substring(1, rawValue.length() - 1);
-            return content.replace("''", "'");
+            return content.replaceAll("''", "'");
         }
         return rawValue;
     }

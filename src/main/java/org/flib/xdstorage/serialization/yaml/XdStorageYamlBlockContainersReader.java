@@ -8,17 +8,14 @@ import java.util.Map;
 
 /**
  * Выделенный stateless-компонент для разбора Java Collections, Maps и Enums.
- * Полностью универсален, работает динамически через рефлексию без хардкода констант.
+ * Извлекает элементы строго из объектной структуры - item: и entry: key/value.
  */
 public class XdStorageYamlBlockContainersReader {
 
     public static Object readEnum(final XdStorageYamlTokenizer tokenizer) throws Exception {
-        tokenizer.nextToken(); // Потребляем 'enum:'
-
         String className = null;
         String enumValue = null;
 
-        // Динамический разбор свойств энума с защитой от изменения порядка строк Райтера
         YamlLineToken token;
         while ((token = tokenizer.peekToken()) != null) {
             if (!"class".equals(token.key) && !"value".equals(token.key)) {
@@ -52,29 +49,21 @@ public class XdStorageYamlBlockContainersReader {
         YamlLineToken token;
         while ((token = tokenizer.peekToken()) != null) {
             if (token.level <= parentLevel) break;
-            token = tokenizer.nextToken();
 
-            Object tmp = null;
-            if (token.isListItem) {
-                if ("null".equals(token.key)) {
-                    tmp = null;
-                } else if ("object".equals(token.key)) {
-                    tmp = XdStorageYamlBlockObjectsReader.readObject(tokenizer, token.level, simpleTypeHelper);
-                } else if ("reference".equals(token.key)) {
-                    tmp = XdStorageYamlBlockObjectsReader.readReference(tokenizer, token.level, null, simpleTypeHelper);
-                } else {
-                    tmp = token.value != null ? token.value : token.key;
-                }
-            } else if (token.value != null) {
-                tmp = token.value;
+            if (token.isListItem && "item".equals(token.key)) {
+                token = tokenizer.nextToken(); // Потребляем токен '- item:'
+                Object itemValue = readTypedNode(tokenizer, token.level, simpleTypeHelper);
+                collection.add(itemValue);
+            } else {
+                tokenizer.nextToken();
             }
-            collection.add(tmp);
         }
         return collection;
     }
 
     @SuppressWarnings("unchecked")
-    public static Object readMap(final XdStorageYamlTokenizer tokenizer, final int parentLevel) throws Exception {
+    public static Object readMap(final XdStorageYamlTokenizer tokenizer, IXdStorageSimpleTypeHelper simpleTypeHelper,
+                                 final int parentLevel) throws Exception {
         YamlLineToken classToken = tokenizer.nextToken();
         if (classToken == null || !"class".equals(classToken.key)) {
             return null;
@@ -88,13 +77,26 @@ public class XdStorageYamlBlockContainersReader {
             if (token.level <= parentLevel) break;
 
             if (token.isListItem && "entry".equals(token.key)) {
-                tokenizer.nextToken(); // Потребляем токен '- entry:'
+                token = tokenizer.nextToken(); // Потребляем токен '- entry:'
 
-                tokenizer.nextToken(); // Потребляем токен 'key:'
-                Object keyObj = readMapComponent(tokenizer, token.level + 1);
+                int entryLevel = token.level;
+                Object keyObj = null;
+                Object valObj = null;
 
-                tokenizer.nextToken(); // Потребляем токен 'value:'
-                Object valObj = readMapComponent(tokenizer, token.level + 1);
+                YamlLineToken sub;
+                while ((sub = tokenizer.peekToken()) != null) {
+                    if (sub.level <= entryLevel) break;
+
+                    if ("key".equals(sub.key)) {
+                        tokenizer.nextToken(); // Потребляем 'key:'
+                        keyObj = readTypedNode(tokenizer, sub.level, simpleTypeHelper);
+                    } else if ("value".equals(sub.key)) {
+                        tokenizer.nextToken(); // Потребляем 'value:'
+                        valObj = readTypedNode(tokenizer, sub.level, simpleTypeHelper);
+                    } else {
+                        tokenizer.nextToken();
+                    }
+                }
 
                 if (keyObj != null) {
                     map.put(keyObj, valObj);
@@ -106,73 +108,89 @@ public class XdStorageYamlBlockContainersReader {
         return map;
     }
 
-    @SuppressWarnings("unchecked")
-    public static Object readObjectDataCollection(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
-        YamlLineToken classToken = tokenizer.nextToken();
-        if (classToken == null || !"class".equals(classToken.key)) {
-            return null;
-        }
-
-        Class<?> cl = Class.forName(classToken.value);
-        Collection<Object> collection = (Collection<Object>) cl.newInstance();
+    private static Object readTypedNode(final XdStorageYamlTokenizer tokenizer, final int parentLevel,
+                                        final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
+        String typeName = null;
+        String rawScalar = null;
+        YamlLineToken complexBlock = null;
 
         YamlLineToken token;
         while ((token = tokenizer.peekToken()) != null) {
             if (token.level <= parentLevel) break;
+
+            // Ровно один честный вызов nextToken на итерацию цикла свойств!
             token = tokenizer.nextToken();
 
-            Object tmp = null;
-            if (token.isListItem) {
-                if ("null".equals(token.key)) {
-                    tmp = null;
-                } else if ("object".equals(token.key)) {
-                    tmp = XdStorageYamlBlockObjectsReader.readObjectData(tokenizer, token.level, simpleTypeHelper);
-                } else if ("reference".equals(token.key)) {
-                    tmp = XdStorageYamlBlockObjectsReader.readObjectDataReference(tokenizer, token.level);
+            if ("type".equals(token.key)) {
+                typeName = token.value;
+            } else if ("value".equals(token.key)) {
+                if (token.value != null) {
+                    // Случай А: Значение лежит на той же строчке (скаляр, например value: null)
+                    rawScalar = token.value;
                 } else {
-                    tmp = token.value != null ? token.value : token.key;
+                    // Случай Б: Значение разворачивается на следующей строке (сложный блок)
+                    YamlLineToken next = tokenizer.peekToken();
+                    if (next != null && next.level > token.level) {
+                        complexBlock = next;
+                        // =========================================================================
+                        // СНАЙПЕРСКИЙ БАРЬЕР: Немедленно прерываем цикл сбора свойств элемента списка!
+                        // Оставляем каретку токенизатора нетронутой прямо перед сложным блоком!
+                        // =========================================================================
+                        break;
+                    }
                 }
-            } else if (token.value != null) {
-                tmp = token.value;
             }
-            collection.add(tmp);
         }
-        return collection;
+
+        // Выполняем проверку строго ПОСЛЕ того, как цикл полностью освободил поток
+        if ("null".equals(typeName)) {
+            return null;
+        }
+
+        if (rawScalar != null && !"null".equals(rawScalar)) {
+            if (typeName != null) {
+                Class<?> targetType = Class.forName(normalizePrimitiveName(typeName));
+                if (targetType == Object.class) targetType = String.class;
+                return simpleTypeHelper.simpleTypeFromString(targetType, rawScalar);
+            }
+            return rawScalar;
+        }
+
+        if (complexBlock != null) {
+            if ("enum".equals(complexBlock.key)) {
+                tokenizer.nextToken(); // Потребляем 'enum:' перед входом
+                return readEnum(tokenizer);
+            } else if ("object".equals(complexBlock.key)) {
+                tokenizer.nextToken(); // Потребляем 'object:' перед входом
+                return XdStorageYamlBlockObjectsReader.readObject(tokenizer, complexBlock.level, simpleTypeHelper);
+            } else if ("reference".equals(complexBlock.key)) {
+                return XdStorageYamlBlockObjectsReader.readReference(tokenizer, complexBlock.level, null, simpleTypeHelper);
+            }
+        }
+
+        return null;
     }
 
     @SuppressWarnings("unchecked")
-    public static Object readObjectDataMap(final XdStorageYamlTokenizer tokenizer, final int parentLevel) throws Exception {
-        return readMap(tokenizer, parentLevel);
+    public static Object readObjectDataCollection(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
+        return readCollection(tokenizer, parentLevel, simpleTypeHelper);
     }
 
-    /**
-     * Универсальный адаптивный метод вычитки ключа или значения Map.
-     * Полностью очищен от хардкода, восстанавливает инстансы рефлексивно на лету.
-     */
-    private static Object readMapComponent(final XdStorageYamlTokenizer tokenizer, final int parentLevel) throws Exception {
-        YamlLineToken nextToken = tokenizer.peekToken();
-        if (nextToken == null) return null;
+    @SuppressWarnings("unchecked")
+    public static Object readObjectDataMap(final XdStorageYamlTokenizer tokenizer, IXdStorageSimpleTypeHelper simpleTypeHelper,
+                                           final int parentLevel) throws Exception {
+        return readMap(tokenizer, simpleTypeHelper, parentLevel);
+    }
 
-        // Если это плоский атомарный скаляр (например, строка в кавычках)
-        if (nextToken.value != null) {
-            YamlLineToken t = tokenizer.nextToken();
-            return "null".equals(t.value) ? null : t.value;
-        }
-
-        // Если это вложенный блок метаданных типа
-        if (nextToken.level > parentLevel - 1) {
-            if ("enum".equals(nextToken.key)) {
-                return readEnum(tokenizer);
-            } else if ("object".equals(nextToken.key)) {
-                tokenizer.nextToken(); // Потребляем 'object:'
-                return XdStorageYamlBlockObjectsReader.readObject(tokenizer, nextToken.level, new org.flib.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper());
-            } else if ("reference".equals(nextToken.key)) {
-                return XdStorageYamlBlockObjectsReader.readReference(tokenizer, nextToken.level, null, new org.flib.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper());
-            }
-        }
-
-        // Fail-safe фолбэк для пустых строк/ключей без двоеточий
-        YamlLineToken t = tokenizer.nextToken();
-        return t.key;
+    private static String normalizePrimitiveName(String name) {
+        if ("int".equals(name)) return "java.lang.Integer";
+        if ("long".equals(name)) return "java.lang.Long";
+        if ("boolean".equals(name)) return "java.lang.Boolean";
+        if ("byte".equals(name)) return "java.lang.Byte";
+        if ("short".equals(name)) return "java.lang.Short";
+        if ("float".equals(name)) return "java.lang.Float";
+        if ("double".equals(name)) return "java.lang.Double";
+        if ("char".equals(name)) return "java.lang.Character";
+        return name;
     }
 }

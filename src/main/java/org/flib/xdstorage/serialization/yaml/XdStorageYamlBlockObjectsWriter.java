@@ -19,6 +19,7 @@ import java.util.Map;
 
 /**
  * Изолированный рефлексивный маршаллер JavaBeans-сущностей и ORM-ссылок СУБД.
+ * Генерирует тотально типизированную структуру полей name/type/value.
  */
 public class XdStorageYamlBlockObjectsWriter {
 
@@ -39,6 +40,9 @@ public class XdStorageYamlBlockObjectsWriter {
         emitter.writeKey("class");
         emitter.writeScalar("'" + cl.getName() + "'");
 
+        // Открываем единый, строго структурированный узел для всех полей JavaBeans класса
+        emitter.openBlock("fields");
+
         for (final XdStorageObjectField property : props) {
             if (property.isIdField()) {
                 final XdStorageObjectIdField idField = clInfo.getIdField();
@@ -51,50 +55,70 @@ public class XdStorageYamlBlockObjectsWriter {
 
             final Object value = property.get(object);
             if (value == null) {
-                continue; // ПОЛНЫЙ ПРОПУСК NULL-ПОЛЕЙ (Вариант 2)
+                continue; // Полный пропуск null-свойств согласно инвариантам СУБД
             }
 
+            final Class<?> fieldType = property.getFieldInfo().getClazz();
             final Class<?> c = value.getClass();
 
+            // Открываем элемент списка мета-модели полей
+            emitter.openBlock("- field");
+            emitter.writeKey("name");
+            emitter.writeScalar("'" + property.getName() + "'");
+            emitter.writeKey("type");
+            emitter.writeScalar("'" + fieldType.getName() + "'");
+
+            // Запись контента уходит строго внутрь узла value:
             if (simpleTypeHelper.isSimpleType(c, value)) {
-                emitter.writeKey(property.getName());
+                emitter.writeKey("value");
                 emitter.writeScalar("'" + encode(simpleTypeHelper.simpleTypeToString(value)) + "'");
             } else if (c.isEnum()) {
-                XdStorageYamlBlockContainersWriter.writeEnum(property.getName(), c, value, emitter);
+                emitter.openBlock("value");
+                XdStorageYamlBlockContainersWriter.writeEnumInline(c, value, emitter);
+                emitter.closeBlock();
             } else if (value instanceof Collection<?>) {
-                XdStorageYamlBlockContainersWriter.writeCollection(property.getName(), c, (Collection<?>) value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.openBlock("value");
+                XdStorageYamlBlockContainersWriter.writeCollectionInline(c, (Collection<?>) value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.closeBlock();
             } else if (value instanceof Map<?, ?>) {
-                XdStorageYamlBlockContainersWriter.writeMap(property.getName(), c, (Map<?, ?>) value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.openBlock("value");
+                XdStorageYamlBlockContainersWriter.writeMapInline(c, (Map<?, ?>) value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.closeBlock();
             } else {
-                writeSingleObjectOrReference(property.getName(), c, value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.openBlock("value");
+                writeSingleObjectOrReferenceInline(c, value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.closeBlock();
             }
+
+            emitter.closeBlock(); // Закрываем "- field"
         }
+
+        emitter.closeBlock(); // Закрываем "fields"
     }
 
-    public static void writeSingleObjectOrReference(final String propertyName, final Class<?> cl, final Object value,
-                                                    final XdStorageYamlEmitter emitter,
-                                                    final XdStorageServicesLocator services,
-                                                    final IXdStorageSimpleTypeHelper simpleTypeHelper,
-                                                    final IXdStorageIdGenerator idGenerator) throws IOException, XdStorageException {
+    public static void writeSingleObjectOrReferenceInline(final Class<?> cl, final Object value,
+                                                          final XdStorageYamlEmitter emitter,
+                                                          final XdStorageServicesLocator services,
+                                                          final IXdStorageSimpleTypeHelper simpleTypeHelper,
+                                                          final IXdStorageIdGenerator idGenerator) throws IOException, XdStorageException {
         final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(cl);
         final XdStorageClassInfo targetClInfo = XdStorageObjectUtils.getClassInfo(entityClass);
         final XdStoragePolicy policy = targetClInfo.getPolicy();
 
         if (policy == null || policy == XdStoragePolicy.StoreWithParentObject) {
-            emitter.openBlock(propertyName);
-            emitter.openBlock("- object");
+            emitter.openBlock("object");
             writeObjectData(value, emitter, services, simpleTypeHelper, idGenerator);
-            emitter.closeBlock();
             emitter.closeBlock();
         } else {
             final XdStorageObjectIdField targetIdField = targetClInfo.getIdField();
-            emitter.openBlock(propertyName);
             emitter.openBlock("reference");
             emitter.writeKey("class");
             emitter.writeScalar("'" + entityClass.getName() + "'");
-            emitter.writeKey("objectId");
-            emitter.writeScalar("'" + targetIdField.get(value).toString() + "'");
-            emitter.closeBlock();
+            Object targetId = targetIdField.get(value);
+            if (targetId != null) {
+                emitter.writeKey("objectId");
+                emitter.writeScalar("'" + targetId + "'");
+            }
             emitter.closeBlock();
         }
     }

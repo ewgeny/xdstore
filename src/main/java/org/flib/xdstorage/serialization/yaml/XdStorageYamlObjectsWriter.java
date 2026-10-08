@@ -11,8 +11,8 @@ import java.io.Writer;
 import java.util.Collection;
 
 /**
- * Высокоуровневый транзакционный диспетчер маршаллинга YAML.
- * Делегирует рефлексивный обход специализированным суб-компонентам.
+ * Главный фасад подсистемы маршаллинга СУБД.
+ * Строго реализует интерфейс IXdStorageObjectsWriter и координирует потоковую запись.
  */
 public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
 
@@ -31,17 +31,21 @@ public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
     @Override
     public void writeObjects(final Writer writer, final Collection<Object> objects) throws XdStorageIOException {
         try {
-            XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
+            final XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
+
             emitter.openBlock("objects");
 
-            for (final Object object : objects) {
-                if (object == null) continue;
+            for (final Object obj : objects) {
+                if (obj == null) continue;
+
+                // Корневой уровень СУБД всегда пишет полноценные тела агрегатов.
+                // Ссылочная ORM-политика применяется только при каскадном обходе свойств полей!
                 emitter.openBlock("- object");
-                XdStorageYamlBlockObjectsWriter.writeObjectData(object, emitter, services, simpleTypeHelper, idGenerator);
+                XdStorageYamlBlockObjectsWriter.writeObjectData(obj, emitter, services, simpleTypeHelper, idGenerator);
                 emitter.closeBlock();
             }
 
-            emitter.closeBlock();
+            emitter.closeBlock(); // Закрываем "objects"
         } catch (final Throwable cause) {
             throw new XdStorageIOException(cause);
         }
@@ -50,17 +54,20 @@ public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
     @Override
     public void writeReferences(final Writer writer, final XdStorageObjectIdField field, final Collection<Object> references) throws XdStorageIOException {
         try {
-            XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
+            final XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
+
             emitter.openBlock("references");
 
-            for (final Object reference : references) {
-                if (reference == null) continue;
+            for (final Object ref : references) {
+                if (ref == null) continue;
+
+                // Контракт записи чистых транзакционных связей СУБД
                 emitter.openBlock("- reference");
-                XdStorageYamlBlockObjectsWriter.writeReferenceData(reference, field, emitter);
+                XdStorageYamlBlockObjectsWriter.writeReferenceData(ref, field, emitter);
                 emitter.closeBlock();
             }
 
-            emitter.closeBlock();
+            emitter.closeBlock(); // Закрываем "references"
         } catch (final Throwable cause) {
             throw new XdStorageIOException(cause);
         }

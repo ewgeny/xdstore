@@ -17,7 +17,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@DisplayName("Юнит-тесты: Декомпозированный маршаллер контейнеров YAML")
+@DisplayName("Юнит-тесты: Тотально типизированный маршаллер контейнеров YAML (Коллекции и Мапы)")
 public class XdStorageYamlBlockContainersWriterTest {
 
     private XdStorageServicesLocator mockLocator;
@@ -32,8 +32,8 @@ public class XdStorageYamlBlockContainersWriterTest {
     }
 
     @Test
-    @DisplayName("Маршаллинг коллекций: Сериализация списков со смешанными примитивами и null ячейками")
-    public void testWriteCollection_MixedElements_ShouldFormatStrictList() throws Exception {
+    @DisplayName("Кейс 1: Маршаллинг коллекций — Сериализация списков в структуру - item: type/value с null ячейками")
+    public void testWriteCollection_MixedElements_ShouldFormatStrictItemsList() throws Exception {
         StringWriter writer = new StringWriter();
         XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
 
@@ -46,15 +46,23 @@ public class XdStorageYamlBlockContainersWriterTest {
         );
 
         String result = writer.toString();
+
         assertTrue(result.contains("planets:"));
-        assertTrue(result.contains("collection:"));
-        assertTrue(result.contains("- 'Mars'"));
-        assertTrue(result.contains("- null"), "Ячейка null в массиве обязана сохранить свой явный строковый маркер!");
+        assertTrue(result.contains("class: 'java.util.ArrayList'"));
+
+        // Верифицируем строгие объектные ячейки списка
+        assertTrue(result.contains("- item:"));
+        assertTrue(result.contains("type: 'java.lang.String'"));
+        assertTrue(result.contains("value: 'Mars'"));
+
+        // Верифицируем каноничный полиморфный маркер для null-элемента
+        assertTrue(result.contains("type: 'null'"));
+        assertTrue(result.contains("value: null"));
     }
 
     @Test
-    @DisplayName("Маршаллинг мап: Проверка сериализации плоских HashMap объектов")
-    public void testWriteMap_StandardHashMap_ShouldGenerateEntries() throws Exception {
+    @DisplayName("Кейс 2: Маршаллинг мап — Проверка генерации чистых структур entry -> key/value -> type/value")
+    public void testWriteMap_StandardHashMap_ShouldGenerateStrictObjects() throws Exception {
         StringWriter writer = new StringWriter();
         XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
 
@@ -66,16 +74,19 @@ public class XdStorageYamlBlockContainersWriterTest {
         );
 
         String result = writer.toString();
+
         assertTrue(result.contains("metadata:"));
-        assertTrue(result.contains("map:"));
+        assertTrue(result.contains("class: 'java.util.HashMap'"));
         assertTrue(result.contains("- entry:"));
 
-        // =========================================================================
-        // СИНТАКСИЧЕСКИЙ ФИКС ТЕСТА: Проверяем новые плоские, чистые пары ключ-значение
-        // без паразитных дефисов и многострочных переносов рассинхронизации!
-        // =========================================================================
-        assertTrue(result.contains("key: 'sector'"));
+        // Проверяем, что узел key имеет строгое разделение на тип и значение
+        assertTrue(result.contains("key:"));
+        assertTrue(result.contains("type: 'java.lang.String'"));
+        assertTrue(result.contains("value: 'sector'"));
+
+        // Проверяем то же самое для узла value
+        assertTrue(result.contains("value:"));
+        assertTrue(result.contains("type: 'java.lang.String'"));
         assertTrue(result.contains("value: 'Sector-7G'"));
     }
-
 }

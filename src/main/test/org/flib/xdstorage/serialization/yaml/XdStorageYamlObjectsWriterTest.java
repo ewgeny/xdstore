@@ -35,7 +35,7 @@ public class XdStorageYamlObjectsWriterTest {
     }
 
     @Test
-    @DisplayName("Маршаллинг графа: проверка структуры YAML, табуляций и одинарных кавычек")
+    @DisplayName("Маршаллинг графа: проверка структуры YAML, табуляций и одинарных кавычек метамодели")
     public void testWriteObjects_ValidGraph_ShouldGenerateStrictYamlWithTabulations() throws Exception {
         StringWriter stringWriter = new StringWriter();
 
@@ -58,19 +58,28 @@ public class XdStorageYamlObjectsWriterTest {
 
         assertNotNull(resultYaml);
 
-        // Верифицируем маркеры блоков
+        // Верифицируем корневые маркеры блоков
         assertTrue(resultYaml.contains("objects:"));
         assertTrue(resultYaml.contains("- object:"));
-
-        // ПРАВКА АССЕРТOВ: Теперь проверяем наличие ОДИНАРНЫХ кавычек вместо двойных!
         assertTrue(resultYaml.contains("class: 'org.flib.xdstorage.entities.XdStarSystem'"));
-        assertTrue(resultYaml.contains("id: 'system-001'"));
-        assertTrue(resultYaml.contains("newName: 'Sol'"));
+
+        // =========================================================================
+        // ПРАВКА АССЕРТOВ ПОД МЕТАМOДЕЛЬ: Проверяем строгую иерархию полей
+        // =========================================================================
+        assertTrue(resultYaml.contains("fields:"));
+        assertTrue(resultYaml.contains("- field:"));
+        assertTrue(resultYaml.contains("name: 'id'"));
+        assertTrue(resultYaml.contains("type: 'java.lang.String'"));
+        assertTrue(resultYaml.contains("value: 'system-001'"));
+
+        assertTrue(resultYaml.contains("name: 'newName'"));
+        assertTrue(resultYaml.contains("type: 'java.lang.String'"));
+        assertTrue(resultYaml.contains("value: 'Sol'"));
 
         // Проверяем канонический пропуск null-полей (Вариант 2)
-        assertFalse(resultYaml.contains("satellite:"), "🚨 Ошибка: Поле со значением null попало в файл!");
+        assertFalse(resultYaml.contains("name: 'satellite'"), "🚨 Ошибка: Поле со значением null попало в файл!");
 
-        // Проверяем геометрию табуляций
-        assertTrue(resultYaml.contains("\t\tclass:"), "🚨 Нарушена геометрия табуляционных отступов!");
+        // Проверяем геометрию табуляций внутри структуры метамодели полей
+        assertTrue(resultYaml.contains("\t\t\t- field:"), "🚨 Нарушена геометрия табуляционных отступов полей!");
     }
 }

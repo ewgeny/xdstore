@@ -14,7 +14,7 @@ import java.io.StringWriter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@DisplayName("Юнит-тесты: Декомпозированный маршаллер объектов YAML")
+@DisplayName("Юнит-тесты: Тотально типизированный маршаллер объектов XdStorageYamlBlockObjectsWriter")
 public class XdStorageYamlBlockObjectsWriterTest {
 
     private XdStorageServicesLocator mockLocator;
@@ -29,28 +29,45 @@ public class XdStorageYamlBlockObjectsWriterTest {
     }
 
     @Test
-    @DisplayName("Экранирование кавычек: Одинарная кавычка обязана удваиваться при записи на диск")
+    @DisplayName("Кейс 1: Экранирование кавычек в строковых скалярах")
     public void testEncode_SingleQuote_ShouldBeDuplicated() {
         String dirtyValue = "Planet 'Omega'";
         String cleanValue = XdStorageYamlBlockObjectsWriter.encode(dirtyValue);
-        assertEquals("Planet ''Omega''", cleanValue, "Нарушен канонический инвариант YAML-экранирования!");
+        assertEquals("Planet ''Omega''", cleanValue, "Нарушен канонический инвариант YAML-экранирования кавычек!");
     }
 
     @Test
-    @DisplayName("Маршаллинг JavaBeans объектов: Проверка обхода свойств сущности")
-    public void testWriteObjectData_ValidEntity_ShouldWriteMetadataAndClass() throws Exception {
+    @DisplayName("Кейс 2: Маршаллинг JavaBeans — генерация строгой структуры name/type/value для полей")
+    public void testWriteObjectData_ValidEntity_ShouldGenerateStrictMetaStructure() throws Exception {
         StringWriter writer = new StringWriter();
         XdStorageYamlEmitter emitter = new XdStorageYamlEmitter(writer);
 
         XdPlanet planet = new XdPlanet();
         planet.setId(500L);
         planet.setName("Tatooine");
+        planet.setWaterPercent(0);
 
         XdStorageYamlBlockObjectsWriter.writeObjectData(planet, emitter, mockLocator, simpleTypeHelper, mockIdGenerator);
 
         String result = writer.toString();
+
+        // Проверяем метаданные самого класса
         assertTrue(result.contains("class: 'org.flib.xdstorage.entities.XdPlanet'"));
-        assertTrue(result.contains("id: '500'"));
-        assertTrue(result.contains("name: 'Tatooine'"));
+        assertTrue(result.contains("fields:"));
+
+        // =========================================================================
+        // СНАЙПЕРСКИЙ СИНТАКСИЧЕСКИЙ ФИКС: Все скалярные значения пишутся в кавычках!
+        // =========================================================================
+        assertTrue(result.contains("name: 'id'"));
+        assertTrue(result.contains("type: 'java.lang.Long'"));
+        assertTrue(result.contains("value: '500'")); // Добавлены кавычки
+
+        assertTrue(result.contains("name: 'name'"));
+        assertTrue(result.contains("type: 'java.lang.String'"));
+        assertTrue(result.contains("value: 'Tatooine'"));
+
+        assertTrue(result.contains("name: 'waterPercent'"));
+        assertTrue(result.contains("type: 'int'"));
+        assertTrue(result.contains("value: '0'")); // Добавлены кавычки
     }
 }
