@@ -107,11 +107,12 @@ public class XdStorageReadWriteLock {
 
     public void lockWrite(final IXdStorageTransaction transaction) throws InterruptedException {
         long timeout = transaction != null ? transaction.getTimeout() : 5000;
-        long startTime = System.currentTimeMillis();
+        timeout *= 1_000_000;
+        long startTime = System.nanoTime();
         long sleepStep = 15;
 
         while (!tryLockWrite()) {
-            long elapsed = System.currentTimeMillis() - startTime;
+            long elapsed = System.nanoTime() - startTime;
             if (elapsed >= timeout) {
                 throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс монопольно занят на запись другим потоком. Превышен таймаут ожидания: " + timeout + " мс");
             }
@@ -121,11 +122,12 @@ public class XdStorageReadWriteLock {
 
     public void lockRead(final IXdStorageTransaction transaction) throws InterruptedException {
         long timeout = transaction != null ? transaction.getTimeout() : 5000;
-        long startTime = System.currentTimeMillis();
+        timeout *= 1_000_000;
+        long startTime = System.nanoTime();
         long sleepStep = 15;
 
         while (!tryLockRead()) {
-            long elapsed = System.currentTimeMillis() - startTime;
+            long elapsed = System.nanoTime() - startTime;
             if (elapsed >= timeout) {
                 throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс занят на чтение другим потоком. Превышен таймаут ожидания: " + timeout + " мс");
             }

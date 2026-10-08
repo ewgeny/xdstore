@@ -132,7 +132,7 @@ public class XdStorageResourceCacheTest {
         resourceCache.commit(tx1);
 
         // Новая транзакция чтения с актуальным timestart
-        XdStorageTransaction tx2 = createMockTransaction("tx-reader-2", System.currentTimeMillis());
+        XdStorageTransaction tx2 = createMockTransaction("tx-reader-2", System.nanoTime());
         when(mockTxManager.isTransactionAlive(tx2)).thenReturn(true);
 
         Collection<TestEntity> tx2Read = resourceCache.read(tx2);
@@ -164,7 +164,7 @@ public class XdStorageResourceCacheTest {
     @DisplayName("Архитектурный тест: Если владелец блокировки мертв (isTransactionAlive == false), замок аннулируется")
     public void testCache_DeadTransactionOrphan_ShouldBeOverriddenByNextTransaction() throws Exception {
         XdStorageTransaction txDead = createMockTransaction("tx-dead-worker", 1000L);
-        XdStorageTransaction txClean = createMockTransaction("tx-clean-after-each", System.currentTimeMillis());
+        XdStorageTransaction txClean = createMockTransaction("tx-clean-after-each", System.nanoTime());
 
         // Менеджер транзакций сообщает: старый параллельный воркер МЕРТВ, а очистка — ЖИВА
         when(mockTxManager.isTransactionAlive(txDead)).thenReturn(false);

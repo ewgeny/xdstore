@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Изолированный рефлексивный маршаллер JavaBeans-сущностей и ORM-ссылок СУБД.
@@ -23,7 +24,7 @@ import java.util.Map;
  */
 public class XdStorageYamlBlockObjectsWriter {
 
-    private static final Map<Class<?>, Collection<XdStorageObjectField>> propertiesCache = new HashMap<>();
+    private static final Map<Class<?>, Collection<XdStorageObjectField>> propertiesCache = new ConcurrentHashMap<>();
 
     public static void writeObjectData(final Object object, final XdStorageYamlEmitter emitter,
                                        final XdStorageServicesLocator services,

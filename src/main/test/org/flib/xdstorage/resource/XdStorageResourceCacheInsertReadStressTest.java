@@ -155,7 +155,7 @@ public class XdStorageResourceCacheInsertReadStressTest {
 
                     for (int j = 0; j < operationsPerThread; j++) {
                         String txId = "tx-stress-" + threadIdx + "-" + j;
-                        XdStorageTransaction tx = createMockTransaction(txId, System.currentTimeMillis());
+                        XdStorageTransaction tx = createMockTransaction(txId, System.nanoTime());
 
                         if (threadIdx % 2 == 0) {
                             // Пишущие потоки: генерируют массовые уникальные вставки

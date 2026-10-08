@@ -19,12 +19,13 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
 
     private IXdStorageSimpleTypeHelper simpleTypeHelper;
 
-    private Map<Class<?>, Map<String, XdStorageObjectField>> properties = new HashMap<Class<?>, Map<String, XdStorageObjectField>>();
+    private final Map<Class<?>, Map<String, XdStorageObjectField>> properties = new ConcurrentHashMap<>();
 
     public XdStorageDefaultObjectsReader(final IXdStorageSimpleTypeHelper simpleTypeHelper) {
         this.simpleTypeHelper = simpleTypeHelper;

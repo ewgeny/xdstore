@@ -9,6 +9,7 @@ import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Изолированный рефлексивный парсер JavaBeans-сущностей и ORM-ссылок СУБД.
@@ -16,7 +17,7 @@ import java.util.Map;
  */
 public class XdStorageYamlBlockObjectsReader {
 
-    private static final Map<Class<?>, Map<String, XdStorageObjectField>> propertiesCache = new HashMap<>();
+    private static final Map<Class<?>, Map<String, XdStorageObjectField>> propertiesCache = new ConcurrentHashMap<>();
 
     public static Object readObject(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         YamlLineToken token = tokenizer.peekToken();

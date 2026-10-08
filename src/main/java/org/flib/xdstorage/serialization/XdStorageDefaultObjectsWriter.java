@@ -19,6 +19,7 @@ import java.lang.reflect.Array;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
 
@@ -28,7 +29,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
 
     private final IXdStorageIdGenerator idGenerator;
 
-    private Map<Class<?>, Collection<XdStorageObjectField>> properties = new HashMap<>();
+    private final Map<Class<?>, Collection<XdStorageObjectField>> properties = new ConcurrentHashMap<>();
 
     public XdStorageDefaultObjectsWriter(final XdStorageServicesLocator services, final IXdStorageSimpleTypeHelper simpleTypeHelper, final IXdStorageIdGenerator idGenerator) {
         this.services = services;

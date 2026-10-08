@@ -89,7 +89,7 @@ public class XdStorageResourceCache {
         for (final T object : objects) {
             final Object objectId = field.get(object);
             final Object clonedObject = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-            tmpReadObjects.putIfAbsent(objectId, new ObjectChange(clonedObject, Change.read, System.currentTimeMillis()));
+            tmpReadObjects.putIfAbsent(objectId, new ObjectChange(clonedObject, Change.read, System.nanoTime()));
             result.add((T) tmpReadObjects.get(objectId).object);
             cache.putIfAbsent(field.get(object), createReadRecord(object));
         }
@@ -191,7 +191,7 @@ public class XdStorageResourceCache {
                         final Object objectId = field.get(object);
                         if (!readObjects.containsKey(objectId)) {
                             Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.currentTimeMillis()));
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
                         }
                         Object objectToReturn = readObjects.get(objectId).object;
 
@@ -391,7 +391,7 @@ public class XdStorageResourceCache {
                 synchronized (result) {
                     synchronized (record) {
                         if (!readObjects.containsKey(objectId)) {
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.currentTimeMillis()));
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
                         }
                     }
                     result.add((T) readObjects.get(objectId).object);
@@ -514,7 +514,7 @@ public class XdStorageResourceCache {
             }
 
             if (object != null) {
-                readObjects.putIfAbsent(id, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.currentTimeMillis()));
+                readObjects.putIfAbsent(id, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
                 return readObjects.get(id).object;
             }
         }
@@ -574,7 +574,7 @@ public class XdStorageResourceCache {
                     cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
                 } else {
                     cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
-                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.currentTimeMillis()));   // reading by reference - only last read object is cached for this transaction
+                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));   // reading by reference - only last read object is cached for this transaction
                 }
                 return;
             }
@@ -1376,10 +1376,10 @@ public class XdStorageResourceCache {
                             }
 
                             final Long startTime = blockingTime.remove(transactionId);
-                            final Long currentTime = System.currentTimeMillis();
+                            final Long currentTime = System.nanoTime();
                             if (startTime == null) {
                                 blockingTime.put(transactionId, currentTime);
-                            } else if ( (currentTime - startTime) >= transaction.getTimeout() ) {
+                            } else if ( (currentTime - startTime) >= transaction.getTimeout() * 1_000_000 ) {
                                 throw new XdStorageException("transaction " + transactionId + " should be rolled back by timeout. Object with id " + id + " is locked for " + change);
                             } else {
                                 blockingTime.put(transactionId, startTime);
@@ -1428,7 +1428,7 @@ public class XdStorageResourceCache {
             firstPhaseCommit = false;
             secondPhaseCommit = false;
 
-            this.timestamp = System.currentTimeMillis();
+            this.timestamp = System.nanoTime();
         }
 
         public void rollback() {
