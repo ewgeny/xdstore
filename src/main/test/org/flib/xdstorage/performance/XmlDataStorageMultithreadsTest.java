@@ -356,7 +356,7 @@ public class XmlDataStorageMultithreadsTest {
 
         Assertions.assertNull(ex);
 
-        final Throwable[] exThread = new Throwable[]{null};
+        final List<Throwable> exThread = new ArrayList<>();
         final AtomicInteger countThreads = new AtomicInteger(20);
 
         final Random rand = new Random(System.nanoTime());
@@ -371,7 +371,7 @@ public class XmlDataStorageMultithreadsTest {
                         operations[Math.abs(opindex)].run();
                     } catch (final Throwable e) {
                         log.info("error", e);
-                        exThread[0] = e;
+                        exThread.add(e);
                     }
                     synchronized (countThreads) {
                         countThreads.decrementAndGet();
@@ -393,10 +393,8 @@ public class XmlDataStorageMultithreadsTest {
             while (countThreads.intValue() > 0) {
                 try {
                     countThreads.wait(100);
-                    if (exThread[0] != null) {
-                        exThread[0].printStackTrace(System.err);
-                    }
-                    Assertions.assertNull(exThread[0]);
+                    exThread.forEach(e -> e.printStackTrace(System.err));
+                    Assertions.assertTrue(exThread.isEmpty());
                     log.info("FileStorage multithreads test: active threads = " + countThreads.get());
                 } catch (InterruptedException e) {
                     // do nothing

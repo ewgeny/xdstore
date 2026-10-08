@@ -1,5 +1,7 @@
-package org.flib.xdstorage;
+package org.flib.xdstorage.serialization;
 
+import org.flib.xdstorage.IXdFileStorage;
+import org.flib.xdstorage.XdStorageProvider;
 import org.flib.xdstorage.entities.map.EnumFieldObject;
 import org.flib.xdstorage.entities.map.EnumMapKeyObject;
 import org.flib.xdstorage.entities.map.TestEnum;

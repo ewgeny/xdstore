@@ -44,8 +44,10 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
                         }
                         break;
                 }
-                if (tmp != null)
+                if (tmp != null) {
                     result.add(tmp);
+                    tmp = null;
+                }
             }
         } catch (final Throwable cause) { // stupid quick solution
             throw new XdStorageIOException(cause);

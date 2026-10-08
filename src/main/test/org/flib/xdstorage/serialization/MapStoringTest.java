@@ -1,5 +1,7 @@
-package org.flib.xdstorage;
+package org.flib.xdstorage.serialization;
 
+import org.flib.xdstorage.IXdFileStorage;
+import org.flib.xdstorage.XdStorageProvider;
 import org.flib.xdstorage.entities.map.ObjectsMapObject;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;

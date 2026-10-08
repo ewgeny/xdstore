@@ -10,11 +10,31 @@ public class XdBlackHole {
     @XdStorageObjectId
     private String id;
 
+    private long mass;
+
+    private boolean isEventHorizonActive;
+
     public String getId() {
         return id;
     }
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public long getMass() {
+        return mass;
+    }
+
+    public void setMass(long mass) {
+        this.mass = mass;
+    }
+
+    public boolean getIsEventHorizonActive() {
+        return isEventHorizonActive;
+    }
+
+    public void setIsEventHorizonActive(boolean eventHorizonActive) {
+        isEventHorizonActive = eventHorizonActive;
     }
 }
