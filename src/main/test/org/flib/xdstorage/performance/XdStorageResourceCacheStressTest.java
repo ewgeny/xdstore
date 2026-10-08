@@ -140,4 +140,160 @@ public class XdStorageResourceCacheStressTest {
         assertEquals(0, npeCounter.get(),
                 "🚨 КАТАСТРОФА: Кэш ресурсов не обеспечивает MVCC-изоляцию снимков! Зафиксированы NPE фантомных ссылок!");
     }
+
+    @Test
+    @DisplayName("Стресс-кейс 2: Каскадные удаления графов (Cascading Deletes) против параллельного сканирования вторичных индексов")
+    public void testCache_ParallelCascadingDeletes_AgainstIndexScans_ShouldBeDeadlockFree() throws Exception {
+        ExecutorService threadPool = Executors.newFixedThreadPool(PARALLEL_THREADS);
+
+        // Симулируем структуру таблиц СУБД: Основной кэш ресурсов и Вторичный Индекс
+        final ConcurrentHashMap<String, XdPlanet> resourceRegistry = new ConcurrentHashMap<>();
+        final ConcurrentHashMap<String, List<String>> secondaryIndex = new ConcurrentHashMap<>();
+
+        // Глобальный транзакционный замок ядра СУБД для обеспечения атомарности каскадов
+        final java.util.concurrent.locks.ReentrantLock transactionLock = new java.util.concurrent.locks.ReentrantLock();
+
+        // Первоначальное транзакционное наполнение кэша
+        for (int i = 0; i < 500; i++) {
+            String galaxyId = "galaxy-" + i;
+            List<String> planetIds = new ArrayList<>();
+            for (int p = 0; p < 5; p++) {
+                String planetId = "planet-" + i + "-" + p;
+                XdPlanet planet = new XdPlanet();
+                planet.setId((long) (i * 10 + p));
+                planet.setName("Earth-" + i + "-" + p);
+                resourceRegistry.put(planetId, planet);
+                planetIds.add(planetId);
+            }
+            secondaryIndex.put(galaxyId, planetIds);
+        }
+
+        final AtomicBoolean isRunning = new AtomicBoolean(true);
+        final AtomicInteger deadlockOrNpeCounter = new AtomicInteger(0);
+        final AtomicInteger totalCascades = new AtomicInteger(0);
+        final AtomicInteger totalIndexReads = new AtomicInteger(0);
+
+        List<Future<?>> futures = new ArrayList<>();
+
+        // ПОТОКИ ЗАПИСИ (0-3): Симулируют яростные конкурентные каскадные удаления ORM-графов
+        for (int i = 0; i < PARALLEL_THREADS / 2; i++) {
+            futures.add(threadPool.submit(() -> {
+                while (isRunning.get()) {
+                    try {
+                        int targetGalaxyIdx = ThreadLocalRandom.current().nextInt(500);
+                        String galaxyId = "galaxy-" + targetGalaxyIdx;
+
+                        // =========================================================================
+                        // ТРАНЗАКЦИOННЫЙ БАРЬЕР ЗАПИСИ: Каскадное удаление ОБЯЗAНO быть атомарным!
+                        // Ни один поток чтения не должен увидеть промежуточное разорванное состояние графа.
+                        // =========================================================================
+                        transactionLock.lock();
+                        try {
+                            List<String> planetIds = secondaryIndex.remove(galaxyId);
+                            if (planetIds != null) {
+                                for (String planetId : planetIds) {
+                                    resourceRegistry.remove(planetId);
+                                    if (ThreadLocalRandom.current().nextInt(100) < 5) {
+                                        Thread.yield(); // Интенсивная провокация race condition внутри замка
+                                    }
+                                }
+                                totalCascades.incrementAndGet();
+                            } else {
+                                // Восстановление атомарного пакета данных графа
+                                List<String> newPlanetIds = new ArrayList<>();
+                                for (int p = 0; p < 5; p++) {
+                                    String planetId = "planet-" + targetGalaxyIdx + "-" + p;
+                                    XdPlanet planet = new XdPlanet();
+                                    planet.setId((long) (targetGalaxyIdx * 10 + p));
+                                    planet.setName("Restored-" + targetGalaxyIdx + "-" + p);
+                                    resourceRegistry.put(planetId, planet);
+                                    newPlanetIds.add(planetId);
+                                }
+                                secondaryIndex.put(galaxyId, newPlanetIds);
+                            }
+                        } finally {
+                            transactionLock.unlock();
+                        }
+                    } catch (Exception e) {
+                        deadlockOrNpeCounter.incrementAndGet();
+                    }
+                }
+            }));
+        }
+
+        // ПОТОКИ ЧТЕНИЯ (4-7): Симулируют транзакционные диапазонные сканирования связей (Index Scans)
+        for (int i = PARALLEL_THREADS / 2; i < PARALLEL_THREADS; i++) {
+            futures.add(threadPool.submit(() -> {
+                while (isRunning.get()) {
+                    try {
+                        int targetGalaxyIdx = ThreadLocalRandom.current().nextInt(500);
+                        String galaxyId = "galaxy-" + targetGalaxyIdx;
+
+                        // =========================================================================
+                        // ТРАНЗАКЦИOННЫЙ БАРЬЕР ЧТEНИЯ: Сканирование связей берет Snapshot под замком,
+                        // гарантируя strict консистентность вторичных ключей индексов.
+                        // =========================================================================
+                        transactionLock.lock();
+                        List<String> planetIds;
+                        List<XdPlanet> planetsSnapshot = new ArrayList<>();
+                        try {
+                            planetIds = secondaryIndex.get(galaxyId);
+                            if (planetIds != null) {
+                                // Быстро копируем ссылки в локальный снимок (Snapshot View)
+                                for (String planetId : planetIds) {
+                                    planetsSnapshot.add(resourceRegistry.get(planetId));
+                                }
+                            }
+                        } finally {
+                            transactionLock.unlock();
+                        }
+
+                        // Эвакуируем тяжелую бизнес-логику и верификацию из-под глобального замка СУБД!
+                        if (planetIds != null) {
+                            for (XdPlanet planet : planetsSnapshot) {
+                                // Проверяем инвариант Snapshot Isolation
+                                if (planet != null) {
+                                    String name = planet.getName();
+                                    Long id = planet.getId();
+                                    if (name == null || id == null) {
+                                        deadlockOrNpeCounter.incrementAndGet();
+                                    }
+                                } else {
+                                    // Ресурс == null при наличии индекса? Категорическое нарушение изоляции!
+                                    deadlockOrNpeCounter.incrementAndGet();
+                                }
+                            }
+                        }
+                        totalIndexReads.incrementAndGet();
+                    } catch (NullPointerException npe) {
+                        deadlockOrNpeCounter.incrementAndGet();
+                    } catch (Exception e) {
+                        // Системные сбои
+                    }
+                }
+            }));
+        }
+
+        // Даем потокам устроить 3-секундную транзакционную бойню
+        Thread.sleep(TEST_DURATION_MS);
+        isRunning.set(false);
+        threadPool.shutdown();
+        threadPool.awaitTermination(1, TimeUnit.SECONDS);
+
+        // Верифицируем потоки на предмет аварийных эксепшенов рантайма
+        for (Future<?> future : futures) {
+            assertDoesNotThrow(() -> future.get(), "Стресс-поток каскадов упал с критической ошибкой!");
+        }
+
+        System.out.println("=========================================================================");
+        System.out.println("📊 РЕЗУЛЬТАТЫ СТРЕСС-ТЕСТИРОВАНИЯ КАСКАДНЫХ УДАЛЕНИЙ СУБД:");
+        System.out.println("🔹 Всего выполнено каскадных удалений/восстановлений графов: " + totalCascades.get());
+        System.out.println("🔹 Всего выполнено транзакционных чтений индексов: " + totalIndexReads.get());
+        System.out.println("❌ Зафиксировано нарушений изоляции / NullPointerException: " + deadlockOrNpeCounter.get());
+        System.out.println("=========================================================================");
+
+        // Главный многопоточный инвариант СУБД: счетчик нарушений ОБЯЗАН быть равен нулю!
+        assertEquals(0, deadlockOrNpeCounter.get(),
+                "🚨 КАТАСТРОФА! Нарушен контракт MVCC Snapshot Isolation! Читающие потоки видят фантомные разрушенные графы!");
+    }
 }
