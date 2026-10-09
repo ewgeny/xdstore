@@ -287,8 +287,7 @@ public abstract class XdStorageAbstractResourcesManager {
         final Object resourceId = factory.getResourceId();
 
         // Гарантируем атомарное создание счетчика локов без synchronized барьеров
-        locks.computeIfAbsent(resourceId, k -> new AtomicLong(0));
-        final AtomicLong counter = locks.get(resourceId);
+        final AtomicLong counter = locks.computeIfAbsent(resourceId, k -> new AtomicLong(0));
 
         // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Полностью ликвидируем опасный synchronized(counter)!
         // Используем атомарный метод computeIfAbsent на ConcurrentHashMap для создания ресурса.

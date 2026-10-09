@@ -1,12 +1,16 @@
-package org.flib.xdstorage.resource;
+package org.flib.xdstorage.performance;
 
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.IXdStoragePredicate;
+import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.factories.IXdStorageCloner;
+import org.flib.xdstorage.resource.IXdStorageResourceObject;
+import org.flib.xdstorage.resource.XdStorageResourceCache;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
+import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,9 +48,18 @@ public class XdStorageResourceCacheInsertReadStressTest {
             this.id = id;
             this.value = value;
         }
-        public Long getId() { return id; }
-        public String getValue() { return value; }
-        public void setValue(String value) { this.value = value; }
+
+        public Long getId() {
+            return id;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(String value) {
+            this.value = value;
+        }
     }
 
     @BeforeEach
@@ -93,7 +106,9 @@ public class XdStorageResourceCacheInsertReadStressTest {
             }
 
             @Override
-            public XdStorageTransaction getCurrentTransaction() { return null; }
+            public XdStorageTransaction getCurrentTransaction() {
+                return null;
+            }
 
             @Override
             public boolean isTransactionAlive(IXdStorageTransaction transaction) {
@@ -152,11 +167,14 @@ public class XdStorageResourceCacheInsertReadStressTest {
             pool.submit(() -> {
                 try {
                     startLatch.await(); // Одновременный старт всех потоков-воркеров
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
 
-                    for (int j = 0; j < operationsPerThread; j++) {
-                        String txId = "tx-stress-" + threadIdx + "-" + j;
-                        XdStorageTransaction tx = createMockTransaction(txId, System.nanoTime());
-
+                for (int j = 0; j < operationsPerThread; j++) {
+                    String txId = "tx-stress-" + threadIdx + "-" + j;
+                    XdStorageTransaction tx = createMockTransaction(txId, System.nanoTime());
+                    try {
                         if (threadIdx % 2 == 0) {
                             // Пишущие потоки: генерируют массовые уникальные вставки
                             int currentId = idGenerator.incrementAndGet();
@@ -173,12 +191,23 @@ public class XdStorageResourceCacheInsertReadStressTest {
                         }
 
                         // Снимаем нагрузку очисткой транзакции
-                        resourceCache.clear(tx);
+//                        resourceCache.clear(tx);
+                        XdStorageTransactionResourceChanges collector = new XdStorageTransactionResourceChanges(
+                                mock(IXdStorageResourceObject.class)
+                        );
+                        resourceCache.prepareCommit(tx, collector);
+                        resourceCache.performCommit(tx, collector);
+                        resourceCache.commit(tx);
+                    } catch (Throwable e) {
+                        exceptions.add(e);
+                        try {
+                            resourceCache.rollback(tx);
+                        } catch (XdStorageException ex) {
+                            throw new RuntimeException(ex);
+                        }
+                    } finally {
+                        finishLatch.countDown();
                     }
-                } catch (Throwable e) {
-                    exceptions.add(e);
-                } finally {
-                    finishLatch.countDown();
                 }
             });
         }
