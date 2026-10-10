@@ -202,7 +202,7 @@ public class XdStorageResourceCache {
                     final Object objectId = field.get(object);
                     if (!readObjects.containsKey(objectId)) {
                         Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                        readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.currentTimeMillis()));
+                        readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
                     }
                     Object objectToReturn = readObjects.get(objectId).object;
 
@@ -567,43 +567,47 @@ public class XdStorageResourceCache {
         if (objectId == null) {
             return;
         }
-        CacheRecord record = cache.get(objectId);
-        if (record != null) {
-            Object object = null;
-            if (record.isUpdateChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                } else {
-                    object = record.getObject();
-                }
-            } else if (record.isInsertChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                }
-            } else if (record.isDeleteChange()) {
-                if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                    object = record.getObject();
-                }
-            } else {
-                object = record.getObject();
-            }
 
-            if (object != null) {
-                // TODO check safety of this operation - reference must be one in context of transaction
-                if (readObjects.containsKey(objectId)) {
-                    final ObjectChange readObject = readObjects.get(objectId);
-                    cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
+        CacheRecord record = cache.get(objectId);
+        Object object = null;
+
+        if (record != null) {
+            synchronized (record) {
+                if (record.isUpdateChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else {
+                        object = record.getObject();
+                    }
+                } else if (record.isInsertChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    }
+                } else if (record.isDeleteChange()) {
+                    if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
+                        object = record.getObject();
+                    }
                 } else {
-                    cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
-                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));   // reading by reference - only last read object is cached for this transaction
+                    object = record.getObject();
                 }
-                return;
             }
         }
+
+        if (object != null) {
+            if (readObjects.containsKey(objectId)) {
+                final ObjectChange readObject = readObjects.get(objectId);
+                cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
+            } else {
+                cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
+                readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
+            }
+            return;
+        }
+
         throw new XdStorageException("cannot load by reference object of " + reference.getClass() + " with idgeneration " + field.get(reference));
     }
 
