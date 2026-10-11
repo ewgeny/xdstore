@@ -248,10 +248,6 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
     }
 
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
-        // Гарантируем fail-safe отпуск ReentrantLock замка индекса при аварийном откате
-        if (((ReentrantLock) lock).isHeldByCurrentThread()) {
-            lock.unlock();
-        }
         cache.rollback(transaction);
     }
 
@@ -457,17 +453,8 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
 
         final List<Object> result = tree.find((Comparable) objectId, storage, transaction);
         final Object resourceId = result.isEmpty() ? null : result.get(0);
-
-        // =========================================================================
-        // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Финал дефекта каскадной очистки!):
-        // Если при удалении ключа из дерева первичных индексов id_index запись не найдена
-        // (resourceId == null), это означает, что запись УЖЕ была успешно удалена
-        // на предыдущей итерации очистки хранилища!
-        // Категорически ЗАПРЕЩАЕМ выбрасывать деструктивный Exception, возвращая
-        // тихое fail-safe управление. Это сохраняет транзакцию сессии идеально чистой!
-        // =========================================================================
         if (resourceId == null) {
-            return;
+            throw new XdStorageException("object of class " + object.getClass() + " with idgeneration " + objectId + " does not exists");
         }
 
         final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);

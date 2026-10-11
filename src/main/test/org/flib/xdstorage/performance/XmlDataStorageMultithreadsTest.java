@@ -119,7 +119,7 @@ public class XmlDataStorageMultithreadsTest {
     @BeforeAll
     public static void initStorage() {
         deleteDir(new File("./teststorage"));
-        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 250);
+        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 200);
     }
 
     @AfterAll
@@ -144,7 +144,6 @@ public class XmlDataStorageMultithreadsTest {
 
                 Collection<XdGalaxy> galaxies = universe.getGalaxies();
                 storage.load(galaxies, localTx);
-                System.out.println("-> LOADED GALAXIES: " + galaxies.size());
 
                 for (XdGalaxy galaxyRef : galaxies) {
                     // АКТИВАЦИЯ ССЫЛКИ: Загружаем полноценный объект галактики, чтобы поднять её свойства
@@ -153,27 +152,26 @@ public class XmlDataStorageMultithreadsTest {
 
                     Collection<XdStarSystem> systems = galaxy.getSystems();
                     storage.load(systems, localTx);
-                    System.out.println("  -> LOADED STAR SYSTEMS: " + systems.size());
 
                     for (XdStarSystem systemRef : systems) {
                         // АКТИВАЦИЯ ССЫЛКИ: Загружаем звездную систему, материализуя её кэш в localTx
-                        XdStarSystem system = storage.load(XdStarSystem.class, systemRef.getId(), localTx);
-                        if (system == null) continue;
+//                        XdStarSystem system = storage.load(XdStarSystem.class, systemRef.getId(), localTx);
+//                        if (system == null) continue;
 
                         // ВНИМАНИЕ: system.getStars() — встроенная коллекция (StoreWithParentObject).
                         // Вызовы load/delete для нее запрещены — ядро вычистит её при удалении Системы.
 
-                        Collection<XdPlanet> planets = system.getPlanets();
+                        Collection<XdPlanet> planets = systemRef.getPlanets();
                         storage.load(planets, localTx);
-                        System.out.println("    -> LOADED PLANETS TO PURGE: " + system);
+                        System.out.println("    -> LOADED PLANETS TO PURGE: " + systemRef);
 
                         for (XdPlanet planetRef : planets) {
                             storage.delete(planetRef, localTx);
                         }
-                        System.out.println("      -> DELETED PLANETS TO PURGE: " + system);
+                        System.out.println("      -> PURGE PLANETS: " + systemRef);
 
                         // Стираем саму звездную систему
-                        storage.delete(system, localTx);
+                        storage.delete(systemRef, localTx);
                     }
 
                     // Стираем галактику
@@ -253,7 +251,6 @@ public class XmlDataStorageMultithreadsTest {
                     for (final XdStarSystem system : galaxy.getSystems()) {
                         if (system != null) {
                             storage.save(system.getPlanets());
-                            System.err.println("INSERTED: " + system);
                         }
                     }
                 }
@@ -287,25 +284,20 @@ public class XmlDataStorageMultithreadsTest {
             for (XdUniverse universe : universes) {
                 storage.load(universe);
 
+                storage.load(universe.getGalaxies());
                 Collection<XdGalaxy> galaxies = universe.getGalaxies();
                 for (XdGalaxy galaxyRef : galaxies) {
-                    XdGalaxy galaxy = storage.load(XdGalaxy.class, galaxyRef.getId());
 
-                    Assertions.assertNotNull(galaxy);
+                    Assertions.assertNotNull(galaxyRef);
 
-                    Collection<XdStarSystem> systems = galaxy.getSystems();
+                    Collection<XdStarSystem> systems = galaxyRef.getSystems();
                     for (XdStarSystem starSystemRef : systems) {
-                        XdStarSystem starSystem = storage.load(XdStarSystem.class, starSystemRef.getId());
+                        storage.load(starSystemRef);
 
-                        Assertions.assertNotNull(starSystem);
+                        Assertions.assertNotNull(starSystemRef);
 
-                        Collection<XdPlanet> planets = starSystem.getPlanets();
-                        System.err.println("LOADED: " + starSystem);
-//                        for (XdPlanet planetRef : planets) {
-//                            XdPlanet planet = storage.load(XdPlanet.class, planetRef.getId());
-//
-//                            Assertions.assertNotNull(planet);
-//                        }
+                        Collection<XdPlanet> planets = starSystemRef.getPlanets();
+                        System.err.println("LOADED: " + starSystemRef);
                     }
                 }
             }

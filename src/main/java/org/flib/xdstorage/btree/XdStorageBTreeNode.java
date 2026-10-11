@@ -358,7 +358,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             }
             try {
                 insertIntoThisNode(key, object, storage, transaction);
-                if (this.getKeys().size() == 2 * getTree().getT()) {
+                if (this.getKeys().size() >= 2 * getTree().getT()) {
                     if (this.getParent() == null) {
                         splitAndCreateNewRoot(this, storage, transaction);
                     } else {

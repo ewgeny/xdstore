@@ -505,41 +505,52 @@ public class XdStorageResourceCache {
 
     private Object readInternal(final Object id, final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
+        Map<Object, ObjectChange> tmpReadObjects = readObjectsByTransaction.get(transactionId);
+        if (tmpReadObjects == null) {
             readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        } else if (readObjects.containsKey(id)) {
+            tmpReadObjects = readObjectsByTransaction.get(transactionId);
+        }
+        final Map<Object, ObjectChange> readObjects = tmpReadObjects;
+
+        // Если объект уже материализован текущей транзакцией — мгновенно возвращаем его (Identity)
+        if (readObjects.containsKey(id)) {
             return readObjects.get(id).object;
         }
 
         CacheRecord record = cache.get(id);
         if (record != null) {
             Object object = null;
-            if (record.isUpdateChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
+
+            // Канонический MVCC-барьер вычисления видимости в оперативной памяти
+            synchronized (record) {
+                if (record.isUpdateChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else {
+                        object = record.getObject();
+                    }
+                } else if (record.isInsertChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    }
+                } else if (record.isDeleteChange()) {
+                    if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
+                        object = record.getObject();
+                    }
                 } else {
                     object = record.getObject();
                 }
-            } else if (record.isInsertChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                }
-            } else if (record.isDeleteChange()) {
-                if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                    object = record.getObject();
-                }
-            } else {
-                object = record.getObject();
             }
 
             if (object != null) {
-                readObjects.putIfAbsent(id, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
+                if (!readObjects.containsKey(id)) {
+                    Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
+                    readObjects.putIfAbsent(id, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                }
                 return readObjects.get(id).object;
             }
         }
@@ -598,13 +609,13 @@ public class XdStorageResourceCache {
         }
 
         if (object != null) {
-            if (readObjects.containsKey(objectId)) {
-                final ObjectChange readObject = readObjects.get(objectId);
-                cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
-            } else {
+//            if (readObjects.containsKey(objectId)) {
+//                final ObjectChange readObject = readObjects.get(objectId);
+//                cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
+//            } else {
                 cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
-                readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
-            }
+//            }
+            readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
             return;
         }
 
