@@ -16,6 +16,11 @@ public class MockTransaction implements IXdStorageTransaction {
     }
 
     @Override
+    public long getTimestart() {
+        return 0;
+    }
+
+    @Override
     public IXdStorage getStorage() {
         return null;
     }

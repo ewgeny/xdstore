@@ -1,7 +1,6 @@
 package org.flib.xdstorage.resource;
 
 import org.flib.xdstorage.IXdStorage;
-import org.flib.xdstorage.IXdStoragePredicate;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.factories.IXdStorageCloner;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
@@ -11,17 +10,14 @@ import org.flib.xdstorage.utils.XdStorageObjectIdField;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-public class XdStorageResourceCacheTest {
+public class XdStorageResourceCacheSomeCasesTest {
 
     private XdStorageServicesLocator mockLocator;
     private IXdStorageTransactionManager mockTxManager;

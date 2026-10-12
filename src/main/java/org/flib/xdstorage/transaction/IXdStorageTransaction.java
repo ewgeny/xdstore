@@ -7,6 +7,8 @@ public interface IXdStorageTransaction {
 
     IXdStorageTransactionManager<?> getTransactionManager();
 
+    long getTimestart();
+
     IXdStorage getStorage();
 
     String getTransactionThreadId();

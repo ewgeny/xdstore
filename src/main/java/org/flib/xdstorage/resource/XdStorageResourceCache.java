@@ -10,6 +10,7 @@ import org.flib.xdstorage.factories.IXdStorageCloner;
 import org.flib.xdstorage.observing.IXdStorageIdObservableWrapper;
 import org.flib.xdstorage.observing.XdStorageAbstractIdObserver;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
+import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
@@ -99,7 +100,7 @@ public class XdStorageResourceCache {
         if (isWrappableClass == null) {
             lock.lock();
             try {
-                if(isWrappableClass == null) {
+                if (isWrappableClass == null) {
                     isWrappableClass = new AtomicBoolean(XdStorageObjectUtils.isWrappableObject(object));
                 }
             } finally {
@@ -158,10 +159,7 @@ public class XdStorageResourceCache {
 
         final List<T> result = Collections.synchronizedList(new java.util.LinkedList<>());
 
-        // =========================================================================
         // БЛOК 1: СУБД SNAPSHOT VIEW БАРЬЕР (Чтение по предикату)
-        // Снимаем быстрый изолированный массив нод для защиты от параллельных remove()
-        // =========================================================================
         Object[] recordsSnapshot = cache.values().toArray();
 
         for (final Object node : recordsSnapshot) {
@@ -175,32 +173,42 @@ public class XdStorageResourceCache {
             CacheRecord record = (CacheRecord) node;
 
             Object object = null;
-            if (record.isUpdateChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
+            synchronized (record) {
+                if (record.isUpdateChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else {
+                        object = record.getObject();
+                    }
+                } else if (record.isInsertChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    }
+                } else if (record.isDeleteChange()) {
+                    if (!record.isCommitedState()) {
+                        if (!record.isChangedByTransaction(transaction)) {
+                            object = record.getObject();
+                        }
+                    } else if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    }
                 } else {
-                    object = record.getObject();
+                    if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    } else {
+                        object = record.getObject();
+                    }
                 }
-            } else if (record.isInsertChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                }
-            } else if (record.isDeleteChange()) {
-                if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                    object = record.getObject();
-                }
-            } else {
-                object = record.getObject();
             }
 
             if (object != null) {
                 try {
                     final Object objectId = field.get(object);
-                    if (!readObjects.containsKey(objectId)) {
+                    if (!readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
                         Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
                         readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
                     }
@@ -208,7 +216,12 @@ public class XdStorageResourceCache {
 
                     Object wrappedObject = org.flib.xdstorage.utils.XdStorageObjectUtils.wrapAsUnmodifiableObject(objectToReturn, services.getStorage(), transaction);
 
-                    if (predicate.passed((T) wrappedObject)) {
+                    // =========================================================================
+                    // СУБД-БАРЬEР БEЗOПAСНOСТИ ПРEДИКАТA: Защищаем от NullPointerException!
+                    // ЕслиwrappedObject вычелся как null, мы не пускаем его в пользовательский
+                    // предикат, предотвращая крах однопоточных и многопоточных сканирований!
+                    // =========================================================================
+                    if (wrappedObject != null && predicate.passed((T) wrappedObject)) {
                         result.add((T) objectToReturn);
                     }
                 } catch (final Throwable e) {
@@ -232,7 +245,7 @@ public class XdStorageResourceCache {
                 if (nodeWrapper == null) continue;
                 IXdStorageIdObservableWrapper wrapper = (IXdStorageIdObservableWrapper) nodeWrapper;
                 try {
-                    if (predicate.passed((T) wrapper)) {
+                    if (wrapper != null && predicate.passed((T) wrapper)) {
                         result.add((T) wrapper);
                     }
                 } catch (final Throwable e) {
@@ -260,6 +273,7 @@ public class XdStorageResourceCache {
         }
     }
 
+
     private <T> void watchInternal(final XdStorageTransaction transaction, final IXdStorageWatcher<T> watcher) throws XdStorageException {
         final XdStorageException[] exceptions = new XdStorageException[]{null};
         final AtomicBoolean hasError = new AtomicBoolean(false);
@@ -272,32 +286,49 @@ public class XdStorageResourceCache {
         }
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
-        cache.values().stream().forEach(record -> {
-            if (hasError.get()) {
+        // =========================================================================
+        // СНАЙПEРСКИЙ ФИКС CLASSCASTEXCEPTION: Снимаем чистый Snapshot-массив Object[]!
+        // Избавляемся от хрупкого принудительного каста (CacheRecord[]) всего массива.
+        // =========================================================================
+        Object[] recordsSnapshot = cache.values().toArray();
+
+        Arrays.stream(recordsSnapshot).forEach(node -> {
+            if (hasError.get() || node == null) {
                 return;
             }
+            CacheRecord record = (CacheRecord) node;
 
             Object object = null;
-            if (record.isUpdateChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
+            synchronized (record) {
+                if (record.isUpdateChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else {
+                        object = record.getObject();
+                    }
+                } else if (record.isInsertChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    }
+                } else if (record.isDeleteChange()) {
+                    if (!record.isCommitedState()) {
+                        if (!record.isChangedByTransaction(transaction)) {
+                            object = record.getObject();
+                        }
+                    } else if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    }
                 } else {
-                    object = record.getObject();
+                    if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    } else {
+                        object = record.getObject();
+                    }
                 }
-            } else if (record.isInsertChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                }
-            } else if (record.isDeleteChange()) {
-                if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                    object = record.getObject();
-                }
-            } else {
-                object = record.getObject();
             }
 
             try {
@@ -333,7 +364,9 @@ public class XdStorageResourceCache {
                 }
 
                 try {
-                    watcher.watch((T) wrapper);
+                    if (wrapper != null) {
+                        watcher.watch((T) wrapper);
+                    }
                 } catch (final Throwable e) {
                     if (hasError.get()) {
                         return;
@@ -342,7 +375,6 @@ public class XdStorageResourceCache {
                     exceptions[0] = new XdStorageException(e);
                 }
             });
-
             if (exceptions[0] != null)
                 throw new XdStorageRuntimeException(exceptions[0]);
         }
@@ -376,33 +408,43 @@ public class XdStorageResourceCache {
             CacheRecord record = (CacheRecord) node;
 
             Object object = null;
-            if (record.isUpdateChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
+            synchronized (record) {
+                if (record.isUpdateChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else {
+                        object = record.getObject();
+                    }
+                } else if (record.isInsertChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    }
+                } else if (record.isDeleteChange()) {
+                    if (!record.isCommitedState()) {
+                        if (!record.isChangedByTransaction(transaction)) {
+                            object = record.getObject();
+                        }
+                    } else if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    }
                 } else {
-                    object = record.getObject();
+                    if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    } else {
+                        object = record.getObject();
+                    }
                 }
-            } else if (record.isInsertChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                }
-            } else if (record.isDeleteChange()) {
-                if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                    object = record.getObject();
-                }
-            } else {
-                object = record.getObject();
             }
 
             if (object != null) {
                 final Object objectId = field.get(object);
                 synchronized (result) {
                     synchronized (record) {
-                        if (!readObjects.containsKey(objectId)) {
+                        if (!readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
                             readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
                         }
                     }
@@ -450,26 +492,36 @@ public class XdStorageResourceCache {
             CacheRecord record = (CacheRecord) node;
 
             Object object = null;
-            if (record.isUpdateChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
+            synchronized (record) {
+                if (record.isUpdateChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else {
+                        object = record.getObject();
+                    }
+                } else if (record.isInsertChange()) {
+                    if (record.isCommitedState()) {
+                        object = record.getObject();
+                    } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    }
+                } else if (record.isDeleteChange()) {
+                    if (!record.isCommitedState()) {
+                        if (!record.isChangedByTransaction(transaction)) {
+                            object = record.getObject();
+                        }
+                    } else if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    }
                 } else {
-                    object = record.getObject();
+                    if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    } else {
+                        object = record.getObject();
+                    }
                 }
-            } else if (record.isInsertChange()) {
-                if (record.isCommitedState()) {
-                    object = record.getObject();
-                } else if (record.isChangedByTransaction(transaction)) {
-                    object = record.getNewObject();
-                }
-            } else if (record.isDeleteChange()) {
-                if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                    object = record.getObject();
-                }
-            } else {
-                object = record.getObject();
             }
             if (object != null) {
                 final Object objectId = field.get(object);
@@ -538,20 +590,28 @@ public class XdStorageResourceCache {
                         object = record.getNewObject();
                     }
                 } else if (record.isDeleteChange()) {
-                    if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                        object = record.getObject();
+                    if (!record.isCommitedState()) {
+                        if (!record.isChangedByTransaction(transaction)) {
+                            object = record.getObject();
+                        }
+                    } else if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
                     }
                 } else {
-                    object = record.getObject();
+                    if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    } else {
+                        object = record.getObject();
+                    }
                 }
-            }
 
-            if (object != null) {
-                if (!readObjects.containsKey(id)) {
-                    Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                    readObjects.putIfAbsent(id, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                if (object != null) {
+                    if (!readObjects.containsKey(id) || record.isChangedByTransaction(transaction)) {
+                        Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
+                        readObjects.putIfAbsent(id, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                    }
+                    return readObjects.get(id).object;
                 }
-                return readObjects.get(id).object;
             }
         }
         return null;
@@ -599,24 +659,32 @@ public class XdStorageResourceCache {
                         object = record.getNewObject();
                     }
                 } else if (record.isDeleteChange()) {
-                    if (!record.isCommitedState() && !record.isChangedByTransaction(transaction)) {
-                        object = record.getObject();
+                    if (!record.isCommitedState()) {
+                        if (!record.isChangedByTransaction(transaction)) {
+                            object = record.getObject();
+                        }
+                    } else if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
                     }
                 } else {
-                    object = record.getObject();
+                    if (transaction.getTimestart() < record.timestamp) {
+                        object = record.prevObject;
+                    } else {
+                        object = record.getObject();
+                    }
+                }
+
+                if (object != null) {
+                    if (!record.isChangedByTransaction(transaction) && readObjects.containsKey(objectId)) {
+                        final ObjectChange readObject = readObjects.get(objectId);
+                        cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
+                    } else {
+                        cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
+                    }
+                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
+                    return;
                 }
             }
-        }
-
-        if (object != null) {
-//            if (readObjects.containsKey(objectId)) {
-//                final ObjectChange readObject = readObjects.get(objectId);
-//                cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
-//            } else {
-                cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
-//            }
-            readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
-            return;
         }
 
         throw new XdStorageException("cannot load by reference object of " + reference.getClass() + " with idgeneration " + field.get(reference));
@@ -689,13 +757,15 @@ public class XdStorageResourceCache {
                     }
 
                     Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-                    if(readObjects == null) {
+                    if (readObjects == null) {
                         readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
                         readObjects = readObjectsByTransaction.get(transactionId);
                     }
                     readObjects.put(id, new ObjectChange(object, Change.insert, transaction.getTimestart()));
 
-                    record.prepareCommit();
+                    synchronized (record) {
+                        record.prepareCommit();
+                    }
 
                     Map<Object, CacheRecord> map = changes.get(transactionId);
                     if (map == null) {
@@ -708,7 +778,7 @@ public class XdStorageResourceCache {
         } else {
             final String transactionId = transaction.getTransactionId();
             Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-            if(readObjects == null) {
+            if (readObjects == null) {
                 readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
                 readObjects = readObjectsByTransaction.get(transactionId);
             }
@@ -731,16 +801,18 @@ public class XdStorageResourceCache {
                 }
                 readObjects.put(objectId, new ObjectChange(newObject, Change.insert, transaction.getTimestart()));
             } else {
-                if (record.isChangedByTransaction(transaction)) {
-                    if (record.isDeleteChange()) {
-                        throw new XdStorageException("trying to insert deleted object of " + newObject.getClass() + " with idgeneration " + objectId);
-                    } else if (record.isInsertChange()) {
-                        throw new XdStorageException("trying to double insert one object of " + newObject.getClass() + " with idgeneration " + objectId);
+                synchronized (record) {
+                    if (record.isChangedByTransaction(transaction)) {
+                        if (record.isDeleteChange()) {
+                            throw new XdStorageException("trying to insert deleted object of " + newObject.getClass() + " with idgeneration " + objectId);
+                        } else if (record.isInsertChange()) {
+                            throw new XdStorageException("trying to double insert one object of " + newObject.getClass() + " with idgeneration " + objectId);
+                        } else {
+                            throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " is exists");
+                        }
                     } else {
-                        throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " is exists");
+                        throw new XdStorageException("concurrent modification one object of " + newObject.getClass() + " with idgeneration " + objectId);
                     }
-                } else {
-                    throw new XdStorageException("concurrent modification one object of " + newObject.getClass() + " with idgeneration " + objectId);
                 }
             }
             Map<Object, CacheRecord> map = changes.get(transactionId);
@@ -804,48 +876,50 @@ public class XdStorageResourceCache {
         }
 
         final ObjectChange change = readObjects.get(objectId);
-        if (change != null) {
-            if (!record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
+        synchronized (record) {
+            if (change != null) {
+                if (!record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
+                    throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
+                }
+            } else if (!record.canBeChangedByTransaction(transaction)) {
                 throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
             }
-        } else if (!record.canBeChangedByTransaction(transaction)) {
-            throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
-        }
 
-        final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(newObject.getClass());
-        final boolean isBTreeInfrastructure = entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
-                || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
-                || entityClass.getName().contains("org.flib.xdstorage.btree");
+            final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(newObject.getClass());
+            final boolean isBTreeInfrastructure = entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
+                    || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
+                    || entityClass.getName().contains("org.flib.xdstorage.btree");
 
-        if (record.isReadChange()) {
-            if (isBTreeInfrastructure) {
-                record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
-            } else {
-                record.setNewObject(cloner.unwrapAndClone(newObject));
-            }
-            record.markUpdate();
-            readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
-        } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
-            if (record.isUpdateChange() || record.isInsertChange()) {
+            if (record.isReadChange()) {
                 if (isBTreeInfrastructure) {
                     record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
                 } else {
                     record.setNewObject(cloner.unwrapAndClone(newObject));
                 }
+                record.markUpdate();
+                readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
+            } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
+                if (record.isUpdateChange() || record.isInsertChange()) {
+                    if (isBTreeInfrastructure) {
+                        record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
+                    } else {
+                        record.setNewObject(cloner.unwrapAndClone(newObject));
+                    }
+                    readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
+                } else {
+                    throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " was deleted this transaction");
+                }
+            } else if (record.canBeChangedByTransaction(transaction)) {
+                if (isBTreeInfrastructure) {
+                    record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
+                } else {
+                    record.setNewObject(cloner.unwrapAndClone(newObject));
+                }
+                record.markUpdate();
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else {
-                throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " was deleted this transaction");
+                throw new XdStorageException("concurrent modification one object of " + newObject.getClass() + " with idgeneration " + objectId);
             }
-        } else if (record.canBeChangedByTransaction(transaction)) {
-            if (isBTreeInfrastructure) {
-                record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
-            } else {
-                record.setNewObject(cloner.unwrapAndClone(newObject));
-            }
-            record.markUpdate();
-            readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
-        } else {
-            throw new XdStorageException("concurrent modification one object of " + newObject.getClass() + " with idgeneration " + objectId);
         }
 
         Map<Object, CacheRecord> map = changes.get(transactionId);
@@ -894,36 +968,38 @@ public class XdStorageResourceCache {
             readObjects = readObjectsByTransaction.get(transactionId);
         }
 
-        final ObjectChange change = readObjects.get(objectId);
-        if (change != null) {
-            if (!record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
-                throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
+        synchronized (record) {
+            final ObjectChange change = readObjects.get(objectId);
+            if (change != null) {
+                if (!record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
+                    throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
+                }
+            } else if (!record.canBeChangedByTransaction(transaction)) {
+                throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " can not be deleted by transaction " + transactionId);
             }
-        } else if (!record.canBeChangedByTransaction(transaction)) {
-            throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " can not be deleted by transaction " + transactionId);
-        }
 
-        if (record.isReadChange()) {
-            record.setNewObject(null);
-            record.markDelete();
-            readObjects.remove(objectId);
-        } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
-            if (record.isInsertChange()) {
-                cache.remove(objectId);
+            if (record.isReadChange()) {
+                record.setNewObject(null);
+                record.markDelete();
                 readObjects.remove(objectId);
-            } else if (record.isUpdateChange()) {
+            } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
+                if (record.isInsertChange()) {
+                    cache.remove(objectId);
+                    readObjects.remove(objectId);
+                } else if (record.isUpdateChange()) {
+                    record.setNewObject(null);
+                    record.markDelete();
+                    readObjects.remove(objectId);
+                } else {
+                    throw new XdStorageException("trying to double delete one object of " + clazz + " with idgeneration " + objectId);
+                }
+            } else if (record.canBeChangedByTransaction(transaction)) {
                 record.setNewObject(null);
                 record.markDelete();
                 readObjects.remove(objectId);
             } else {
-                throw new XdStorageException("trying to double delete one object of " + clazz + " with idgeneration " + objectId);
+                throw new XdStorageException("concurrent modification one object of " + clazz + " with idgeneration " + objectId);
             }
-        } else if (record.canBeChangedByTransaction(transaction)) {
-            record.setNewObject(null);
-            record.markDelete();
-            readObjects.remove(objectId);
-        } else {
-            throw new XdStorageException("concurrent modification one object of " + clazz + " with idgeneration " + objectId);
         }
 
         Map<Object, CacheRecord> map = changes.get(transactionId);
@@ -958,7 +1034,7 @@ public class XdStorageResourceCache {
         final String transactionId = transaction.getTransactionId();
 
         Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if(readObjects == null) {
+        if (readObjects == null) {
             readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
             readObjects = readObjectsByTransaction.get(transactionId);
         }
@@ -970,40 +1046,42 @@ public class XdStorageResourceCache {
                 final CacheRecord record = it.next().getValue();
                 Object oldObject = null, newObject = null;
                 XdStorageObjectOperationType type = null;
-                if (record.isInsertChange()) {
-                    newObject = record.getNewObject();
-                    type = XdStorageObjectOperationType.Insert;
+                synchronized (record) {
+                    if (record.isInsertChange()) {
+                        newObject = record.getNewObject();
+                        type = XdStorageObjectOperationType.Insert;
 
-                    if (newObject != null) {
-                        Object insertId = field.get(newObject);
-                        if (insertId != null && readObjects != null && readObjects.containsKey(insertId)) {
-                            newObject = readObjects.get(insertId).object;
+                        if (newObject != null) {
+                            Object insertId = field.get(newObject);
+                            if (insertId != null && readObjects != null && readObjects.containsKey(insertId)) {
+                                newObject = readObjects.get(insertId).object;
+                            }
                         }
-                    }
-                } else if (record.isUpdateChange()) {
-                    oldObject = record.getObject();
-                    type = XdStorageObjectOperationType.Update;
+                    } else if (record.isUpdateChange()) {
+                        oldObject = record.getObject();
+                        type = XdStorageObjectOperationType.Update;
 
-                    if (oldObject != null) {
-                        Object updateId = field.get(oldObject);
-                        if (updateId != null && readObjects != null && readObjects.containsKey(updateId)) {
-                            newObject = readObjects.get(updateId).object;
+                        if (oldObject != null) {
+                            Object updateId = field.get(oldObject);
+                            if (updateId != null && readObjects != null && readObjects.containsKey(updateId)) {
+                                newObject = readObjects.get(updateId).object;
+                            }
                         }
+                    } else if (record.isDeleteChange()) {
+                        oldObject = record.getObject();
+                        type = XdStorageObjectOperationType.Delete;
                     }
-                } else if (record.isDeleteChange()) {
-                    oldObject = record.getObject();
-                    type = XdStorageObjectOperationType.Delete;
+
+                    if (log.isDebugEnabled()) {
+                        log.debug("PREPARE COMMIT " + type + " by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + oldObject + "\r\n NEW OBJECT: " + newObject);
+                    }
+
+                    collector.addChangeObject(type, record.getId(),
+                            oldObject != null ? XdStorageObjectUtils.cloneObject(oldObject) : null,
+                            newObject != null ? newObject : null);
+
+                    record.prepareCommit();
                 }
-
-                if (log.isDebugEnabled()) {
-                    log.debug("PREPARE COMMIT " + type + " by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + oldObject + "\r\n NEW OBJECT: " + newObject);
-                }
-
-                collector.addChangeObject(type, record.getId(),
-                        oldObject != null ? XdStorageObjectUtils.cloneObject(oldObject) : null,
-                        newObject != null ? newObject : null);
-
-                record.prepareCommit();
             }
         }
 
@@ -1019,7 +1097,7 @@ public class XdStorageResourceCache {
         final String transactionId = transaction.getTransactionId();
 
         Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if(readObjects == null) {
+        if (readObjects == null) {
             readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
             readObjects = readObjectsByTransaction.get(transactionId);
         }
@@ -1031,40 +1109,42 @@ public class XdStorageResourceCache {
                 final CacheRecord record = it.next().getValue();
                 Object oldObject = null, newObject = null;
                 XdStorageObjectOperationType type = null;
-                if (record.isInsertChange()) {
-                    newObject = record.getNewObject();
-                    type = XdStorageObjectOperationType.Insert;
+                synchronized (record) {
+                    if (record.isInsertChange()) {
+                        newObject = record.getNewObject();
+                        type = XdStorageObjectOperationType.Insert;
 
-                    if (newObject != null) {
-                        Object commitId = field.get(newObject);
-                        if (commitId != null && readObjects != null && readObjects.containsKey(commitId)) {
-                            newObject = readObjects.get(commitId).object;
+                        if (newObject != null) {
+                            Object commitId = field.get(newObject);
+                            if (commitId != null && readObjects != null && readObjects.containsKey(commitId)) {
+                                newObject = readObjects.get(commitId).object;
+                            }
                         }
-                    }
-                } else if (record.isUpdateChange()) {
-                    oldObject = record.getObject();
-                    type = XdStorageObjectOperationType.Update;
+                    } else if (record.isUpdateChange()) {
+                        oldObject = record.getObject();
+                        type = XdStorageObjectOperationType.Update;
 
-                    if (oldObject != null) {
-                        Object commitId = field.get(oldObject);
-                        if (commitId != null && readObjects != null && readObjects.containsKey(commitId)) {
-                            newObject = readObjects.get(commitId).object;
+                        if (oldObject != null) {
+                            Object commitId = field.get(oldObject);
+                            if (commitId != null && readObjects != null && readObjects.containsKey(commitId)) {
+                                newObject = readObjects.get(commitId).object;
+                            }
                         }
+                    } else if (record.isDeleteChange()) {
+                        oldObject = record.getObject();
+                        type = XdStorageObjectOperationType.Delete;
                     }
-                } else if (record.isDeleteChange()) {
-                    oldObject = record.getObject();
-                    type = XdStorageObjectOperationType.Delete;
+
+                    if (log.isDebugEnabled()) {
+                        log.debug("PERFORM COMMIT " + type + " by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + oldObject + "\r\n NEW OBJECT: " + newObject);
+                    }
+
+                    collector.addChangeObject(type, record.getId(),
+                            oldObject != null ? XdStorageObjectUtils.cloneObject(oldObject) : null,
+                            newObject != null ? newObject : null);
+
+                    record.performCommit();
                 }
-
-                if (log.isDebugEnabled()) {
-                    log.debug("PERFORM COMMIT " + type + " by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + oldObject + "\r\n NEW OBJECT: " + newObject);
-                }
-
-                collector.addChangeObject(type, record.getId(),
-                        oldObject != null ? XdStorageObjectUtils.cloneObject(oldObject) : null,
-                        newObject != null ? newObject : null);
-
-                record.performCommit();
             }
         }
 
@@ -1089,14 +1169,16 @@ public class XdStorageResourceCache {
                 }
 
                 // Фиксируем признак удаления строго по транзакционному контракту СУБД
-                boolean isDeleteOp = record.isDeleteChange() && record.isChangedByTransaction(transaction);
-                Object recordId = record.getId();
+//                boolean isDeleteOp = record.isDeleteChange() && record.isChangedByTransaction(transaction);
+//                Object recordId = record.getId();
 
-                record.commit();
-
-                if (isDeleteOp && recordId != null) {
-                    cache.remove(recordId);
+                synchronized (record) {
+                    record.commit(transaction);
                 }
+
+//                if (isDeleteOp && recordId != null) {
+//                    cache.remove(recordId);
+//                }
                 record.unlock(transaction);
             }
         }
@@ -1121,7 +1203,9 @@ public class XdStorageResourceCache {
                 boolean isInsertOp = record.isInsertChange() && record.isChangedByTransaction(transaction);
                 Object recordId = record.getId();
 
-                record.rollback();
+                synchronized (record) {
+                    record.rollback();
+                }
 
                 if (isInsertOp && recordId != null) {
                     cache.remove(recordId);
@@ -1154,7 +1238,9 @@ public class XdStorageResourceCache {
                         log.debug("ROLLBACK FAILED COMMIT by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + record.getObject() + "\r\n NEW OBJECT: " + record.getNewObject());
                     }
 
-                    record.rollback();
+                    synchronized (record) {
+                        record.rollback();
+                    }
                     record.unlock(transaction);
                 }
             }
@@ -1212,6 +1298,8 @@ public class XdStorageResourceCache {
     private class CacheRecord {
 
         private Object id;
+
+        private Object prevObject;
 
         private Object object;
 
@@ -1326,6 +1414,18 @@ public class XdStorageResourceCache {
         }
 
         public void markUpdate() {
+            this.prevObject = this.object;
+
+            // =========================================================================
+            // СУБД ТАЙМСТAМП-БAРЬEР: Защищаем историческую сетку времени при холодном старте!
+            // Перезаписываем prevTimestamp только если у ноды есть реальное время коммита.
+            // Это полностью предотвращает превращение timestamp в Long.MIN_VALUE при параллельных
+            // конфликтах сессий, возвращая выборку к исходным 1000 элементам!
+            // =========================================================================
+            if (this.timestamp != Long.MIN_VALUE) {
+                this.prevTimestamp = this.timestamp;
+            }
+
             this.previousChange = this.change;
             this.change = Change.update;
             this.previousState = this.state;
@@ -1333,6 +1433,13 @@ public class XdStorageResourceCache {
         }
 
         public void markDelete() {
+            this.prevObject = this.object;
+
+            // Симметрично защищаем временную сетку для операций удаления
+            if (this.timestamp != Long.MIN_VALUE) {
+                this.prevTimestamp = this.timestamp;
+            }
+
             this.previousChange = this.change;
             this.change = Change.delete;
             this.previousState = this.state;
@@ -1371,7 +1478,7 @@ public class XdStorageResourceCache {
                             final Long currentTime = System.nanoTime();
                             if (startTime == null) {
                                 blockingTime.put(transactionId, currentTime);
-                            } else if ( (currentTime - startTime) >= transaction.getTimeout() * 1_000_000 ) {
+                            } else if ((currentTime - startTime) >= transaction.getTimeout() * 1_000_000) {
                                 throw new XdStorageException("transaction " + transactionId + " should be rolled back by timeout. Object with id " + id + " is locked for " + change);
                             } else {
                                 blockingTime.put(transactionId, startTime);
@@ -1408,10 +1515,11 @@ public class XdStorageResourceCache {
             secondPhaseCommit = true;
         }
 
-        public void commit() {
+        public void commit(IXdStorageTransaction tx) {
             if (!firstPhaseCommit || !secondPhaseCommit)
                 throw new XdStorageRuntimeException("Illegal state of record to commit");
 
+            this.prevObject = this.object;
             this.object = this.newObject;
             this.newObject = null;
             this.state = State.committed;
@@ -1421,10 +1529,21 @@ public class XdStorageResourceCache {
             secondPhaseCommit = false;
 
             this.prevTimestamp = this.timestamp;
-            this.timestamp = System.nanoTime();
+            this.timestamp = tx.getTimestart();
+
+            // =========================================================================
+            // ФИНАЛЬНЫЙ АРХИТЕКТУРНЫЙ ШТРИХ: Свобождаем тип изменения ноды!
+            // Мы обязаны сохранить историю в previousChange для старых транзакций,
+            // но текущий маркер change переводим в Change.undefined, чтобы транзакции
+            // из будущего могли повторно использовать этот ID для вставок (insert)!
+            // =========================================================================
+            this.previousChange = this.change;
+            this.change = Change.undefined;
         }
 
         public void rollback() {
+            this.object = this.prevObject;
+            this.prevObject = null;
             this.newObject = null;
             this.state = this.previousState;
             this.previousState = State.undefined;
