@@ -788,10 +788,13 @@ public class XdStorageResourceCache {
             }
 
             final Object objectId = field.get(newObject);
-            CacheRecord record = cache.get(objectId);
             if (objectId == null) {
+                // Барьер null-ID обязан стоять ДО обращения к CHM: cache.get(null)
+                // падает с голым NullPointerException, съедая осмысленную диагностику
                 throw new XdStorageException("cannot store object of " + newObject.getClass() + " with null id");
-            } else if (record == null) {
+            }
+            CacheRecord record = cache.get(objectId);
+            if (record == null) {
                 final CacheRecord tmpRecord;
                 cache.putIfAbsent(objectId, tmpRecord = createInsertRecord(cloner.unwrapAndClone(newObject), transaction));
                 record = cache.get(objectId);

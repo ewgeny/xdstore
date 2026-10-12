@@ -24,7 +24,9 @@ public abstract class AbstractXdStorageResourceCacheTest {
     // Изолированная сущность для Unit-тестов
     // Конструктор без аргументов обязателен по конвенции СУБД: генератор оберток
     // наследует сущность, а скомпилированный прокси требует no-arg super().
+    // @XdStorageObjectId + сеттер обязательны, чтобы MVCC-клонер переносил ID в глубокие копии
     public static class TestEntity {
+        @org.flib.xdstorage.annotations.XdStorageObjectId
         private Long id;
         private String value;
 
@@ -34,6 +36,7 @@ public abstract class AbstractXdStorageResourceCacheTest {
             this.value = value;
         }
         public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
         public String getValue() { return value; }
         public void setValue(String value) { this.value = value; }
     }

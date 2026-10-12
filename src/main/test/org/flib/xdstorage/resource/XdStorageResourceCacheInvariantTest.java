@@ -33,8 +33,10 @@ public class XdStorageResourceCacheInvariantTest {
     private XdStorageResource resource;
 
     // Простая сущность для изоляции тестов кэша ресурсов
-    // Конструктор без аргументов обязателен по конвенции СУБД для генерации оберток
+    // Конструктор без аргументов обязателен по конвенции СУБД для генерации оберток;
+    // @XdStorageObjectId + сеттер переносят ID в глубокие MVCC-копии
     public static class SampleNode {
+        @org.flib.xdstorage.annotations.XdStorageObjectId
         private Long id;
         private String data;
 
@@ -44,7 +46,9 @@ public class XdStorageResourceCacheInvariantTest {
             this.data = data;
         }
         public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
         public String getData() { return data; }
+        public void setData(String data) { this.data = data; }
     }
 
     @BeforeEach
