@@ -406,6 +406,17 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 if (!isFound) {
                     child = current.loadChildOfThisNode(currentChildren.size() - 1, storage, transaction);
                 }
+                // ГОНКА РЕБАЛАНСИРОВКИ: параллельный merge мог опустошить список детей —
+                // child бывает null. Уходим в контролируемый отказ (НЕ в retry do-while:
+                // опустошенный список детей не восстановится сам, retry зациклит поток).
+                if (child == null) {
+                    throw new XdStorageException("object of " + getTree().getId() + " with idgeneration " + key
+                            + " does not exists: index structure was concurrently rebalanced");
+                }
+                // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
+                // устаревшей инстанции родителя (остаточная двойственность инстанций после
+                // подгрузки ссылок). Контейнер ребенка известен точно — это current.
+                child.setParent(current);
                 child.lockWrite(transaction);
             } finally {
                 current.unlockWrite();
@@ -622,6 +633,11 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private Comparable findLeftKey(final XdStorageBTreeNode deepLockedNode, final XdStorageBTreeNode node, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         node.lockAndAddToDeepLock(deepLockedNode, transaction);
+        // ГВАРДЬЯН ПУСТОГО РАЗДЕЛИТЕЛЯ: транзитно пустая нода не имеет левого ключа —
+        // возвращаем null, вызывающие стороны обязаны пропустить добавление разделителя
+        if (node.getKeys().isEmpty()) {
+            return null;
+        }
         return node.getChildren().isEmpty() ? node.getKeys().get(0) : findLeftKey(deepLockedNode, node.loadChildOfThisNode(0, storage, transaction), storage, transaction);
     }
 
@@ -707,6 +723,16 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 if (!isFound) {
                     child = current.loadChildOfThisNode(currentChildren.size() - 1, storage, transaction);
                 }
+                // ГОНКА РЕБАЛАНСИРОВКИ: параллельный merge мог опустошить список детей —
+                // child бывает null. Уходим в контролируемый отказ (НЕ в retry do-while:
+                // опустошенный список детей не восстановится сам, retry зациклит поток).
+                if (child == null) {
+                    throw new XdStorageException("object of " + getTree().getId() + " with idgeneration " + key
+                            + " does not exists: index structure was concurrently rebalanced");
+                }
+                // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
+                // устаревшей инстанции родителя; фактический контейнер — current.
+                child.setParent(current);
                 child.lockWrite(transaction);
             } finally {
                 current.unlockWrite();
@@ -728,12 +754,22 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             final XdStorageBTreeNode child = parentChildren.get(i);
             final Object childId = child.getId();
             if ((childId != null && childId.equals(this.getId())) || child == this) {
-                if (!tryToMoveKeyFromNeightbor(deepLockedNode, storage, transaction)) {
-                    if (i == 0) {
-                        joinWithRightNeightbor(deepLockedNode, i, storage, transaction);
-                    }
-                    else {
-                        joinWithLeftNeightbor(deepLockedNode, i, storage, transaction);
+                // =========================================================================
+                // ГВАРДЬЯН САМОСЛИЯНИЯ (дефект висячей ссылки 47→29): если this — ЕДИНСТВЕННЫЙ
+                // ребенок родителя, индекс соседа i+1 выходит за границы, а loadChildOfThisNode
+                // молча зажимает его обратно на САМОГО СЕБЯ. Слияние/заимствование с самим собой
+                // удаляет живую ноду и оставляет родителя с битой ссылкой на удаленного ребенка.
+                // Единственного ребенка не с чем балансировать — уходим, рекурсия недогруза
+                // родителя выше по стеку разрулит структуру слиянием самого родителя.
+                // =========================================================================
+                if (countChildren >= 2) {
+                    if (!tryToMoveKeyFromNeightbor(deepLockedNode, storage, transaction)) {
+                        if (i == 0) {
+                            joinWithRightNeightbor(deepLockedNode, i, storage, transaction);
+                        }
+                        else {
+                            joinWithLeftNeightbor(deepLockedNode, i, storage, transaction);
+                        }
                     }
                 }
                 break;
@@ -769,6 +805,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private void joinWithRightNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode right = this.getParent().loadChildOfThisNode(currentNodeIndex + 1, storage, transaction);
+        // ГВАРДЬЯН САМОСЛИЯНИЯ: clamp индекса в loadChildOfThisNode может вернуть нас самих
+        if (right == this) {
+            return;
+        }
         right.lockAndAddToDeepLock(deepLockedNode, transaction);
 
         // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Ликвидация ConcurrentModificationException):
@@ -785,7 +825,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         storage.delete(right, transaction);
         // Спускаем разделительный ключ из родителя во внутренний узел 'this'
         if (!rightChildren.isEmpty()) {
-            this.getKeys().add(findLeftKey(deepLockedNode, rightChildren.get(0), storage, transaction));
+            final Comparable separatorKey = findLeftKey(deepLockedNode, rightChildren.get(0), storage, transaction);
+            if (separatorKey != null) {
+                this.getKeys().add(separatorKey);
+            }
         }
 
         // Безопасно переносим ключи и объекты из изолированных снимков
@@ -834,6 +877,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private void joinWithLeftNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode left = this.getParent().loadChildOfThisNode(currentNodeIndex - 1, storage, transaction);
+        // ГВАРДЬЯН САМОСЛИЯНИЯ: clamp индекса в loadChildOfThisNode может вернуть нас самих
+        if (left == this) {
+            return;
+        }
         if (left.tryLockAndAddToDeepLock(deepLockedNode, transaction)) {
 
             // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД: Зеркальная защита левого слияния через Snapshots
@@ -847,7 +894,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             storage.delete(this, transaction);
 
             if (!thisChildren.isEmpty()) {
-                left.getKeys().add(findLeftKey(deepLockedNode, thisChildren.get(0), storage, transaction));
+                final Comparable separatorKey = findLeftKey(deepLockedNode, thisChildren.get(0), storage, transaction);
+                if (separatorKey != null) {
+                    left.getKeys().add(separatorKey);
+                }
             }
 
             for (Comparable k : thisKeys) {
@@ -933,13 +983,24 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private boolean tryToMoveKeyFromRightNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode right = this.getParent().loadChildOfThisNode(currentNodeIndex + 1, storage, transaction);
+        // ГВАРДЬЯН САМОЗАИМСТВОВАНИЯ: clamp индекса может вернуть нас самих
+        if (right == this) {
+            return false;
+        }
         right.lockAndAddToDeepLock(deepLockedNode, transaction);
+        // ГВАРДЬЯН ПУСТОГО РОДИТЕЛЯ: транзитно пустой список ключей родителя не может
+        // принимать заимствованный разделитель — заимствование невозможно, уходим в слияние
+        if (this.getParent().getKeys().isEmpty() || right.getKeys().size() <= getTree().getT()) {
+            return false;
+        }
         if (right.getKeys().size() > getTree().getT()) {
             if (right.getChildren().isEmpty()) {
                 this.getKeys().add(right.getKeys().remove(0));
                 this.getObjects().add(right.getObjects().remove(0));
-                final Comparable key = right.getKeys().get(0);
-                this.getParent().getKeys().set(currentNodeIndex, key);
+                final Comparable key = right.getKeys().isEmpty() ? null : right.getKeys().get(0);
+                if (key != null) {
+                    this.getParent().getKeys().set(currentNodeIndex, key);
+                }
             } else {
                 // АЛГОРИТМИЧЕСКИЙ GUARD-БАРЬЕР Б+ ДЕРЕВА:
                 // Если у правого соседа на внутреннем уровне нарушен инвариант children = keys + 1,
@@ -976,6 +1037,13 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private boolean tryToMoveKeyFromLeftNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode left = this.getParent().loadChildOfThisNode(currentNodeIndex - 1, storage, transaction);
+        // ГВАРДЬЯН САМОЗАИМСТВОВАНИЯ: clamp индекса может вернуть нас самих
+        if (left == this) {
+            return false;
+        }
+        if (this.getParent().getKeys().isEmpty()) {
+            return false;
+        }
         if (left.tryLockAndAddToDeepLock(deepLockedNode, transaction)
                 && left.getKeys().size() > getTree().getT()) {
             final int lastKeyIndex = left.getKeys().size() - 1;
@@ -1195,12 +1263,18 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     }
 
     public void read(final IXdStorageBTreeNode toUnlock, final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
-        if (getKeys().size() != getObjects().size()) {
-            throw new XdStorageException("cannot handle index node, because it is not leaf node");
-        }
-
         lockRead(transaction);
         try {
+            // =========================================================================
+            // БАРЬЕР КОНСИСТЕНТНОСТИ ЛИСТА: проверка паритета keys/objects обязана идти
+            // СТРОГО под read-локом ноды. Раньше она выполнялась до захвата лока и ловила
+            // промежуточные состояния писателя (ключ добавлен, объект еще нет), роняя
+            // честных читателей диапазона псевдо-исключением "not leaf node".
+            // =========================================================================
+            if (getKeys().size() != getObjects().size()) {
+                throw new XdStorageException("cannot handle index node, because it is not leaf node");
+            }
+
             if (toUnlock != null) {
                 toUnlock.unlockRead();
             }

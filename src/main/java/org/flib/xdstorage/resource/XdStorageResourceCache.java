@@ -745,7 +745,8 @@ public class XdStorageResourceCache {
 
                     final CacheRecord tmpRecord;
                     try {
-                        cache.putIfAbsent(id, tmpRecord = createInsertRecord(cloner.unwrapAndClone(object), transaction));
+                        // ИДЕНТИЧНОСТЬ B+ ДЕРЕВА: ноды индекса сохраняются живой инстанцией
+                        cache.putIfAbsent(id, tmpRecord = createInsertRecord(materializeForCache(object), transaction));
                         record = cache.get(id);
                         if (record != tmpRecord) {
                             throw new XdStorageRuntimeException("trying to double insert one object of " + newObject.getClass() + " with idgeneration " + id);
@@ -796,7 +797,9 @@ public class XdStorageResourceCache {
             CacheRecord record = cache.get(objectId);
             if (record == null) {
                 final CacheRecord tmpRecord;
-                cache.putIfAbsent(objectId, tmpRecord = createInsertRecord(cloner.unwrapAndClone(newObject), transaction));
+                // ИДЕНТИЧНОСТЬ B+ ДЕРЕВА: ноды индекса сохраняются живой инстанцией,
+                // чтобы граф children/next не расходился между кэшем и памятью после коммита
+                cache.putIfAbsent(objectId, tmpRecord = createInsertRecord(materializeForCache(newObject), transaction));
                 record = cache.get(objectId);
                 if (record != tmpRecord) {
                     throw new XdStorageException("trying to double insert one object of " + newObject.getClass() + " with idgeneration " + objectId);
@@ -834,6 +837,29 @@ public class XdStorageResourceCache {
     // =========================================================================
     // БЛОК 3: ПУЛЕНЕПРОБИВАЕМЫЙ КОНТУР ОБНОВЛЕНИЯ (Вынос локов из-под критической секции)
     // =========================================================================
+
+    /**
+     * Классификация инфраструктурных объектов B+ Дерева индексов.
+     * Такие объекты обязаны храниться в кэше РЕФЕРЕНСОМ НА ЖИВУЮ ИНСТАНЦИЮ, а не клоном:
+     * их поля (children/nextTreeNodeOnThisLevel/parent) образуют единый граф в памяти JVM,
+     * и любая подмена инстанса клоном разрывает связность структуры между транзакциями.
+     */
+    private static boolean isBTreeInfrastructureObject(final Object object) {
+        final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(object.getClass());
+        return entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
+                || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
+                || entityClass.getName().contains("org.flib.xdstorage.btree");
+    }
+
+    /**
+     * Материализация объекта для записи в кэш: живая инстанция для B+ Дерева, изолированный клон для доменных объектов.
+     */
+    private Object materializeForCache(final Object newObject) throws XdStorageException {
+        return isBTreeInfrastructureObject(newObject)
+                ? XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject)
+                : cloner.unwrapAndClone(newObject);
+    }
+
     public void update(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         final Object objectId = field.get(newObject);
         CacheRecord record = cache.get(objectId);
@@ -853,7 +879,25 @@ public class XdStorageResourceCache {
             if (objectId != null && map != null && map.containsKey(objectId)) {
                 final CacheRecord existingRecord = map.get(objectId);
                 if (existingRecord.isInsertChange() || existingRecord.isUpdateChange()) {
-                    existingRecord.setNewObject(cloner.unwrapAndClone(newObject));
+                    // ИДЕНТИЧНОСТЬ B+ ДЕРЕВА: быстрый путь повторного апдейта обязан подчиняться
+                    // тому же правилу живой инстанции, что и полный путь — иначе коммит пишет
+                    // устаревший клон ноды на диск и рвет цепочку листьев индекса.
+                    existingRecord.setNewObject(materializeForCache(newObject));
+
+                    // =========================================================================
+                    // СИНХРОНИЗАЦИЯ ТРАНЗИТНОГО ОБЪЕКТА С БАРЬEРОМ ВЫГРУЗКИ: readUnsafe() при
+                    // выписке на диск предпочитает readObjects[id].object. Без обновления этой
+                    // карты быстрый путь оставлял там ИСХОДНУЮ инстанцию с момента insert(),
+                    // и все мутации, выполненные через другую инстанцию (например, подгруженный
+                    // стаб ссылки B+ Дерева), молча терялись при коммите!
+                    // =========================================================================
+                    Map<Object, ObjectChange> transitObjects = readObjectsByTransaction.get(transactionId);
+                    if (transitObjects != null) {
+                        final ObjectChange previous = transitObjects.get(objectId);
+                        if (previous != null) {
+                            transitObjects.put(objectId, new ObjectChange(newObject, Change.update, previous.readTimestamp));
+                        }
+                    }
                     return;
                 }
             }
@@ -892,36 +936,19 @@ public class XdStorageResourceCache {
                 throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
             }
 
-            final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(newObject.getClass());
-            final boolean isBTreeInfrastructure = entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
-                    || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
-                    || entityClass.getName().contains("org.flib.xdstorage.btree");
-
             if (record.isReadChange()) {
-                if (isBTreeInfrastructure) {
-                    record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
-                } else {
-                    record.setNewObject(cloner.unwrapAndClone(newObject));
-                }
+                record.setNewObject(materializeForCache(newObject));
                 record.markUpdate();
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
                 if (record.isUpdateChange() || record.isInsertChange()) {
-                    if (isBTreeInfrastructure) {
-                        record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
-                    } else {
-                        record.setNewObject(cloner.unwrapAndClone(newObject));
-                    }
+                    record.setNewObject(materializeForCache(newObject));
                     readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
                 } else {
                     throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " was deleted this transaction");
                 }
             } else if (record.canBeChangedByTransaction(transaction)) {
-                if (isBTreeInfrastructure) {
-                    record.setNewObject(XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject));
-                } else {
-                    record.setNewObject(cloner.unwrapAndClone(newObject));
-                }
+                record.setNewObject(materializeForCache(newObject));
                 record.markUpdate();
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else {

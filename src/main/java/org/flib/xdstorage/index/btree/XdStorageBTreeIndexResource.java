@@ -415,6 +415,14 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         resource.insert(object, transaction);
 
         tree.insert((Comparable) objectId, resource.getResourceId(), storage, transaction);
+
+        // =========================================================================
+        // БАРЬЕР СТРУКТУРНОЙ ЦЕЛОСТНОСТИ ИНДEКСА: мутации id_index обязаны завершаться
+        // валидацией цепочки листьев. При нарушении транзакция откатывается громко,
+        // а не фиксирует битую структуру на диск молча (урок цепочки 268/1250).
+        // =========================================================================
+        org.flib.xdstorage.btree.XdStorageBTreeInvariants.validateLeafChain(tree, storage, transaction,
+                "id_index insert of " + objectClInfo.getClazz().getSimpleName() + "." + objectId);
     }
 
     @Override
@@ -461,6 +469,11 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         resource.delete(object, transaction);
 
         tree.delete((Comparable) objectId, storage, transaction);
+
+        // БАРЬЕР СТРУКТУРНОЙ ЦЕЛОСТНОСТИ: слияния листьев (join/borrow) — самый опасный
+        // контур ребалансировки, валидируем цепочку сразу после удаления
+        org.flib.xdstorage.btree.XdStorageBTreeInvariants.validateLeafChain(tree, storage, transaction,
+                "id_index delete of " + objectClInfo.getClazz().getSimpleName() + "." + objectId);
     }
 
     @Override

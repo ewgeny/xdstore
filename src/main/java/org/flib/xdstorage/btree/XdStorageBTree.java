@@ -49,6 +49,11 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
     private final XdStorageReadWriteLock lock = new XdStorageReadWriteLock();
 
+    // БЮДЖЕТ ПОПЫТОК РЕБАЛАНСИРОВКИ: retry-циклы операций обязаны быть ограничены —
+    // иначе устойчивая конкуренция за deep-локи превращает их в вечный livelock,
+    // вешающий потоки (дефект зависания cleanShutdown в merge-стрессе).
+    private static final int REBALANCE_RETRY_BUDGET = 200;
+
     @Override
     public boolean isWriteLocked() {
         return lock.isWriteLocked();
@@ -174,6 +179,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
         final AtomicLong counter = new AtomicLong(0);
         final AtomicBoolean retryInsert = new AtomicBoolean();
+        int attempts = 0;
         do {
             synchronized (counter) {
                 if (counter.incrementAndGet() % 5 == 0) {
@@ -183,6 +189,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                         throw new XdStorageException("interrupted", e);
                     }
                 }
+            }
+            if (++attempts > REBALANCE_RETRY_BUDGET) {
+                throw new XdStorageException("retry budget exhausted by insert of idgeneration " + key
+                        + " into " + id + ": устойчивая конкуренция за блокировки ребалансировки");
             }
 
             retryInsert.set(false);
@@ -244,6 +254,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
         final AtomicLong counter = new AtomicLong(0);
         final AtomicBoolean retryDelete = new AtomicBoolean();
+        int attempts = 0;
         do {
             synchronized (counter) {
                 if (counter.incrementAndGet() % 5 == 0) {
@@ -253,6 +264,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                         throw new XdStorageException("interrupted", e);
                     }
                 }
+            }
+            if (++attempts > REBALANCE_RETRY_BUDGET) {
+                throw new XdStorageException("retry budget exhausted by delete of idgeneration " + key
+                        + " from " + id + ": устойчивая конкуренция за блокировки ребалансировки");
             }
 
             retryDelete.set(false);
@@ -311,6 +326,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
         final AtomicLong counter = new AtomicLong(0);
         final AtomicBoolean retryUpdate = new AtomicBoolean();
+        int attempts = 0;
         do {
             synchronized (counter) {
                 if (counter.incrementAndGet() % 5 == 0) {
@@ -320,6 +336,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                         throw new XdStorageException("interrupted", e);
                     }
                 }
+            }
+            if (++attempts > REBALANCE_RETRY_BUDGET) {
+                throw new XdStorageException("retry budget exhausted by update of idgeneration " + key
+                        + " in " + id + ": устойчивая конкуренция за блокировки ребалансировки");
             }
 
             retryUpdate.set(false);
