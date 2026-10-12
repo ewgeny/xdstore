@@ -214,15 +214,19 @@ public class XdStorageResourceCache {
                     }
                     Object objectToReturn = readObjects.get(objectId).object;
 
-                    Object wrappedObject = org.flib.xdstorage.utils.XdStorageObjectUtils.wrapAsUnmodifiableObject(objectToReturn, services.getStorage(), transaction);
-
                     // =========================================================================
-                    // СУБД-БАРЬEР БEЗOПAСНOСТИ ПРEДИКАТA: Защищаем от NullPointerException!
-                    // ЕслиwrappedObject вычелся как null, мы не пускаем его в пользовательский
-                    // предикат, предотвращая крах однопоточных и многопоточных сканирований!
+                    // СУБД-БАРЬEР БEЗOПAСНOСТИ ПРEДИКАТA: Если объект не удалось обернуть в
+                    // unmodifiable-прокси (wrapAsUnmodifiableObject вернул null), мы ОБЯЗАНЫ
+                    // проверить предикат по сырому материализованному объекту, а не выбрасывать
+                    // объект из выборки. Иначе диапазонное чтение молча теряет записи, которые
+                    // видит полный скан read(transaction) — нарушение контракта Snapshot Isolation!
                     // =========================================================================
-                    if (wrappedObject != null && predicate.passed((T) wrappedObject)) {
-                        result.add((T) objectToReturn);
+                    if (objectToReturn != null) {
+                        final Object wrappedObject = org.flib.xdstorage.utils.XdStorageObjectUtils.wrapAsUnmodifiableObject(objectToReturn, services.getStorage(), transaction);
+                        final Object objectForPredicate = wrappedObject != null ? wrappedObject : objectToReturn;
+                        if (predicate.passed((T) objectForPredicate)) {
+                            result.add((T) objectToReturn);
+                        }
                     }
                 } catch (final Throwable e) {
                     if (!hasError.get()) {

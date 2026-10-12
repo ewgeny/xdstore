@@ -33,10 +33,12 @@ public class XdStorageResourceCacheInvariantTest {
     private XdStorageResource resource;
 
     // Простая сущность для изоляции тестов кэша ресурсов
+    // Конструктор без аргументов обязателен по конвенции СУБД для генерации оберток
     public static class SampleNode {
         private Long id;
         private String data;
 
+        public SampleNode() {}
         public SampleNode(Long id, String data) {
             this.id = id;
             this.data = data;

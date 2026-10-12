@@ -22,10 +22,13 @@ public abstract class AbstractXdStorageResourceCacheTest {
     protected XdStorageResourceCache resourceCache;
 
     // Изолированная сущность для Unit-тестов
+    // Конструктор без аргументов обязателен по конвенции СУБД: генератор оберток
+    // наследует сущность, а скомпилированный прокси требует no-arg super().
     public static class TestEntity {
         private Long id;
         private String value;
 
+        public TestEntity() {}
         public TestEntity(Long id, String value) {
             this.id = id;
             this.value = value;
