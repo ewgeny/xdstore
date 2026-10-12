@@ -50,18 +50,18 @@ public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstr
 
     private void appendPackageAndClassHeader(final StringBuilder builder, final String classesPackage, final String className, final Class<?> cl) {
         builder.append("package ").append(classesPackage).append(";\r\n\r\n");
-        builder.append("public class ").append(className).append(" extends ").append(cl.getName());
+        builder.append("public class ").append(className).append(" extends ").append(getSourceTypeName(cl));
         builder.append(" implements ").append(IXdStorageIdObservableWrapper.class.getName()).append(" {\r\n");
     }
 
     private void appendPrivateFields(final StringBuilder builder, final Class<?> cl) {
-        builder.append("\r\n\tprivate ").append(cl.getName()).append(" object;\r\n");
+        builder.append("\r\n\tprivate ").append(getSourceTypeName(cl)).append(" object;\r\n");
         builder.append("\r\n\tprivate java.util.Collection<").append(XdStorageAbstractIdObserver.class.getName())
                 .append("> observers = new java.util.ArrayList<>();\r\n");
     }
 
     private void appendConstructor(final StringBuilder builder, final String className, final Class<?> cl) {
-        builder.append("\r\n\tpublic ").append(className).append("(").append(cl.getName()).append(" object) {\r\n");
+        builder.append("\r\n\tpublic ").append(className).append("(").append(getSourceTypeName(cl)).append(" object) {\r\n");
         builder.append("\t\tthis.object = object;\r\n");
         builder.append("\t}\r\n");
     }

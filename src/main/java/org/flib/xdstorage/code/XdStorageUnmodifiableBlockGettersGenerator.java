@@ -79,10 +79,8 @@ public class XdStorageUnmodifiableBlockGettersGenerator {
     private static void buildTypeCast(StringBuilder builder, Type genReturnType, Class<?> returnType) {
         if (genReturnType != null && (genReturnType instanceof ParameterizedType || genReturnType instanceof TypeVariable)) {
             builder.append(genReturnType.toString());
-        } else if (returnType.isArray()) {
-            builder.append(returnType.getComponentType().getName()).append("[]");
         } else {
-            builder.append(returnType.getName());
+            builder.append(XdStorageAbstractClassCodeGenerator.getSourceTypeName(returnType));
         }
     }
 }

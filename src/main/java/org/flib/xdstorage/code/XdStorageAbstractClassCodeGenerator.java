@@ -43,6 +43,21 @@ public abstract class XdStorageAbstractClassCodeGenerator {
 
     public abstract Map<String, String> generate(final String classesPackage, final Class<?> cl, final Map<String, String> code);
 
+    /**
+     * Возвращает имя класса в форме, пригодной для подстановки в генерируемый исходный код Java.
+     * Бинарное имя вложенного класса (Outer$Inner) не разрешается компилятором в исходнике,
+     * поэтому member-классы обязаны эмититься через точку (Outer.Inner).
+     */
+    protected static String getSourceTypeName(final Class<?> cl) {
+        if (cl.isArray()) {
+            return getSourceTypeName(cl.getComponentType()) + "[]";
+        }
+        if (!cl.isMemberClass()) {
+            return cl.getName();
+        }
+        return getSourceTypeName(cl.getEnclosingClass()) + "." + cl.getSimpleName();
+    }
+
     protected String buildMethodDefinition(final int modifiers, final String name, final TypeVariable<Method>[] typeParameters, final Class<?> returnType,
                                            final Type genReturnType, final Class<?>[] parameterTypes, final Type[] genParameterTypes,
                                            final Class<?>[] exceptionTypes) {
@@ -60,18 +75,15 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         }
         if (genReturnType != null && (genReturnType instanceof ParameterizedType || genReturnType instanceof TypeVariable)) {
             builder.append(genReturnType.toString());
-        } else if (returnType.isArray()) {
-            builder.append(returnType.getComponentType().getName()).append("[]");
         } else {
-            builder.append(returnType.getName());
+            builder.append(getSourceTypeName(returnType));
         }
         builder.append(" ").append(name).append("(");
         if (genParameterTypes != null && genParameterTypes.length > 0) {
             for (int i = 0; i < genParameterTypes.length; ++i) {
                 final Type type = genParameterTypes[i];
                 if (type instanceof Class<?>) {
-                    final String parameterTypeName = parameterTypes[i].isArray() ? parameterTypes[i].getComponentType().getName() + "[]" : parameterTypes[i].getName();
-                    builder.append(parameterTypeName).append(" ").append("var").append(i);
+                    builder.append(getSourceTypeName(parameterTypes[i])).append(" ").append("var").append(i);
                 } else if (type instanceof ParameterizedType || type instanceof TypeVariable) {
                     builder.append(type.toString()).append(" ").append("var").append(i);
                 }
@@ -81,8 +93,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
             }
         } else {
             for (int i = 0; i < parameterTypes.length; ++i) {
-                final String parameterTypeName = parameterTypes[i].isArray() ? parameterTypes[i].getComponentType().getName() + "[]" : parameterTypes[i].getName();
-                builder.append(parameterTypeName).append(" ").append("var").append(i);
+                builder.append(getSourceTypeName(parameterTypes[i])).append(" ").append("var").append(i);
                 if (i < parameterTypes.length - 1) {
                     builder.append(", ");
                 }
@@ -93,7 +104,7 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         if (exceptionTypes.length > 0) {
             builder.append(" throws ");
             for(int i = 0; i < exceptionTypes.length; ++i) {
-                builder.append(exceptionTypes[i].getName());
+                builder.append(getSourceTypeName(exceptionTypes[i]));
                 if (i < exceptionTypes.length - 1) {
                     builder.append(',');
                 }

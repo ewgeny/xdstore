@@ -23,7 +23,7 @@ public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator exten
         final String className = buildClassName(classesPackage, cl);
 
         builder.append("package ").append(classesPackage).append(";\r\n\r\n");
-        builder.append("public class ").append(className).append(" extends ").append(cl.getName());
+        builder.append("public class ").append(className).append(" extends ").append(getSourceTypeName(cl));
         builder.append(" implements ").append(IXdStorageUnmodifiableWrapper.class.getName()).append(" {\r\n");
 
         builder.append("\r\n\tprivate ").append(XdStorageIdentifiableObject.class.getName()).append(" object;\r\n");
@@ -133,10 +133,8 @@ public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator exten
     private void buildReturnType(StringBuilder builder, Type genReturnType, Class<?> returnType) {
         if (genReturnType != null && (genReturnType instanceof ParameterizedType || genReturnType instanceof TypeVariable)) {
             builder.append(genReturnType.toString());
-        } else if (returnType.isArray()) {
-            builder.append(returnType.getComponentType().getName()).append("[]");
         } else {
-            builder.append(returnType.getName());
+            builder.append(getSourceTypeName(returnType));
         }
     }
 

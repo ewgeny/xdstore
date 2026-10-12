@@ -43,12 +43,12 @@ public class XdStorageUnmodifiableWrapperClassCodeGenerator extends XdStorageAbs
 
     private void appendPackageAndClassHeader(final StringBuilder builder, final String classesPackage, final String className, final Class<?> cl) {
         builder.append("package ").append(classesPackage).append(";\r\n\r\n");
-        builder.append("public class ").append(className).append(" extends ").append(cl.getName());
+        builder.append("public class ").append(className).append(" extends ").append(getSourceTypeName(cl));
         builder.append(" implements ").append(IXdStorageUnmodifiableWrapper.class.getName()).append(" {\r\n");
     }
 
     private void appendPrivateFields(final StringBuilder builder, final Class<?> cl) {
-        builder.append("\r\n\tprivate ").append(cl.getName()).append(" object;\r\n");
+        builder.append("\r\n\tprivate ").append(getSourceTypeName(cl)).append(" object;\r\n");
         builder.append("\r\n\tprivate ").append(Object.class.getName()).append(" parent;\r\n");
         builder.append("\r\n\tprivate ").append(IXdStorage.class.getName()).append(" storage;\r\n");
         builder.append("\r\n\tprivate ").append(IXdStorageTransaction.class.getName()).append(" transaction;\r\n");
@@ -57,7 +57,7 @@ public class XdStorageUnmodifiableWrapperClassCodeGenerator extends XdStorageAbs
     private void appendConstructor(final StringBuilder builder, final String className, final Class<?> cl) {
         builder.append("\r\n\tpublic ").append(className).append("(");
         builder.append(Object.class.getName()).append(" parent, ");
-        builder.append(cl.getName()).append(" object, ");
+        builder.append(getSourceTypeName(cl)).append(" object, ");
         builder.append(IXdStorage.class.getName()).append(" storage, ");
         builder.append(IXdStorageTransaction.class.getName()).append(" transaction");
         builder.append(") {\r\n");

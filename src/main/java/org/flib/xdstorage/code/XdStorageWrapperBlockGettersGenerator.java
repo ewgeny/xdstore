@@ -61,10 +61,10 @@ public class XdStorageWrapperBlockGettersGenerator {
             builder.append("\t\t\t\t\ttry{\r\n");
 
             if (returnType.isArray()) {
-                builder.append("\t\t\t\t\t\t").append(returnType.getComponentType().getName()).append("[] toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
+                builder.append("\t\t\t\t\t\t").append(XdStorageAbstractClassCodeGenerator.getSourceTypeName(returnType)).append(" toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
                 builder.append("\t\t\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\t\t\tif (toLoadObject != null) {\r\n\t\t\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t}\r\n");
             } else if (returnType.isAssignableFrom(Collection.class) || returnType.isAssignableFrom(List.class)) {
-                builder.append("\t\t\t\t\t\t").append(returnType.getName()).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
+                builder.append("\t\t\t\t\t\t").append(XdStorageAbstractClassCodeGenerator.getSourceTypeName(returnType)).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
                 builder.append("\t\t\t\t\t\tif (toLoadCollection != null) {\r\n\t\t\t\t\t\t\tfor (Object toLoadObject : toLoadCollection) {\r\n\t\t\t\t\t\t\t\tif (toLoadObject != null && ").append(XdStorageObjectUtils.class.getName()).append(".isSimpleWrappedObject(toLoadObject)) {\r\n\t\t\t\t\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t\t}\r\n\t\t\t\t\t\t}\r\n");
             } else if (returnType.isAssignableFrom(Map.class)) {
                 builder.append("\t\t\t\t\t\t").append(Collection.class.getName()).append("<? extends Object> toLoadCollection = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(".values();\r\n");
@@ -99,10 +99,8 @@ public class XdStorageWrapperBlockGettersGenerator {
     private static void buildTypeCast(StringBuilder builder, Type genReturnType, Class<?> returnType) {
         if (genReturnType != null && (genReturnType instanceof ParameterizedType || genReturnType instanceof TypeVariable)) {
             builder.append(genReturnType.toString());
-        } else if (returnType.isArray()) {
-            builder.append(returnType.getComponentType().getName()).append("[]");
         } else {
-            builder.append(returnType.getName());
+            builder.append(XdStorageAbstractClassCodeGenerator.getSourceTypeName(returnType));
         }
     }
 }
