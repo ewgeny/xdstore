@@ -406,12 +406,13 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 if (!isFound) {
                     child = current.loadChildOfThisNode(currentChildren.size() - 1, storage, transaction);
                 }
-                // ГОНКА РЕБАЛАНСИРОВКИ: параллельный merge мог опустошить список детей —
-                // child бывает null. Уходим в контролируемый отказ (НЕ в retry do-while:
-                // опустошенный список детей не восстановится сам, retry зациклит поток).
+                // ГОНКА РЕБАЛАНСИРОВКИ: параллельный merge мог транзитно опустошить список
+                // детей — child бывает null. Перезапускаем спуск с корня (структура между
+                // попытками меняется, retry делает прогресс); вечный цикл отсекается
+                // бюджетом попыток в XdStorageBTree.insert.
                 if (child == null) {
-                    throw new XdStorageException("object of " + getTree().getId() + " with idgeneration " + key
-                            + " does not exists: index structure was concurrently rebalanced");
+                    retryInsert.set(true);
+                    return; // unlockWrite текущей ноды выполняет finally ниже
                 }
                 // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
                 // устаревшей инстанции родителя (остаточная двойственность инстанций после
@@ -723,12 +724,12 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 if (!isFound) {
                     child = current.loadChildOfThisNode(currentChildren.size() - 1, storage, transaction);
                 }
-                // ГОНКА РЕБАЛАНСИРОВКИ: параллельный merge мог опустошить список детей —
-                // child бывает null. Уходим в контролируемый отказ (НЕ в retry do-while:
-                // опустошенный список детей не восстановится сам, retry зациклит поток).
+                // ГОНКА РЕБАЛАНСИРОВКИ: параллельный merge мог транзитно опустошить список
+                // детей — child бывает null. Перезапускаем спуск с корня; бюджет попыток
+                // в XdStorageBTree.delete отсекает вечный цикл.
                 if (child == null) {
-                    throw new XdStorageException("object of " + getTree().getId() + " with idgeneration " + key
-                            + " does not exists: index structure was concurrently rebalanced");
+                    retryDelete.set(true);
+                    return; // unlockWrite текущей ноды выполняет finally ниже
                 }
                 // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
                 // устаревшей инстанции родителя; фактический контейнер — current.
@@ -803,6 +804,36 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         }
     }
 
+    // =========================================================================
+    // ФАЗА 2: ИДЕНТИЧНОСТЬ ПО ID ВМЕСТО ИДЕНТИЧНОСТИ ПО ИНСТАНЦИИ.
+    // Один и тот же узел дерева может быть представлен в разных графах простым POJO
+    // и SimpleWrapper-стабом (дуальность инстанций после подгрузки ссылок из хранилища).
+    // Любое удаление/поиск ребенка по ссылке-инстанции молча промахивается и оставляет
+    // в родителе висячую ссылку на удаленный узел. Мутации состава детей идут по ID,
+    // с fallback-ом на инстансную идентичность для узлов без ID (свежесозданные ноды
+    // до первого save, тестовые in-memory сценарии с мок-хранилищем).
+    // =========================================================================
+    private static void removeChildById(final XdStorageBTreeNode parent, final Object childId, final XdStorageBTreeNode instance) {
+        if (parent == null) {
+            return;
+        }
+        final List<XdStorageBTreeNode> children = parent.getChildren();
+        synchronized (children) {
+            for (int i = 0; i < children.size(); ++i) {
+                final XdStorageBTreeNode candidate = children.get(i);
+                final Object candidateId = candidate != null ? candidate.getId() : null;
+                if (childId != null && childId.equals(candidateId)) {
+                    children.remove(i);
+                    return;
+                }
+                if (childId == null && candidate == instance) {
+                    children.remove(i);
+                    return;
+                }
+            }
+        }
+    }
+
     private void joinWithRightNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageBTreeNode right = this.getParent().loadChildOfThisNode(currentNodeIndex + 1, storage, transaction);
         // ГВАРДЬЯН САМОСЛИЯНИЯ: clamp индекса в loadChildOfThisNode может вернуть нас самих
@@ -819,9 +850,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         final List<Comparable> rightKeys = new ArrayList<>(right.getKeys());
         final List<Object> rightObjects = new ArrayList<>(right.getObjects());
 
-        synchronized (this.getParent().getChildren()) {
-            this.getParent().getChildren().remove(right);
-        }
+        // ФАЗА 2: изъятие правого соседа по ID (fallback на инстанс при отсутствии ID)
+        removeChildById(this.getParent(), right.getId(), right);
         storage.delete(right, transaction);
         // Спускаем разделительный ключ из родителя во внутренний узел 'this'
         if (!rightChildren.isEmpty()) {
@@ -888,9 +918,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             final List<Comparable> thisKeys = new ArrayList<>(this.getKeys());
             final List<Object> thisObjects = new ArrayList<>(this.getObjects());
 
-            synchronized (this.getParent().getChildren()) {
-                this.getParent().getChildren().remove(this);
-            }
+            // ФАЗА 2: изъятие себя из родителя по ID (fallback на инстанс при отсутствии ID)
+            removeChildById(this.getParent(), this.getId(), this);
             storage.delete(this, transaction);
 
             if (!thisChildren.isEmpty()) {
@@ -988,9 +1017,12 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             return false;
         }
         right.lockAndAddToDeepLock(deepLockedNode, transaction);
-        // ГВАРДЬЯН ПУСТОГО РОДИТЕЛЯ: транзитно пустой список ключей родителя не может
-        // принимать заимствованный разделитель — заимствование невозможно, уходим в слияние
-        if (this.getParent().getKeys().isEmpty() || right.getKeys().size() <= getTree().getT()) {
+        // ГВАРДЬЯН ГРАНИЦ РОДИТЕЛЯ: транзитно пустой/перестроенный список ключей родителя
+        // (разъезд keys/children на середине ребалансировки) не может принимать заимствованный
+        // разделитель — заимствование невозможно, уходим в слияние
+        if (this.getParent().getKeys().isEmpty()
+                || currentNodeIndex >= this.getParent().getKeys().size()
+                || right.getKeys().size() <= getTree().getT()) {
             return false;
         }
         if (right.getKeys().size() > getTree().getT()) {
@@ -1041,7 +1073,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         if (left == this) {
             return false;
         }
-        if (this.getParent().getKeys().isEmpty()) {
+        if (this.getParent().getKeys().isEmpty()
+                || currentNodeIndex - 1 >= this.getParent().getKeys().size()) {
             return false;
         }
         if (left.tryLockAndAddToDeepLock(deepLockedNode, transaction)

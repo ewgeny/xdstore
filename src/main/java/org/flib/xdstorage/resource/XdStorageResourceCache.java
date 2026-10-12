@@ -644,6 +644,21 @@ public class XdStorageResourceCache {
         }
 
         CacheRecord record = cache.get(objectId);
+
+        // =========================================================================
+        // ФАЗА 2: БАРЬЕР НЕВИДИМОЙ НЕЗАКОММИЧЕННОЙ ВСТАВКИ.
+        // Граф B+ Дерева — общее состояние без версионирования: параллельный писатель
+        // публикует указатели на новые узлы (сплиты) немедленно, а сами узлы видимы
+        // только после коммита. Читатель, зашедший по такому указателю, раньше падал
+        // с "cannot load by reference". По контракту Read Committed для обхода структуры
+        // мы обязаны ограниченно дождаться развязки чужой транзакции (коммит -> узел
+        // виден; откат -> запись изъята из кэша и честно считается отсутствующей).
+        // =========================================================================
+        if (record != null) {
+            waitForRecordResolution(record, objectId, transaction);
+            record = cache.get(objectId);
+        }
+
         Object object = null;
 
         if (record != null) {
@@ -692,6 +707,50 @@ public class XdStorageResourceCache {
         }
 
         throw new XdStorageException("cannot load by reference object of " + reference.getClass() + " with idgeneration " + field.get(reference));
+    }
+
+    /**
+     * ФАЗА 2: ограниченное ожидание развязки чужой незакоммиченной мутации записи.
+     * Ждем только пока запись остается невидимой незакоммиченной вставкой/апдейтом
+     * ЖИВОЙ чужой транзакции. Коммит снимает ожидание (узел становится видим),
+     * откат изымает запись из кэша (ожидание прекращается — записи больше нет),
+     * смерть владельца обрабатывается обычным контуром очистки.
+     */
+    private void waitForRecordResolution(final CacheRecord initialRecord, final Object objectId,
+                                         final XdStorageTransaction transaction) throws XdStorageException {
+        final long timeout = transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L;
+        final long deadlineNano = System.nanoTime() + timeout * 1_000_000L;
+        CacheRecord record = initialRecord;
+
+        while (isInvisibleUncommittedMutation(record, transaction)) {
+            if (System.nanoTime() >= deadlineNano) {
+                return; // честный отказ дальше по контракту "cannot load by reference"
+            }
+            try {
+                Thread.sleep(5);
+            } catch (final InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new XdStorageException("waiting for record resolution interrupted", e);
+            }
+            record = cache.get(objectId);
+            if (record == null) {
+                return; // запись изъята (откат вставки) — записи больше нет
+            }
+        }
+    }
+
+    private boolean isInvisibleUncommittedMutation(final CacheRecord record, final XdStorageTransaction transaction) {
+        if (record == null || record.isCommitedState()) {
+            return false;
+        }
+        if (record.isChangedByTransaction(transaction)) {
+            return false; // своя мутация — видим через newObject
+        }
+        if (!record.isInsertChange() && !record.isUpdateChange()) {
+            return false; // delete/read-состояния обрабатываются обычным MVCC-переключателем
+        }
+        final XdStorageTransaction owner = record.transaction;
+        return owner != null && services.getTransactionsManager().isTransactionAlive(owner);
     }
 
     public void insert(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {

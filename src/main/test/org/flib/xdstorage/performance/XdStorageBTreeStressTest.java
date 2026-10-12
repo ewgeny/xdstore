@@ -222,7 +222,7 @@ public class XdStorageBTreeStressTest {
                         // Допускаем контролируемые эксепшены СУБД "does not exist" при гонках потоков удаления
                     } catch (Throwable t) {
                         if (isLockBackpressure(t)) {
-                            lockBackpressureRetries.incrementAndGet(); // штатное противодавление, ретрай следующей итерацией
+                            lockBackpressureRetries.incrementAndGet();
                         } else {
                             deadlockOrErrorCounter.incrementAndGet();
                         }
@@ -241,7 +241,7 @@ public class XdStorageBTreeStressTest {
                         totalOperations.incrementAndGet();
                     } catch (Throwable t) {
                         if (isLockBackpressure(t)) {
-                            lockBackpressureRetries.incrementAndGet(); // штатное противодавление, ретрай следующей итерацией
+                            lockBackpressureRetries.incrementAndGet();
                         } else {
                             deadlockOrErrorCounter.incrementAndGet();
                         }

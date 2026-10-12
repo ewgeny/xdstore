@@ -286,7 +286,13 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
                 @Override
                 public void look(final Comparable objectId, final Object resourceId) throws XdStorageException, XdStorageConnectionException {
                     final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
-                    result.add((T) resource.read(objectId, transaction));
+                    final T object = (T) resource.read(objectId, transaction);
+                    // ФАЗА 2: индекс без версионирования может сослаться на объект, невидимый
+                    // данному snapshot (закоммиченное удаление при обходе гонки структуры).
+                    // Null в результирующей коллекции роняет NPE-ем циклы потребителей — пропуск.
+                    if (object != null) {
+                        result.add(object);
+                    }
                 }
             });
         }
@@ -315,6 +321,10 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
                     try {
                         final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
                         final T object = (T) resource.read(objectId, transaction);
+                        // ФАЗА 2: пропуск snapshot-невидимых объектов (см. полный read)
+                        if (object == null) {
+                            return;
+                        }
                         if (predicate.passed(XdStorageObjectUtils.wrapAsUnmodifiableObject(object, storage, transaction))) {
                             result.add(object);
                         }
@@ -346,6 +356,10 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
                 public void look(final Comparable objectId, final Object resourceId) throws XdStorageException, XdStorageConnectionException {
                     final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
                     final T object = (T) resource.read(objectId, transaction);
+                    // ФАЗА 2: пропуск snapshot-невидимых объектов (см. полный read)
+                    if (object == null) {
+                        return;
+                    }
                     watcher.watch(XdStorageObjectUtils.wrapAsUnmodifiableObject(object, storage, transaction));
                 }
             });
