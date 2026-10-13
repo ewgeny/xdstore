@@ -22,7 +22,7 @@ public class XdStorageTransactionTest extends AbstractXdStorageTest {
     @DisplayName("Метод beginTransaction() обязан делегировать вызовы в TransactionsManager")
     public void testTransaction_Begin_ShouldForwardToManager() {
         storage.beginTransaction();
-        verify(mockTxManager, times(1)).beginTransaction(10000L);
+        verify(mockTxManager, times(1)).beginTransaction(3000L);
 
         storage.beginTransaction(5000L);
         verify(mockTxManager, times(1)).beginTransaction(5000L);
