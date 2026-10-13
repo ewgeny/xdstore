@@ -73,7 +73,7 @@ public class XdStorageStructureManager {
             // гарантируя абсолютную пропускную способность под пиковой многопоточной нагрузкой!
             services.getExecutor().submit(() -> {
                 // Создаем абсолютно чистую, автономную транзакцию верхнего уровня для апдейта метаданных
-                final XdStorageTransaction autonomousTx = (XdStorageTransaction) services.getTransactionsManager().beginTransaction(15 * 1000);
+                final XdStorageTransaction autonomousTx = (XdStorageTransaction) services.getTransactionsManager().beginTransaction(3 * 1000);
                 try {
                     final XdStorageClassStructure currentStructure = buildStructure(cl);
                     if (!hasStructure(cl, autonomousTx)) {

@@ -78,7 +78,7 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
         java.util.concurrent.Callable<Void> task = () -> {
             final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
             final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-            final IXdStorageTransaction transaction = transactionsManager.beginTransaction(10 * 1000);
+            final IXdStorageTransaction transaction = transactionsManager.beginTransaction(3 * 1000);
             try {
                 final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
                 final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);
@@ -129,7 +129,7 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
         java.util.concurrent.Callable<Void> task = () -> {
             final IXdStorageTransactionManager transactionsManager = services.getTransactionsManager();
             final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
-            final IXdStorageTransaction transaction = transactionsManager.beginTransaction(10 * 1000);
+            final IXdStorageTransaction transaction = transactionsManager.beginTransaction(3 * 1000);
             try {
                 final XdStorageClassInfo clRecordInfo = XdStorageObjectUtils.getClassInfo(clRecord);
                 final IXdStorageDaoResource resource = resourcesManager.lockStructureResource(clRecordInfo, (XdStorageTransaction) transaction);

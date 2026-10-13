@@ -77,7 +77,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public IXdStorageTransaction beginTransaction() {
-        return beginTransaction(10 * 1000);
+        return beginTransaction(3 * 1000);
     }
 
     @Override
@@ -87,7 +87,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public IXdStorageTransaction beginTransaction(final IXdStorageTransaction transaction) {
-        return beginTransaction(transaction, 10 * 1000);
+        return beginTransaction(transaction, 3 * 1000);
     }
 
     /**
