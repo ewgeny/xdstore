@@ -186,16 +186,9 @@ public class XmlDataStorageMultithreadsTest {
             localTx.commit();
             System.out.println("=== МОНОЛИТНАЯ КАСКАДНАЯ ОЧИСТКА ХРАНИЛИЩА ЗАВЕРШЕНА УСПЕШНО ===");
         } catch (Exception e) {
-            // СТАБИЛЬНОСТЬ testOneThread: очистка — гигиена теста, а не его контракт.
-            // Тело теста (сохранение + чтение) уже отработало; структурная аномалия очистки
-            // (ловится громко инвариантом B+ Дерева) печатается в stderr для разбора,
-            // но НЕ роняет тест — изоляция между тестами обеспечивается shutdown + deleteDir.
-            try {
-                localTx.rollback();
-            } catch (Exception rollbackError) {
-                System.err.println("🚨 ROLLBACK КАСКАДНОЙ ОЧИСТКИ ТОЖЕ УПАЛ: " + rollbackError);
-            }
+            localTx.rollback();
             System.err.println("🚨 АНОМАЛИЯ ОЧИСТКИ (не влияет на исход теста): " + e);
+            throw new RuntimeException(e);
         } finally {
             destroyStorage();
         }
