@@ -266,20 +266,7 @@ public class XmlDataStorageMultithreadsTest {
 
         Assertions.assertNull(ex);
 
-        // =========================================================================
-        // КВАНТОВЫЙ БАРЬЕР СУБД (Истинное решение однопоточного рассинхрона):
-        // Принудительно усыпляем поток на 2 миллисекунды. Это гарантирует, что
-        // System.nanoTime() новой транзакции чтения tx станет СТРОГО БOЛЬШЕ,
-        // чем время фиксации прошлых коммитов, разводя Snapshot-версии кучи Java
-        // в абсолютный, кристально чистый ACID-порядок!
-        // =========================================================================
-        try {
-            Thread.sleep(2);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        IXdStorageTransaction tx = storage.beginTransaction(15000);
+        IXdStorageTransaction tx = storage.beginTransaction(3000);
         try {
             Collection<XdUniverse> universes = storage.load(XdUniverse.class);
             for (XdUniverse universe : universes) {
