@@ -521,7 +521,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
         storage.update(this.getParent(), transaction);
 
-        if (this.getParent().getKeys().size() == 2 * t) {
+        if (this.getParent().getKeys().size() >= 2 * t) {
             if (this.getParent().getParent() == null) {
                 this.getParent().splitAndCreateNewRoot(deepLockedNode, storage, transaction);
             } else {
@@ -1024,12 +1024,15 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         // ГВАРДЬЯН ГРАНИЦ РОДИТЕЛЯ: транзитно пустой/перестроенный список ключей родителя
         // (разъезд keys/children на середине ребалансировки) не может принимать заимствованный
         // разделитель — заимствование невозможно, уходим в слияние
+        // КАНОН B-ДЕРЕВА: занимать у соседа можно всегда, когда у него БОЛЬШЕ минимума (t-1),
+        // т.е. >= t. Отказ при ровно t вынуждал merge: (<=t-1) + 1 + t = 2t ключей —
+        // на единицу больше максимума 2t-1 — и давал пере-полненные ноды children=2t+1.
         if (this.getParent().getKeys().isEmpty()
                 || currentNodeIndex >= this.getParent().getKeys().size()
-                || right.getKeys().size() <= getTree().getT()) {
+                || right.getKeys().size() < getTree().getT()) {
             return false;
         }
-        if (right.getKeys().size() > getTree().getT()) {
+        if (right.getKeys().size() >= getTree().getT()) {
             if (right.getChildren().isEmpty()) {
                 this.getKeys().add(right.getKeys().remove(0));
                 this.getObjects().add(right.getObjects().remove(0));
@@ -1077,12 +1080,13 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         if (left == this) {
             return false;
         }
+        // КАНОН B-ДЕРЕВА: зеркальный фикс порога заимствования (>= t вместо > t)
         if (this.getParent().getKeys().isEmpty()
                 || currentNodeIndex - 1 >= this.getParent().getKeys().size()) {
             return false;
         }
         if (left.tryLockAndAddToDeepLock(deepLockedNode, transaction)
-                && left.getKeys().size() > getTree().getT()) {
+                && left.getKeys().size() >= getTree().getT()) {
             final int lastKeyIndex = left.getKeys().size() - 1;
             if (left.getChildren().isEmpty()) {
                 final Comparable key = left.getKeys().remove(lastKeyIndex);
