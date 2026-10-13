@@ -7,6 +7,7 @@ import org.flib.xdstorage.XdStorageProvider;
 import org.flib.xdstorage.entities.*;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.operation.*;
+import org.flib.xdstorage.serialization.FilesFormat;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.junit.FixMethodOrder;
 import org.junit.jupiter.api.*;
@@ -119,7 +120,7 @@ public class XmlDataStorageMultithreadsTest {
     @BeforeEach
     public void initStorage() {
         deleteDir(new File("./teststorage"));
-        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 200);
+        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 200, FilesFormat.XML);
     }
 
     public static void destroyStorage() {

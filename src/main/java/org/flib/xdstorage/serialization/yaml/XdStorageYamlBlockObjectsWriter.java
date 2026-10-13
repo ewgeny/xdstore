@@ -85,6 +85,10 @@ public class XdStorageYamlBlockObjectsWriter {
                 emitter.openBlock("value");
                 XdStorageYamlBlockContainersWriter.writeMapInline(c, (Map<?, ?>) value, emitter, services, simpleTypeHelper, idGenerator);
                 emitter.closeBlock();
+            } else if (c.isArray()) {
+                emitter.openBlock("value");
+                XdStorageYamlBlockContainersWriter.writeArrayInline(c, value, emitter, services, simpleTypeHelper, idGenerator);
+                emitter.closeBlock();
             } else {
                 emitter.openBlock("value");
                 writeSingleObjectOrReferenceInline(c, value, emitter, services, simpleTypeHelper, idGenerator);

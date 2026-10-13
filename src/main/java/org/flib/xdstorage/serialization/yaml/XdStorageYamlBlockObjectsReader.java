@@ -125,7 +125,11 @@ public class XdStorageYamlBlockObjectsReader {
                 // ФИКС СИГНАТУРЫ: Убран лишний параметр simpleTypeHelper!
                 finalValue = XdStorageYamlBlockContainersReader.readMap(tokenizer, simpleTypeHelper, fieldLevel);
             } else if ("reference".equals(complexBlockToken.key)) {
+                tokenizer.nextToken(); // Честно потребляем 'reference:' перед входом
                 finalValue = readReference(tokenizer, complexBlockToken.level, null, simpleTypeHelper);
+            } else if ("array".equals(complexBlockToken.key)) {
+                tokenizer.nextToken(); // Честно потребляем 'array:' перед входом
+                finalValue = XdStorageYamlBlockContainersReader.readArray(tokenizer, complexBlockToken.level, simpleTypeHelper);
             } else if ("object".equals(complexBlockToken.key)) {
                 tokenizer.nextToken();
                 finalValue = readObject(tokenizer, complexBlockToken.level, simpleTypeHelper);
@@ -246,7 +250,11 @@ public class XdStorageYamlBlockObjectsReader {
 // ФИКС СИГНАТУРЫ МЕТАДАННЫХ: Убран лишний параметр simpleTypeHelper!
                             finalValue = XdStorageYamlBlockContainersReader.readMap(tokenizer, simpleTypeHelper, token.level);
                         } else if ("reference".equals(complexBlock.key)) {
+                            tokenizer.nextToken(); // Честно потребляем 'reference:' перед входом
                             finalValue = readReference(tokenizer, complexBlock.level, null, simpleTypeHelper);
+                        } else if ("array".equals(complexBlock.key)) {
+                            tokenizer.nextToken(); // Честно потребляем 'array:' перед входом
+                            finalValue = XdStorageYamlBlockContainersReader.readArray(tokenizer, complexBlock.level, simpleTypeHelper);
                         } else if ("object".equals(complexBlock.key)) {
                             tokenizer.nextToken();
                             finalValue = readObject(tokenizer, complexBlock.level, simpleTypeHelper);

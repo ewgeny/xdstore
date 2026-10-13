@@ -3,7 +3,9 @@ package org.flib.xdstorage.serialization.yaml;
 import org.flib.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -59,6 +61,39 @@ public class XdStorageYamlBlockContainersReader {
             }
         }
         return collection;
+    }
+
+    /**
+     * Читает блок array: тип компонента из 'class:' и элементы '- item'.
+     * Восстанавливает массив через java.lang.reflect.Array.newInstance.
+     */
+    public static Object readArray(final XdStorageYamlTokenizer tokenizer, final int parentLevel,
+                                   final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
+        YamlLineToken classToken = tokenizer.nextToken();
+        if (classToken == null || !"class".equals(classToken.key)) {
+            return null;
+        }
+
+        final Class<?> component = Class.forName(classToken.value);
+        final List<Object> items = new ArrayList<>();
+
+        YamlLineToken token;
+        while ((token = tokenizer.peekToken()) != null) {
+            if (token.level <= parentLevel) break;
+
+            if (token.isListItem && "item".equals(token.key)) {
+                token = tokenizer.nextToken(); // Потребляем '- item:'
+                items.add(readTypedNode(tokenizer, token.level, simpleTypeHelper));
+            } else {
+                tokenizer.nextToken();
+            }
+        }
+
+        final Object array = java.lang.reflect.Array.newInstance(component, items.size());
+        for (int i = 0; i < items.size(); ++i) {
+            java.lang.reflect.Array.set(array, i, items.get(i));
+        }
+        return array;
     }
 
     @SuppressWarnings("unchecked")
@@ -164,7 +199,12 @@ public class XdStorageYamlBlockContainersReader {
                 tokenizer.nextToken(); // Потребляем 'object:' перед входом
                 return XdStorageYamlBlockObjectsReader.readObject(tokenizer, complexBlock.level, simpleTypeHelper);
             } else if ("reference".equals(complexBlock.key)) {
+                tokenizer.nextToken(); // Честно потребляем 'reference:' перед входом — иначе
+                // readReference видит блок-токен с level == parentLevel и мгновенно выходит с null!
                 return XdStorageYamlBlockObjectsReader.readReference(tokenizer, complexBlock.level, null, simpleTypeHelper);
+            } else if ("array".equals(complexBlock.key)) {
+                tokenizer.nextToken(); // Честно потребляем 'array:' перед входом
+                return readArray(tokenizer, complexBlock.level, simpleTypeHelper);
             }
         }
 

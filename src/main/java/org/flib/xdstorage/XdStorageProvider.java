@@ -1,5 +1,7 @@
 package org.flib.xdstorage;
 
+import org.flib.xdstorage.serialization.FilesFormat;
+
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,13 +15,17 @@ public class XdStorageProvider {
     private static Lock lock = new ReentrantLock();
 
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize) {
+        return newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.XML);
+    }
+
+    public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize, FilesFormat format) {
         XdStorage storage = storages.get(name);
         if (storage == null) {
             lock.lock();
             try {
                 storage = storages.get(name);
                 if (storage == null) {
-                    storages.put(name, storage = new XdStorage(name, folder, fragmentSize));
+                    storages.put(name, storage = new XdStorage(name, folder, fragmentSize, format));
                 }
             } finally {
                 lock.unlock();

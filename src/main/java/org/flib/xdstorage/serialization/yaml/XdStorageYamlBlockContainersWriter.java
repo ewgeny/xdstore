@@ -85,6 +85,50 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.closeBlock(); // Закрываем "collection"
     }
 
+    /**
+     * Пишет массив как блок array с типом КОМПОНЕНТА и элементами-ячейками '- item'.
+     * Формат зеркален коллекции: читатель восстанавливает массив через Array.newInstance.
+     */
+    public static void writeArrayInline(final Class<?> arrayClass, final Object array,
+                                        final XdStorageYamlEmitter emitter,
+                                        final XdStorageServicesLocator services,
+                                        final IXdStorageSimpleTypeHelper simpleTypeHelper,
+                                        final IXdStorageIdGenerator idGenerator) throws IOException, XdStorageException {
+        emitter.openBlock("array");
+        emitter.writeKey("class");
+        emitter.writeScalar("'" + arrayClass.getComponentType().getName() + "'");
+
+        final int length = java.lang.reflect.Array.getLength(array);
+        for (int i = 0; i < length; ++i) {
+            final Object item = java.lang.reflect.Array.get(array, i);
+            emitter.openBlock("- item");
+            if (item == null) {
+                emitter.writeKey("type");
+                emitter.writeScalar("'null'");
+                emitter.writeKey("value");
+                emitter.writeScalar("null");
+            } else {
+                final Class<?> ic = item.getClass();
+                emitter.writeKey("type");
+                emitter.writeScalar("'" + ic.getName() + "'");
+                if (simpleTypeHelper.isSimpleType(ic, item)) {
+                    emitter.writeKey("value");
+                    emitter.writeScalar("'" + XdStorageYamlBlockObjectsWriter.encode(simpleTypeHelper.simpleTypeToString(item)) + "'");
+                } else if (ic.isEnum()) {
+                    emitter.openBlock("value");
+                    writeEnumInline(ic, item, emitter);
+                    emitter.closeBlock();
+                } else {
+                    emitter.openBlock("value");
+                    writeComplexItemInline(ic, item, emitter, services, simpleTypeHelper, idGenerator);
+                    emitter.closeBlock();
+                }
+            }
+            emitter.closeBlock(); // Закрываем "- item"
+        }
+        emitter.closeBlock(); // Закрываем "array"
+    }
+
     public static void writeMap(final String name, final Class<?> cl, final Map<?, ?> map,
                                 final XdStorageYamlEmitter emitter,
                                 final XdStorageServicesLocator services,
