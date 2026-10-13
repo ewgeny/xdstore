@@ -418,6 +418,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 // устаревшей инстанции родителя (остаточная двойственность инстанций после
                 // подгрузки ссылок). Контейнер ребенка известен точно — это current.
                 child.setParent(current);
+                // Фиксация через фасад обязательна: parent — персистентное поле ноды
+                storage.update(child, transaction);
                 child.lockWrite(transaction);
             } finally {
                 current.unlockWrite();
@@ -734,6 +736,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
                 // устаревшей инстанции родителя; фактический контейнер — current.
                 child.setParent(current);
+                // Фиксация через фасад обязательна: parent — персистентное поле ноды
+                storage.update(child, transaction);
                 child.lockWrite(transaction);
             } finally {
                 current.unlockWrite();
