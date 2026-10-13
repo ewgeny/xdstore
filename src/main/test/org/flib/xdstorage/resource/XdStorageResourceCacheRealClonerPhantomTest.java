@@ -38,6 +38,18 @@ public class XdStorageResourceCacheRealClonerPhantomTest extends AbstractXdStora
                 new XdStorageDefaultReferenceProvider(mockStorage);
         final IXdStorageCloner realCloner = new XdStorageSmartCloner(provider);
         when(mockLocator.getCloner()).thenReturn(realCloner);
+
+        // Базовые записи заполняются ПОСЛЕ установки боевого клонера и создания кэша —
+        // порядок @BeforeEach между методами одного класса не гарантирован JUnit5
+        fillBaseData();
+    }
+
+    public void fillBaseData() {
+        resourceCache.fillCache(java.util.Arrays.asList(
+                new TestEntity(1L, "Stable_1"),
+                new TestEntity(2L, "Stable_2"),
+                new TestEntity(3L, "Stable_3")
+        ));
     }
 
     private Collection<Object> roundTripScan(final XdStorageTransaction tx) throws Exception {

@@ -87,11 +87,10 @@ public abstract class AbstractXdStorageResourceCacheTest {
         });
 
         doAnswer(inv -> {
-            TestEntity reference = inv.getArgument(0);
-            TestEntity sourceNode = inv.getArgument(1);
-            if (reference != null && sourceNode != null) {
-                // Симулируем честное наполнение полей прокси-обертки данными
-                reference.setValue(sourceNode.getValue());
+            // Типобезопасно: стаб обслуживает только пары TestEntity, прочие классы
+            // (например XdStorageBTree) пропускает без каста — CCE недопустим в стабе
+            if (inv.getArgument(0) instanceof TestEntity && inv.getArgument(1) instanceof TestEntity) {
+                ((TestEntity) inv.getArgument(0)).setValue(((TestEntity) inv.getArgument(1)).getValue());
             }
             return null;
         }).when(mockCloner).fillAndWrap(any(), any(), any(), any());
