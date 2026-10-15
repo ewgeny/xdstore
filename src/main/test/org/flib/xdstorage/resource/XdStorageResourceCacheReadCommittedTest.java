@@ -120,6 +120,20 @@ public class XdStorageResourceCacheReadCommittedTest extends AbstractXdStorageRe
         assertEquals(2, values().size());
     }
 
+    @Test
+    @DisplayName("RC-10: чтение по id — чужой закоммиченный апдейт виден в открытой TX")
+    public void flatReadByIdNonRepeatableAllowed() throws Exception {
+        final TestEntity before = (TestEntity) resourceCache.read(1L, reader);
+        assertEquals("Stable_1", before.getValue(), "Первое чтение по id");
+
+        resourceCache.update(new TestEntity(1L, "Committed_1"), writer);
+        writerCommit();
+
+        final TestEntity after = (TestEntity) resourceCache.read(1L, reader);
+        assertEquals("Committed_1", after.getValue(),
+                "READ COMMITTED: чтение по id не увидело чужой закоммиченный апдейт");
+    }
+
     // =========================================================================
     // Откат и собственные записи в RC-режиме
     // =========================================================================

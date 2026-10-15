@@ -581,12 +581,23 @@ public class XdStorageResourceCache {
         }
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
-        // Если объект уже материализован текущей транзакцией — мгновенно возвращаем его (Identity)
-        if (readObjects.containsKey(id)) {
-            return readObjects.get(id).object;
+        CacheRecord record = cache.get(id);
+        ObjectChange materialized = readObjects.get(id);
+
+        // READ COMMITTED: если версия записи изменилась с момента материализации
+        // (чужой коммит) — сбрасываем устаревшую материализацию, ниже она пересоздастся.
+        // SNAPSHOT: отдаем материализованную копию как есть (повторяемое чтение).
+        if (materialized != null && isolationLevel == IsolationLevel.READ_COMMITTED
+                && (record == null || materialized.recordVersion != record.getVersion())) {
+            readObjects.remove(id);
+            materialized = null;
         }
 
-        CacheRecord record = cache.get(id);
+        // Если объект уже материализован текущей транзакцией — мгновенно возвращаем его (Identity)
+        if (materialized != null) {
+            return materialized.object;
+        }
+
         if (record != null) {
             Object object = null;
 
@@ -621,7 +632,9 @@ public class XdStorageResourceCache {
                 if (object != null) {
                     if (!readObjects.containsKey(id) || record.isChangedByTransaction(transaction)) {
                         Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                        readObjects.putIfAbsent(id, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                        final ObjectChange oc = new ObjectChange(cloned, Change.read, System.nanoTime());
+                        oc.recordVersion = record.getVersion();
+                        readObjects.put(id, oc);
                     }
                     return readObjects.get(id).object;
                 }
@@ -699,12 +712,9 @@ public class XdStorageResourceCache {
                 }
 
                 if (object != null) {
-                    if (!record.isChangedByTransaction(transaction) && readObjects.containsKey(objectId)) {
-                        final ObjectChange readObject = readObjects.get(objectId);
-                        cloner.fillAndWrap(reference, readObject.object, services.getStorage(), transaction);
-                    } else {
-                        cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
-                    }
+                    // READ COMMITTED: наполняем ссылку последним закоммиченным состоянием,
+                    // а не устаревшей материализацией из транзитной карты
+                    cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
                     readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
                     return;
                 }
@@ -1387,6 +1397,9 @@ public class XdStorageResourceCache {
 
         public final long readTimestamp;
 
+        /** Версия записи кэша на момент материализации (для RC-освежения). */
+        public volatile long recordVersion = -1;
+
         public ObjectChange(final Object object, final Change change, final long readTimestamp) {
             this.object = object;
             this.change = change;
@@ -1424,12 +1437,19 @@ public class XdStorageResourceCache {
 
         private AtomicBoolean locked = new AtomicBoolean(false);
 
+        /** Версия записи: растет при каждой мутации состояния (для RC-освежения чтений). */
+        private volatile long version;
+
         private CacheRecord() {
             // do nothing
         }
 
         public Object getId() {
             return this.id;
+        }
+
+        public long getVersion() {
+            return version;
         }
 
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction) {
@@ -1513,6 +1533,7 @@ public class XdStorageResourceCache {
         }
 
         public void markUpdate(IXdStorageTransaction transaction) {
+            ++version;
             this.prevObject = this.object;
 
             // =========================================================================
@@ -1533,6 +1554,7 @@ public class XdStorageResourceCache {
         }
 
         public void markDelete(IXdStorageTransaction transaction) {
+            ++version;
             this.prevObject = this.object;
 
             // Симметрично защищаем временную сетку для операций удаления
@@ -1617,6 +1639,7 @@ public class XdStorageResourceCache {
         }
 
         public void commit(IXdStorageTransaction tx) {
+            ++version;
             if (!firstPhaseCommit || !secondPhaseCommit)
                 throw new XdStorageRuntimeException("Illegal state of record to commit");
 
@@ -1663,12 +1686,13 @@ public class XdStorageResourceCache {
             Object object = null;
             if (servesSnapshotVersion(transaction, this)) {
                 object = this.prevObject;
+            } else if (isChangedByTransaction(transaction)) {
+                // СОБСТВЕННЫЕ незакоммиченные мутации: newObject (null после своего delete = скрыто)
+                object = this.newObject;
+            } else if (canBeChangedByTransaction(transaction)) {
+                object = this.object;
             } else {
-                if (canBeChangedByTransaction(transaction)) {
-                    object = this.object;
-                } else {
-                    object = this.prevObject;
-                }
+                object = this.prevObject;
             }
             return object;
         }
