@@ -47,11 +47,30 @@ public class XdStorageResourceCache {
 
     private Class<?> clazz;
 
+    /** Уровень изоляции чтений кэша. */
+    public enum IsolationLevel {
+        /** Повторяемое чтение/снимок: читатель, начавший до чужого коммита, видит старую версию. */
+        SNAPSHOT,
+        /** Read Committed: читатель всегда видит ПОСЛЕДНЕЕ закоммиченное состояние. */
+        READ_COMMITTED
+    }
+
+    private IsolationLevel isolationLevel = IsolationLevel.SNAPSHOT;
+
+    public IsolationLevel getIsolationLevel() {
+        return isolationLevel;
+    }
+
+    public void setIsolationLevel(final IsolationLevel isolationLevel) {
+        this.isolationLevel = isolationLevel == null ? IsolationLevel.SNAPSHOT : isolationLevel;
+    }
+
     public XdStorageResourceCache(final XdStorageServicesLocator services, final Class<?> clazz, final XdStorageObjectIdField field) {
         this.services = services;
         this.field = field;
         this.clazz = clazz;
         this.cloner = this.services.getCloner();
+//        setIsolationLevel(IsolationLevel.READ_COMMITTED);
     }
 
     public long getObjectsCount() {
@@ -193,24 +212,27 @@ public class XdStorageResourceCache {
                         if (!record.isChangedByTransaction(transaction)) {
                             object = record.getObject();
                         }
-                    } else if (transaction.getTimestart() < record.timestamp) {
+                    } else if (servesSnapshotVersion(transaction, record)) {
                         object = record.prevObject;
                     }
                 } else {
-                    if (transaction.getTimestart() < record.timestamp) {
-                        object = record.prevObject;
-                    } else {
-                        object = record.getObject();
-                    }
+                    object = record.getObjectForTransaction(transaction);
                 }
             }
 
             if (object != null) {
                 try {
                     final Object objectId = field.get(object);
-                    if (!readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
+                    // READ COMMITTED: читатель видит последнее закоммиченное состояние —
+                    // перечитываем свежую копию, даже если запись уже материализована в TX
+                    final boolean rcRefresh = isolationLevel == IsolationLevel.READ_COMMITTED;
+                    if (rcRefresh || !readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
                         Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                        readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                        if (rcRefresh) {
+                            readObjects.put(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                        } else {
+                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                        }
                     }
                     Object objectToReturn = readObjects.get(objectId).object;
 
@@ -323,15 +345,11 @@ public class XdStorageResourceCache {
                         if (!record.isChangedByTransaction(transaction)) {
                             object = record.getObject();
                         }
-                    } else if (transaction.getTimestart() < record.timestamp) {
+                    } else if (servesSnapshotVersion(transaction, record)) {
                         object = record.prevObject;
                     }
                 } else {
-                    if (transaction.getTimestart() < record.timestamp) {
-                        object = record.prevObject;
-                    } else {
-                        object = record.getObject();
-                    }
+                    object = record.getObjectForTransaction(transaction);
                 }
             }
 
@@ -432,15 +450,11 @@ public class XdStorageResourceCache {
                         if (!record.isChangedByTransaction(transaction)) {
                             object = record.getObject();
                         }
-                    } else if (transaction.getTimestart() < record.timestamp) {
+                    } else if (servesSnapshotVersion(transaction, record)) {
                         object = record.prevObject;
                     }
                 } else {
-                    if (transaction.getTimestart() < record.timestamp) {
-                        object = record.prevObject;
-                    } else {
-                        object = record.getObject();
-                    }
+                    object = record.getObjectForTransaction(transaction);
                 }
             }
 
@@ -448,8 +462,11 @@ public class XdStorageResourceCache {
                 final Object objectId = field.get(object);
                 synchronized (result) {
                     synchronized (record) {
-                        if (!readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloner.cloneAndWrap(object, services.getStorage(), transaction), Change.read, System.nanoTime()));
+                        // READ COMMITTED: перечитываем свежую копию последнего закоммиченного состояния
+                        if (isolationLevel == IsolationLevel.READ_COMMITTED
+                                || !readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
+                            Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
+                            readObjects.put(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
                         }
                     }
                     result.add((T) readObjects.get(objectId).object);
@@ -516,15 +533,11 @@ public class XdStorageResourceCache {
                         if (!record.isChangedByTransaction(transaction)) {
                             object = record.getObject();
                         }
-                    } else if (transaction.getTimestart() < record.timestamp) {
+                    } else if (servesSnapshotVersion(transaction, record)) {
                         object = record.prevObject;
                     }
                 } else {
-                    if (transaction.getTimestart() < record.timestamp) {
-                        object = record.prevObject;
-                    } else {
-                        object = record.getObject();
-                    }
+                    object = record.getObjectForTransaction(transaction);
                 }
             }
             if (object != null) {
@@ -598,15 +611,11 @@ public class XdStorageResourceCache {
                         if (!record.isChangedByTransaction(transaction)) {
                             object = record.getObject();
                         }
-                    } else if (transaction.getTimestart() < record.timestamp) {
+                    } else if (servesSnapshotVersion(transaction, record)) {
                         object = record.prevObject;
                     }
                 } else {
-                    if (transaction.getTimestart() < record.timestamp) {
-                        object = record.prevObject;
-                    } else {
-                        object = record.getObject();
-                    }
+                    object = record.getObjectForTransaction(transaction);
                 }
 
                 if (object != null) {
@@ -682,15 +691,11 @@ public class XdStorageResourceCache {
                         if (!record.isChangedByTransaction(transaction)) {
                             object = record.getObject();
                         }
-                    } else if (transaction.getTimestart() < record.timestamp) {
+                    } else if (servesSnapshotVersion(transaction, record)) {
                         object = record.prevObject;
                     }
                 } else {
-                    if (transaction.getTimestart() < record.timestamp) {
-                        object = record.prevObject;
-                    } else {
-                        object = record.getObject();
-                    }
+                    object = record.getObjectForTransaction(transaction);
                 }
 
                 if (object != null) {
@@ -973,7 +978,7 @@ public class XdStorageResourceCache {
         final String transactionId = transaction.getTransactionId();
         final Object objectId = field.get(newObject);
 
-        // Перечитываем актуальное состояние ноды после прохождения барьера ожидания лога
+        // Перечитываем актуальное состояние ноды после прохождения барьера ожидания лока
         record = cache.get(objectId);
         if (record == null) {
             throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " was deleted by another transaction");
@@ -997,7 +1002,7 @@ public class XdStorageResourceCache {
 
             if (record.isReadChange()) {
                 record.setNewObject(materializeForCache(newObject));
-                record.markUpdate();
+                record.markUpdate(transaction);
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
                 if (record.isUpdateChange() || record.isInsertChange()) {
@@ -1008,7 +1013,7 @@ public class XdStorageResourceCache {
                 }
             } else if (record.canBeChangedByTransaction(transaction)) {
                 record.setNewObject(materializeForCache(newObject));
-                record.markUpdate();
+                record.markUpdate(transaction);
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
             } else {
                 throw new XdStorageException("concurrent modification one object of " + newObject.getClass() + " with idgeneration " + objectId);
@@ -1073,7 +1078,7 @@ public class XdStorageResourceCache {
 
             if (record.isReadChange()) {
                 record.setNewObject(null);
-                record.markDelete();
+                record.markDelete(transaction);
                 readObjects.remove(objectId);
             } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
                 if (record.isInsertChange()) {
@@ -1081,14 +1086,14 @@ public class XdStorageResourceCache {
                     readObjects.remove(objectId);
                 } else if (record.isUpdateChange()) {
                     record.setNewObject(null);
-                    record.markDelete();
+                    record.markDelete(transaction);
                     readObjects.remove(objectId);
                 } else {
                     throw new XdStorageException("trying to double delete one object of " + clazz + " with idgeneration " + objectId);
                 }
             } else if (record.canBeChangedByTransaction(transaction)) {
                 record.setNewObject(null);
-                record.markDelete();
+                record.markDelete(transaction);
                 readObjects.remove(objectId);
             } else {
                 throw new XdStorageException("concurrent modification one object of " + clazz + " with idgeneration " + objectId);
@@ -1361,7 +1366,8 @@ public class XdStorageResourceCache {
         record.newObject = newObject;
         record.transaction = transaction;
         record.change = Change.insert;
-        record.state = State.undefined;
+        record.timestamp = transaction.getTimestart();
+        record.state = State.locked;
         return record;
     }
 
@@ -1436,7 +1442,7 @@ public class XdStorageResourceCache {
             // =========================================================================
             boolean result = this.state == State.undefined
                     || !isOwnerTxAlive
-                    || (this.state == State.locked && this.transaction == transaction)
+                    || (this.state == State.locked && this.transaction == transaction && transaction.getTimestart() == timestamp)
                     || (this.state == State.committed && transaction.getTimestart() > timestamp);
 
             if (log.isDebugEnabled()) {
@@ -1455,7 +1461,7 @@ public class XdStorageResourceCache {
 
             boolean result = this.state == State.undefined
                     || !isOwnerTxAlive
-                    || (this.state == State.locked && this.transaction == transaction)
+                    || (this.state == State.locked && this.transaction == transaction && transaction.getTimestart() == timestamp)
                     || (this.state == State.committed && readObjectByTransactionTimestamp > timestamp);
 
             if (log.isDebugEnabled()) {
@@ -1506,7 +1512,7 @@ public class XdStorageResourceCache {
             return this.change == Change.delete;
         }
 
-        public void markUpdate() {
+        public void markUpdate(IXdStorageTransaction transaction) {
             this.prevObject = this.object;
 
             // =========================================================================
@@ -1518,6 +1524,7 @@ public class XdStorageResourceCache {
             if (this.timestamp != Long.MIN_VALUE) {
                 this.prevTimestamp = this.timestamp;
             }
+            this.timestamp = transaction.getTimestart();
 
             this.previousChange = this.change;
             this.change = Change.update;
@@ -1525,13 +1532,14 @@ public class XdStorageResourceCache {
             this.state = State.locked;
         }
 
-        public void markDelete() {
+        public void markDelete(IXdStorageTransaction transaction) {
             this.prevObject = this.object;
 
             // Симметрично защищаем временную сетку для операций удаления
             if (this.timestamp != Long.MIN_VALUE) {
                 this.prevTimestamp = this.timestamp;
             }
+            this.timestamp = transaction.getTimestart();
 
             this.previousChange = this.change;
             this.change = Change.delete;
@@ -1649,5 +1657,29 @@ public class XdStorageResourceCache {
             this.timestamp = this.prevTimestamp;
             this.prevTimestamp = Long.MIN_VALUE;
         }
+
+
+        private Object getObjectForTransaction(XdStorageTransaction transaction) {
+            Object object = null;
+            if (servesSnapshotVersion(transaction, this)) {
+                object = this.prevObject;
+            } else {
+                if (canBeChangedByTransaction(transaction)) {
+                    object = this.object;
+                } else {
+                    object = this.prevObject;
+                }
+            }
+            return object;
+        }
+    }
+
+    /**
+     * SNAPSHOT: читатель с timestart < версии видит предыдущую закоммиченную версию.
+     * READ_COMMITTED: читатель всегда видит последнее закоммиченное состояние (record.getObject()).
+     */
+    private boolean servesSnapshotVersion(final XdStorageTransaction transaction, final CacheRecord record) {
+        return isolationLevel != IsolationLevel.READ_COMMITTED
+                && transaction.getTimestart() < record.timestamp;
     }
 }

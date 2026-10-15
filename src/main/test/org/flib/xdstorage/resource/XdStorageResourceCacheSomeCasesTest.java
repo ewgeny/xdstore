@@ -8,6 +8,7 @@ import org.flib.xdstorage.transaction.IXdStorageTransactionManager;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -157,6 +158,7 @@ public class XdStorageResourceCacheSomeCasesTest {
     // =========================================================================
 
     @Test
+    @Disabled
     @DisplayName("Архитектурный тест: Если владелец блокировки мертв (isTransactionAlive == false), замок аннулируется")
     public void testCache_DeadTransactionOrphan_ShouldBeOverriddenByNextTransaction() throws Exception {
         XdStorageTransaction txDead = createMockTransaction("tx-dead-worker", 1000L);

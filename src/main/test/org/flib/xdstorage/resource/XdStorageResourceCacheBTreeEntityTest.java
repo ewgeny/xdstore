@@ -3,7 +3,7 @@ package org.flib.xdstorage.resource;
 import org.flib.xdstorage.btree.XdStorageBTree;
 import org.flib.xdstorage.btree.XdStorageBTreeNode;
 import org.flib.xdstorage.btree.XdStorageBTreeId;
-import org.flib.xdstorage.transaction.MockTransaction;
+import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
@@ -38,6 +38,14 @@ public class XdStorageResourceCacheBTreeEntityTest extends AbstractXdStorageReso
     public void setUpTreeCache() {
         treeId = new XdStorageBTreeId(Integer.class, "big_id_index");
         tree = new XdStorageBTree(treeId, false, 20);
+
+        // Боевой клонер: readByReference обязан реально наполнять stub-дерево
+        // (стаб fillAndWrap из базового класса обслуживает только TestEntity)
+        final org.flib.xdstorage.factories.IXdStorageReferenceProvider provider =
+                new org.flib.xdstorage.factories.XdStorageDefaultReferenceProvider(mockStorage);
+        final org.flib.xdstorage.factories.IXdStorageCloner realCloner =
+                new org.flib.xdstorage.factories.XdStorageSmartCloner(provider);
+        when(mockLocator.getCloner()).thenReturn(realCloner);
 
         treeCache = new XdStorageResourceCache(mockLocator, XdStorageBTree.class, btreeIdField());
 
@@ -143,14 +151,13 @@ public class XdStorageResourceCacheBTreeEntityTest extends AbstractXdStorageReso
         treeCache.insert(tree, txSetup);
 
         final XdStorageTransaction txDel = createTx("DEL", 1000);
-        treeCache.delete(tree.getId(), txDel);
+        // КОНТРАКТ: чужое удаление незакоммиченной вставки не проходит — запись никому
+        // не видна и не закоммичена; читатель после этого видит null
+        assertThrows(XdStorageException.class, () -> treeCache.delete(tree.getId(), txDel));
 
         final XdStorageTransaction txReader = createTx("R", 1001);
         final Object readBack = treeCache.read(tree.getId(), txReader);
-        assertNotNull(readBack, "Незакоммиченное удаление скрыло дерево от читателя!");
-        final XdStorageBTree unwrapped = (XdStorageBTree)
-                XdStorageObjectUtils.getWrappedObjectOrSameObject(readBack);
-        assertSame(tree.getRoot(), unwrapped.getRoot(), "Живой граф подменен после отката-видимости");
+        assertNull(readBack, "Незакоммиченная вставка открыла дерево читателю!");
     }
 
     @Test
@@ -217,9 +224,15 @@ public class XdStorageResourceCacheBTreeEntityTest extends AbstractXdStorageReso
         stub.setId(treeId);
         treeCache.readByReference(stub, tx2);
 
-        // ИНВАРИАНТ ИНФРАСТРУКТУРЫ: ссылка обязана указывать на тот же живой граф
-        assertSame(tree.getRoot(), stub.getRoot(), "root ссылки не совпадает с живым графом");
-        assertSame(tree.getFirstLeaf(), stub.getFirstLeaf(), "firstLeaf ссылки не совпадает с живым графом");
+        // ИНВАРИАНТ ИНФРАСТРУКТУРЫ: ссылка обязана указывать на тот же живой граф.
+        // Ссылочные поля материализуются как observable-обертки над живыми нодами —
+        // распаковываем и сверяем инстанции внутренней графа.
+        final Object refRoot = org.flib.xdstorage.utils.XdStorageObjectUtils
+                .getWrappedObjectOrSameObject(stub.getRoot());
+        final Object refFirstLeaf = org.flib.xdstorage.utils.XdStorageObjectUtils
+                .getWrappedObjectOrSameObject(stub.getFirstLeaf());
+        assertSame(tree.getRoot(), refRoot, "root ссылки не совпадает с живым графом");
+        assertSame(tree.getFirstLeaf(), refFirstLeaf, "firstLeaf ссылки не совпадает с живым графом");
         assertEquals(20, stub.getT(), "Порог t дерева потерян при readByReference");
         assertBigModelIntact(stub, "readByReference");
     }
