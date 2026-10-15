@@ -80,6 +80,7 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         this.idField = this.clInfo.getIdField();
 
         this.cache = new XdStorageResourceCache(services, this.clInfo.getClazz(), this.idField);
+        this.cache.setIsolationLevel(XdStorageResourceCache.IsolationLevel.READ_COMMITTED);
 
         this.reader = services.getIoFactory().newInstanceReader();
         this.writer = services.getIoFactory().newInstanceWriter();
