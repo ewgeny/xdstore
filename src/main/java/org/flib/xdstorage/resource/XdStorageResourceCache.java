@@ -47,22 +47,14 @@ public class XdStorageResourceCache {
 
     private Class<?> clazz;
 
-    /** Уровень изоляции чтений кэша. */
-    public enum IsolationLevel {
-        /** Повторяемое чтение/снимок: читатель, начавший до чужого коммита, видит старую версию. */
-        SNAPSHOT,
-        /** Read Committed: читатель всегда видит ПОСЛЕДНЕЕ закоммиченное состояние. */
-        READ_COMMITTED
-    }
+    private volatile XdStorageIsolationLevel isolationLevel = XdStorageIsolationLevel.SNAPSHOT;
 
-    private IsolationLevel isolationLevel = IsolationLevel.SNAPSHOT;
-
-    public IsolationLevel getIsolationLevel() {
+    public XdStorageIsolationLevel getIsolationLevel() {
         return isolationLevel;
     }
 
-    public void setIsolationLevel(final IsolationLevel isolationLevel) {
-        this.isolationLevel = isolationLevel == null ? IsolationLevel.SNAPSHOT : isolationLevel;
+    public void setIsolationLevel(final XdStorageIsolationLevel isolationLevel) {
+        this.isolationLevel = isolationLevel == null ? XdStorageIsolationLevel.SNAPSHOT : isolationLevel;
     }
 
     public XdStorageResourceCache(final XdStorageServicesLocator services, final Class<?> clazz, final XdStorageObjectIdField field) {
@@ -225,7 +217,7 @@ public class XdStorageResourceCache {
                     final Object objectId = field.get(object);
                     // READ COMMITTED: читатель видит последнее закоммиченное состояние —
                     // перечитываем свежую копию, даже если запись уже материализована в TX
-                    final boolean rcRefresh = isolationLevel == IsolationLevel.READ_COMMITTED;
+                    final boolean rcRefresh = isolationLevel == XdStorageIsolationLevel.READ_COMMITTED;
                     if (rcRefresh || !readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
                         Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
                         if (rcRefresh) {
@@ -356,6 +348,13 @@ public class XdStorageResourceCache {
             try {
                 if (object != null) {
                     final Object objectId = field.get(object);
+                    // READ COMMITTED: если чужой коммит изменил запись после материализации —
+                    // сбрасываем устаревшую копию, ниже она пересоздастся (как в readInternal(id))
+                    final ObjectChange materialized = readObjects.get(objectId);
+                    if (materialized != null && isolationLevel == XdStorageIsolationLevel.READ_COMMITTED
+                            && materialized.recordVersion != record.getVersion()) {
+                        readObjects.remove(objectId);
+                    }
                     final Object objectToWrap;
                     if (readObjects.containsKey(objectId)) {
                         objectToWrap = readObjects.get(objectId).object;
@@ -363,6 +362,12 @@ public class XdStorageResourceCache {
                         objectToWrap = object;
                     } else {
                         objectToWrap = XdStorageObjectUtils.cloneObject(object);
+                        if (isolationLevel == XdStorageIsolationLevel.READ_COMMITTED) {
+                            // запоминаем версию записи, чтобы следующее чтение увидело устаревание копии
+                            final ObjectChange refreshed = new ObjectChange(objectToWrap, Change.read, System.nanoTime());
+                            refreshed.recordVersion = record.getVersion();
+                            readObjects.put(objectId, refreshed);
+                        }
                     }
                     watcher.watch((T) XdStorageObjectUtils.wrapAsUnmodifiableObject(objectToWrap, services.getStorage(), transaction));
                 }
@@ -463,7 +468,7 @@ public class XdStorageResourceCache {
                 synchronized (result) {
                     synchronized (record) {
                         // READ COMMITTED: перечитываем свежую копию последнего закоммиченного состояния
-                        if (isolationLevel == IsolationLevel.READ_COMMITTED
+                        if (isolationLevel == XdStorageIsolationLevel.READ_COMMITTED
                                 || !readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
                             Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
                             readObjects.put(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
@@ -595,7 +600,7 @@ public class XdStorageResourceCache {
         // READ COMMITTED: если версия записи изменилась с момента материализации
         // (чужой коммит) — сбрасываем устаревшую материализацию, ниже она пересоздастся.
         // SNAPSHOT: отдаем материализованную копию как есть (повторяемое чтение).
-        if (materialized != null && isolationLevel == IsolationLevel.READ_COMMITTED
+        if (materialized != null && isolationLevel == XdStorageIsolationLevel.READ_COMMITTED
                 && (record == null || materialized.recordVersion != record.getVersion())) {
             readObjects.remove(id);
             materialized = null;
@@ -1712,7 +1717,7 @@ public class XdStorageResourceCache {
      * READ_COMMITTED: читатель всегда видит последнее закоммиченное состояние (record.getObject()).
      */
     private boolean servesSnapshotVersion(final XdStorageTransaction transaction, final CacheRecord record) {
-        return isolationLevel != IsolationLevel.READ_COMMITTED
+        return isolationLevel != XdStorageIsolationLevel.READ_COMMITTED
                 && transaction.getTimestart() < record.timestamp;
     }
 }

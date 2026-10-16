@@ -1,6 +1,7 @@
 package org.flib.xdstorage.resource;
 
 import org.flib.xdstorage.IXdStoragePredicate;
+import org.flib.xdstorage.IXdStorageWatcher;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +31,7 @@ public class XdStorageResourceCacheReadCommittedTest extends AbstractXdStorageRe
 
     @BeforeEach
     public void setUpRc() throws Exception {
-        resourceCache.setIsolationLevel(XdStorageResourceCache.IsolationLevel.READ_COMMITTED);
+        resourceCache.setIsolationLevel(XdStorageIsolationLevel.READ_COMMITTED);
         writer = createTx("W", 1000);
         reader = createTx("R", 500); // читатель начал ДО райтера — RC обязан все равно видеть коммиты
         resourceCache.fillCache(java.util.Arrays.asList(
@@ -167,5 +168,26 @@ public class XdStorageResourceCacheReadCommittedTest extends AbstractXdStorageRe
         final Object second = resourceCache.read(1L, reader);
         assertNotNull(first);
         assertSame(first, second, "Identity Map нарушена в RC-режиме");
+    }
+
+    @Test
+    @DisplayName("RC-11: watch() — чужой закоммиченный апдейт виден в открытой TX (свежесть материализации)")
+    public void watchSeesFreshCommittedUpdate() throws Exception {
+        // скан ДО чужого коммита материализует в TX-кэше копии со старыми значениями
+        assertTrue(values().contains("Stable_1"), "База не заполнена");
+
+        resourceCache.update(new TestEntity(1L, "Committed_1"), writer);
+        writerCommit();
+
+        final List<String> watched = new ArrayList<>();
+        resourceCache.watch(reader, new IXdStorageWatcher<TestEntity>() {
+            @Override
+            public void watch(final TestEntity e) {
+                watched.add(e.getValue());
+            }
+        });
+        assertTrue(watched.contains("Committed_1"),
+                "READ COMMITTED нарушен: watch() отдал устаревшую материализованную копию!");
+        assertFalse(watched.contains("Stable_1"), "READ COMMITTED: watch() не заменил старую версию");
     }
 }

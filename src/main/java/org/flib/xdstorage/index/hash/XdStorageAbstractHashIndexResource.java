@@ -11,6 +11,7 @@ import org.flib.xdstorage.index.IXdStorageIndexResourceObject;
 import org.flib.xdstorage.index.XdStorageIndexResourceCache;
 import org.flib.xdstorage.resource.IXdStorageDaoResource;
 import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
+import org.flib.xdstorage.resource.XdStorageIsolationLevel;
 import org.flib.xdstorage.resource.XdStorageResourceCache;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
@@ -60,7 +61,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         this.idField = this.clInfo.getIdField();
         this.isReferences = false;
         this.cache = new XdStorageResourceCache(services, clInfo.getClazz(), idField);
-        this.cache.setIsolationLevel(XdStorageResourceCache.IsolationLevel.READ_COMMITTED);
+        this.cache.setIsolationLevel(XdStorageIsolationLevel.READ_COMMITTED);
         this.idGenerator = null;
 
         this.indexName = indexName;
@@ -81,7 +82,7 @@ public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIn
         this.idField = this.clInfo.getIdField();
         this.isReferences = false;
         this.cache = new XdStorageResourceCache(services, clInfo.getClazz(), idField);
-        this.cache.setIsolationLevel(XdStorageResourceCache.IsolationLevel.READ_COMMITTED);
+        this.cache.setIsolationLevel(XdStorageIsolationLevel.READ_COMMITTED);
         this.idGenerator = idGenerator;
 
         this.indexName = indexName;

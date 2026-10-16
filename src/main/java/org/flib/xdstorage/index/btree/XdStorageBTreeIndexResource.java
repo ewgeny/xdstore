@@ -17,6 +17,7 @@ import org.flib.xdstorage.object.XdStorageIdentifiableObject;
 import org.flib.xdstorage.observing.XdStorageObserverService;
 import org.flib.xdstorage.resource.IXdStorageDaoResource;
 import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
+import org.flib.xdstorage.resource.XdStorageIsolationLevel;
 import org.flib.xdstorage.resource.XdStorageObjectChange;
 import org.flib.xdstorage.resource.XdStorageResourceCache;
 import org.flib.xdstorage.serialization.IXdStorageObjectsReader;
@@ -24,6 +25,7 @@ import org.flib.xdstorage.serialization.IXdStorageObjectsWriter;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
+import org.flib.xdstorage.utils.XdStorageAtomicFile;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 import org.flib.xdstorage.utils.XdStorageObjectIdField;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
@@ -80,7 +82,7 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         this.idField = this.clInfo.getIdField();
 
         this.cache = new XdStorageResourceCache(services, this.clInfo.getClazz(), this.idField);
-        this.cache.setIsolationLevel(XdStorageResourceCache.IsolationLevel.READ_COMMITTED);
+        this.cache.setIsolationLevel(XdStorageIsolationLevel.READ_COMMITTED);
 
         this.reader = services.getIoFactory().newInstanceReader();
         this.writer = services.getIoFactory().newInstanceWriter();
@@ -160,33 +162,22 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
     }
 
     private void writeObjects(final Collection<Object> objects) {
-        File file = new File(getFileName());
-        if (file.exists())
-            file.delete();
+        if (objects.size() == 0) {
+            // пустой ресурс = файла нет (прежняя семантика)
+            final File file = new File(getFileName());
+            if (file.exists())
+                file.delete();
+            return;
+        }
 
-        if (objects.size() > 0) {
-            try {
-                // TODO : REVIEW file deleting and creation
-                // ! and think about backup file
-                file = new File(getFileName());
-                if (!file.exists()) {
-                    final File parentFile = file.getParentFile();
-                    if (parentFile != null && !parentFile.exists())
-                        parentFile.mkdirs();
-                    file.createNewFile();
-                }
-
-                Writer xmlWriter = null;
-                try {
-                    xmlWriter = new FileWriter(file);
-
-                    writer.writeObjects(xmlWriter, objects);
-                } finally {
-                    xmlWriter.close();
-                }
-            } catch (final Throwable e) {
-                throw new XdStorageRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
-            }
+        try {
+            // crash-safe: пишем во временный файл-соседа и атомарно подменяем ресурс,
+            // чтобы сбой посреди коммита не мог обрезать существующий файл ресурса
+            XdStorageAtomicFile.writeReplacing(getFileName(), out -> {
+                writer.writeObjects(out, objects);
+            });
+        } catch (final Throwable e) {
+            throw new XdStorageRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
         }
     }
 

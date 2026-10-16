@@ -10,6 +10,7 @@ import org.flib.xdstorage.serialization.IXdStorageObjectsWriter;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionResourceChanges;
+import org.flib.xdstorage.utils.XdStorageAtomicFile;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 
 import java.io.*;
@@ -113,36 +114,26 @@ public class XdStorageResource extends XdStorageAbstractResource {
     }
 
     private void writeObjects(final Collection<Object> objects) {
-        File file = new File(getFileName());
-        if (file.exists())
-            file.delete();
+        if (objects.size() == 0) {
+            // пустой ресурс = файла нет (прежняя семантика)
+            final File file = new File(getFileName());
+            if (file.exists())
+                file.delete();
+            return;
+        }
 
-        if (objects.size() > 0) {
-            try {
-                // TODO : REVIEW file deleting and creation
-                // ! and think about backup file
-                file = new File(getFileName());
-                if (!file.exists()) {
-                    final File parentFile = file.getParentFile();
-                    if (parentFile != null && !parentFile.exists())
-                        parentFile.mkdirs();
-                    file.createNewFile();
+        try {
+            // crash-safe: пишем во временный файл-соседа и атомарно подменяем ресурс,
+            // чтобы сбой посреди коммита не мог обрезать существующий файл ресурса
+            XdStorageAtomicFile.writeReplacing(getFileName(), out -> {
+                if (isReferences) {
+                    writer.writeReferences(out, idField, objects);
+                } else {
+                    writer.writeObjects(out, objects);
                 }
-
-                Writer xmlWriter = null;
-                try {
-                    xmlWriter = new FileWriter(file);
-                    if (isReferences) {
-                        writer.writeReferences(xmlWriter, idField, objects);
-                    } else {
-                        writer.writeObjects(xmlWriter, objects);
-                    }
-                } finally {
-                    xmlWriter.close();
-                }
-            } catch (final Throwable e) {
-                throw new XdStorageRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
-            }
+            });
+        } catch (final Throwable e) {
+            throw new XdStorageRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
         }
     }
 

@@ -1,8 +1,15 @@
 # XdStorage — Optimization Plan
 
-Baseline: 449 tests / 4 red (`testOneThread` purge error, `DeleteIsolation`, `GraphPhantom`, `XdatStorageStressTest`).
-Every fix below is gated by the three suites built in the previous sessions: YAML engine round-trip (11),
-BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10).
+Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retained surefire reports):
+**469 tests / 7 red** — the Phase-3b stress family (`DeleteIsolation`, `GraphPhantom`,
+`PhantomReadIsolation` (flaky under full-suite load), `XdStorageStressTest`,
+`XmlDataStorageMultithreadsTest` ×2) plus the new `XdStorageCompositeObjectPersistentTest.step2`
+boolean-field distortion (`isActive` expected true, was false on reload — under investigation by
+the author). `BTreeResourceCacheIntegrationTest` (rebalance-lock contention) flipped green once
+the log level dropped to INFO — it was timing out under DEBUG logging I/O. Phase-C acceptance
+(449/449) was **not** reached: the stress family is still red (see §3 status).
+Every fix below is gated by the suites built in the previous sessions: YAML engine round-trip (11),
+BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10+1).
 
 ---
 
@@ -57,14 +64,19 @@ without touching the others.**
   uncommitted insert succeeds; reader sees null) + green resource suite.
 - **Revert:** restore no-arg `markUpdate/markDelete` and `state = State.undefined`.
 
-### R-6. REJECTED experiment: timestamp-equality clause in canBeChangedByTransaction — REMOVED
+### R-6. REJECTED experiment: timestamp-equality clause in canBeChangedByTransaction — REMOVED, then RE-INTRODUCED (verified harmless)
 - **What (undone):** `state == locked && this.transaction == transaction &&
   transaction.getTimestart() == timestamp` in both overloads.
 - **Why reverted:** after `record.lock()` adopts an orphaned record (dead owner), the record's
   timestamp still holds the *dead* tx's timestart → adopter could never modify the record →
   `DeadTransactionOrphan` red. The identity check `this.transaction == transaction` is sufficient.
-- **Revert (if ever needed):** re-add the clause to both overloads; expect DeadTransactionOrphan
-  to go red.
+- **UPDATE (2026-10-16): the clause is BACK** at HEAD `158a191` — both `canBeChangedByTransaction`
+  overloads (cache:1473/1492) and `isChangedByTransaction` (1507), framed by an «ИСПРАВЛЕНИЕ» comment.
+  Verified **not** a live regression: `XdStorageResourceCacheSomeCasesTest` 6/6 (1 skipped). It works
+  because of check ordering: the `!isOwnerTxAlive` escape fires *before* lock (while the dead tx still
+  owns the record), and `markUpdate/markDelete` re-stamp `timestamp = adopter.getTimestart()` after
+  `lock()` takes over — `lock()` itself does NOT re-stamp on adoption. Any new adoption path that
+  checks `canBeChangedByTransaction` between lock and markUpdate will hit the original failure.
 
 ### R-7. Phase-2 fast-path refresh (update) — KEEP
 - **What:** update fast-path refreshes the per-tx `readObjects` entry (put, not putIfAbsent)
@@ -79,13 +91,51 @@ listed here because ResourceCache transit interacts with it)
 - **Revert:** unwrap `XdStorageBTreeNode.java` hunk; expect YAML-era graph-split anomalies to
   return.
 
+### R-9. watch() RC freshness — KEEP (closes Phase B item 3, 2026-10-16)
+- **What:** in `watchInternal`, a materialized copy whose `recordVersion != record.getVersion()`
+  is dropped and re-cloned under READ_COMMITTED (mirrors `readInternal(id)`); the fresh clone is
+  put back into the per-tx read-set with the version stamped. SNAPSHOT behavior unchanged
+  (stale copy still served = repeatable reads).
+- **Verified:** new `RC-11 watchSeesFreshCommittedUpdate` (XStorageResourceCacheReadCommittedTest
+  11/11; proven valid — goes red with the refresh condition disabled).
+- **Revert:** delete the two `isolationLevel == XdStorageIsolationLevel.READ_COMMITTED` blocks
+  in `watchInternal`.
+
+### R-10. IsolationLevel extracted to top-level `XdStorageIsolationLevel` + volatile — KEEP (Phase A item 2, 2026-10-16)
+- **What:** enum moved out of `XdStorageResourceCache` (same package, Russian javadoc preserved);
+  the `isolationLevel` field made `volatile` (was a plain field mutated via setter); references
+  updated in BTree/hash index resources and the RC test. Pure refactor + visibility fix.
+- **Revert:** re-nest the enum inside `XdStorageResourceCache` and drop `volatile`.
+
+### R-11. Crash-safe resource write-out (atomic rename) — KEEP (2026-10-16)
+- **What:** all three `writeObjects` (`XdStorageResource`, `XdStorageBTreeIndexResource`,
+  `XdStorageHashIndexResource`) now write to `<file>.tmp` via the new
+  `XdStorageAtomicFile.writeReplacing` and swap with `Files.move(REPLACE_EXISTING, ATOMIC_MOVE)`
+  (plain-move fallback where atomic rename is unsupported). The old delete-then-recreate scheme
+  lost the whole resource file if the process died mid-commit. Empty-resource semantics unchanged
+  (empty cache = no file).
+- **Verified:** full suite green on all persistence-heavy tests (XML/YAML storage, BTree/hash
+  index writes, rollback-failed-commit rewrites).
+- **Revert:** restore the delete-then-create bodies (re-adds the in-code TODO).
+
+### R-12. Ops hygiene: log level INFO, log4j-core 2.23.1, .gitignore — KEEP (2026-10-16)
+- **What:** `log4j2.xml` DEBUG→INFO (DEBUG logged every MVCC switch — GB-scale logs per stress
+  run and heavy I/O slowdown; full suite runs 2:24 at INFO); `log4j-core` 2.11.1→2.23.1
+  (Log4Shell CVE-2021-44228 family); new `.gitignore` (`target/`, `gencode/`, `teststorage/`,
+  `xdstorage.log`, `.idea/`, `*.tmp`).
+- **Verified:** full suite 469 tests / 7 red (same set as baseline minus the contention
+  integration test) — no test asserts on log output.
+- **Revert:** restore DEBUG levels / 2.11.1 / delete `.gitignore`.
+
 ---
 
 ## 2. PROJECT ANALYSIS
 
-- **Scale:** 168 main classes / 118 test classes. God classes: `XdatStorageResourceCache` (1685
-  lines, 51 public + 52 private members, 6 near-identical MVCC switches), `XdatStorageBTreeNode`
-  (1351 — navigation + structural mutations + locking in one), `XdatStorage` (1265 — facade +
+- **Scale:** 168 main classes / 118 test classes. God classes: `XdStorageResourceCache` (~1730
+  lines — the 6 MVCC read sites now delegate the core visibility switch to the consolidated
+  `CacheRecord.getObjectForTransaction`, but each site keeps its own loop/materialize/RC-refresh
+  scaffolding), `XdStorageBTreeNode`
+  (1351 — navigation + structural mutations + locking in one), `XdStorage` (1265 — facade +
   dispatch + index/search orchestration).
 - **Test health:** 449 tests, 4 red — all 4 in the delete-flow/multi-thread family
   (`testOneThread` purge error; `DeleteIsolation`, `GraphPhantom`, `XdatStorageStressTest`).
@@ -101,46 +151,47 @@ listed here because ResourceCache transit interacts with it)
 
 ## 3. OPTIMIZATION PLAN (executed in phases; each phase ends with all suites green)
 
-### Phase A — Consolidate the undo-log (small, safe, do first)
-1. Extract the 6 inline MVCC switches into one private
-   `resolveVisible(tx, record, Object resolved)` — the branches are already semantically
-   identical after R-1/R-2; one switch = one place to fix isolation bugs.
-2. Move `IsolationLevel` to its own top-level file (`XdatStorageIsolationLevel.java`).
-3. Kill the `==`-style dead experiments: confirm no timestamp-equality remnants (R-6 done).
-4. Acceptance: resource suite 113/113, no behavior change (pure refactor).
+### Phase A — Consolidate the undo-log — **DONE (in a different shape than planned)**
+1. ~~Extract the 6 inline MVCC switches~~ — **DONE**: the USER consolidated the core switch into
+   the per-record `CacheRecord.getObjectForTransaction(tx)` (all 6 sites delegate to it); the
+   per-site scaffolding (loop over records, materialization, RC refresh) remains duplicated —
+   acceptable.
+2. Move `IsolationLevel` to its own top-level file — **DONE 2026-10-16** (R-10, incl. `volatile`).
+3. Kill the `==`-style dead experiments: R-6 clause re-introduced by the user — verified harmless
+   (see R-6 UPDATE); no other remnants.
+4. Acceptance: resource suite green, no behavior change — **met**.
 
-### Phase B — Read-Committed completeness (medium)
-1. Flat `read(id, tx)`: honor RC freshness (currently early-returns the first-scan clone →
-   by-id reads are repeatable while scans are not — inconsistent). Keep identity within a
-   single scan; RC scan-refresh already covers scans.
-2. `readByReference`: same RC freshness (fill from `record.getObject()`, not stale transit).
-3. `watch`: honor RC (watcher receives latest committed).
-4. Acceptance: extend `XdatStorageResourceCacheReadCommittedTest` with by-id and
-   readByReference non-repeatable-read cases; snapshot tests stay green.
+### Phase B — Read-Committed completeness — **DONE**
+1. Flat `read(id, tx)` RC freshness — **DONE earlier** (version/recordVersion invalidation).
+2. `readByReference` RC freshness — **DONE earlier**.
+3. `watch` RC freshness — **DONE 2026-10-16** (R-9, pinned by RC-11).
+4. Acceptance: RC suite green (now 11 tests incl. RC-11), snapshot tests stay green — **met**.
 
-### Phase C — Fix the remaining 4 red (the delete-flow / Phase 3b core)
-1. Root cause: structural BTree changes are global; ResourceCache MVCC covers records, not
-   topology. Implement a **canonical instance registry** for BTree infra (node id → live
-   instance) so all transactions share one graph, plus **single-flight tree-record
-   initialization** (the empty-tree race from the GraphPhantom diagnostics).
-2. Make `readByReference` for infra records wire through the registry (removes
-   observable-wrapper indirection for null-id nodes).
-3. Make `delete` of an insert-locked record fail loudly per contract A (currently the lock
-   timeout mask depends on mock vs real timeout).
-4. Acceptance: `XdatStorageResourceCacheBTreeEntityTest` 8/8; `DeleteIsolation`,
-   `GraphPhantom`, `testOneThread` green; BTree invariants + mass-delete stay green.
+### Phase C — Fix the remaining red (the delete-flow / Phase 3b core) — **PARTIAL, acceptance NOT met**
+1. Single-flight tree-record initialization — **DONE** (`createTreeLock` double-check in
+   `XdStorageBTreeIndexResource.insert`). The **canonical instance registry was NOT implemented** —
+   the shipped approach is the R-4 live-instance guard instead; structural BTree changes are still
+   global and unversioned.
+2. `readByReference` infra wiring — **DONE earlier** (unwrap via `getWrappedObjectOrSameObject`).
+3. Contract-A delete of insert-locked records — **DONE earlier** (R-5 stamping).
+4. Acceptance: `DeleteIsolation`, `GraphPhantom`, `testOneThread`, `XdStorageStressTest` green —
+   **NOT met**: all still red at HEAD (re-measured 2026-10-16). The root cause stands: record-level
+   MVCC cannot isolate or undo in-place B+Tree topology changes. Next real step is structural
+   versioning / canonical per-id instance registry (Phase 3b proper), not more record-cache fixes.
 
 ### Phase D — Performance (after correctness)
-1. RC scan cost: reuse unchanged clones (compare record.version counter instead of re-cloning).
-2. `blockingTime` map cleanup in `XdatStorageBTreeNode.lock` (leaks entries per waiting tx id).
+1. RC scan cost: reuse unchanged clones (the by-id read and now `watch` compare
+   `recordVersion`; the full/predicate scans still re-clone every row in RC — open).
+2. `blockingTime` map cleanup in `CacheRecord.lock` (still leaks entries after acquisition).
 3. Counter/index records: consider batching `storage.update` calls in hot insert paths.
 
 ---
 
 ## 4. Regression net (do not skip per phase)
 
-`YamlEngineEntitiesRoundTripTest` + `XdatStorageBTreeSplitJoinInvariantTest` +
-`XdatStorageBTreeMassDeleteStabilityTest` + `XdatStorageResourceCacheReadCommittedTest` +
-`XdatStorageResourceCacheRealClonerPhantomTest` + `XdatStorageResourceCacheMethodCoverageTest` +
-`XdatStorageResourceCacheBTreeEntityTest` + resource package + btree package — ~185 tests, all
-green at plan start. Full suite target after Phase C: 449/449.
+`YamlEngineEntitiesRoundTripTest` + `XdStorageBTreeSplitJoinInvariantTest` +
+`XdStorageBTreeMassDeleteStabilityTest` + `XdStorageResourceCacheReadCommittedTest` +
+`XdStorageResourceCacheRealClonerPhantomTest` + `XdStorageResourceCacheMethodCoverageTest` +
+`XdStorageResourceCacheBTreeEntityTest` + resource package + btree package — all green at
+2026-10-16 (full suite 469 tests, 7 red = the Phase-3b stress family + the new boolean-distortion
+serialization test; assertion suites 100% green).

@@ -1,0 +1,12 @@
+# build output
+target/
+
+# runtime-generated engine artifacts
+gencode/
+teststorage/
+xdstorage.log
+*.tmp
+
+# IDE
+.idea/
+*.iml
