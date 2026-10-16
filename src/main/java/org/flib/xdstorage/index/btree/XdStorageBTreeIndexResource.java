@@ -32,6 +32,7 @@ import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -237,15 +238,18 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
     public void rollbackPerformingFirstPhaseCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) throws XdStorageException {
         cache.rollbackFailedCommit(transaction, changes);
         writeObjects(cache.readUnsafe(transaction));
+        seenKeysByTransaction.remove(transaction.getTransactionId());
     }
 
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
         cache.rollback(transaction);
+        seenKeysByTransaction.remove(transaction.getTransactionId());
     }
 
     @Override
     public void release(final XdStorageTransaction transaction) {
         cache.clear(transaction);
+        seenKeysByTransaction.remove(transaction.getTransactionId());
         manager.releaseResource(this);
     }
 
@@ -255,7 +259,16 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         final XdStorageBTree tree = storage.load(XdStorageBTree.class, bTreeId, transaction);
         if (tree != null) {
             final List<Object> result = tree.find((Comparable) id, storage, transaction);
-            return result.isEmpty() ? null : result.get(0);
+            if (!result.isEmpty()) {
+                return result.get(0);
+            }
+            // SNAPSHOT-фолбэк: ключ уже удален из дерева чужим коммитом, но снапшот этой
+            // транзакции его видел (скан/чтение до коммита) — дороже промаха берем
+            // зафиксированный data-фрагмент; кэш данных отдаст историческую версию.
+            final Map<Object, Object> seenKeys = seenKeysByTransaction.get(transaction.getTransactionId());
+            if (seenKeys != null) {
+                return seenKeys.get(id);
+            }
         }
         return null;
     }
@@ -283,6 +296,7 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
                     // данному snapshot (закоммиченное удаление при обходе гонки структуры).
                     // Null в результирующей коллекции роняет NPE-ем циклы потребителей — пропуск.
                     if (object != null) {
+                        rememberSeenKey(transaction, objectId, resourceId);
                         result.add(object);
                     }
                 }
@@ -317,6 +331,7 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
                         if (object == null) {
                             return;
                         }
+                        rememberSeenKey(transaction, objectId, resourceId);
                         if (predicate.passed(XdStorageObjectUtils.wrapAsUnmodifiableObject(object, storage, transaction))) {
                             result.add(object);
                         }
@@ -376,10 +391,29 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
             return null;
         }
         final IXdStorageDaoResource resource = manager.lockResource(resourceId, objectClInfo, transaction);
-        return resource.read(id, transaction);
+        final Object object = resource.read(id, transaction);
+        if (object != null) {
+            // фиксируем снапшот-видимость ключа для повторных чтений по id этой транзакции
+            rememberSeenKey(transaction, id, resourceId);
+        }
+        return object;
     }
 
     private final Lock createTreeLock = new ReentrantLock();
+
+    /**
+     * Ключи id_index, видимые транзакции на момент ее скана/чтения (id → data-фрагмент).
+     * Структурные удаления ключа из дерева не версионированы: чужой коммит удаляет ключ
+     * из дерева НАВСЕГДА, и скан, увидевший ключ до коммита, при повторном чтении по id
+     * получит промах дерева вместо исторической версии. Карта позволяет by-id дороже
+     * промаха дерева взять resourceId, зафиксированный снапшотом транзакции.
+     */
+    private final Map<String, Map<Object, Object>> seenKeysByTransaction = new ConcurrentHashMap<>();
+
+    private void rememberSeenKey(final XdStorageTransaction transaction, final Object objectId, final Object resourceId) {
+        seenKeysByTransaction.computeIfAbsent(transaction.getTransactionId(),
+                k -> new ConcurrentHashMap<>()).put(objectId, resourceId);
+    }
 
     @Override
     public void insert(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {

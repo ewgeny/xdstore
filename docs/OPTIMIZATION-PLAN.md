@@ -5,9 +5,17 @@ Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retain
 `PhantomReadIsolation` (flaky under full-suite load), `XdStorageStressTest`,
 `XmlDataStorageMultithreadsTest` ×2) plus the new `XdStorageCompositeObjectPersistentTest.step2`
 boolean-field distortion (`isActive` expected true, was false on reload — under investigation by
-the author). `BTreeResourceCacheIntegrationTest` (rebalance-lock contention) flipped green once
-the log level dropped to INFO — it was timing out under DEBUG logging I/O. Phase-C acceptance
-(449/449) was **not** reached: the stress family is still red (see §3 status).
+the author).
+
+**Status after the 2026-10-16 MVCC session (R-13..R-16 below): 469 tests / 4 stable red**
+(CompositeObjectPersistent boolean + DeleteIsolation + GraphPhantom + StressTest),
+2 flaky (PhantomReadIsolation 2/3, Xml `testMultithreads` 1/3, integration contention 1/3).
+`testOneThread` — historically the most stubborn — is stable GREEN. The DeleteIsolation
+materialization invariant (scan size == materialized count, no null links) holds across
+~17k scans per run; the residual red is readers crashing on **dangling B+Tree child refs
+during descent** (`cannot load by reference XdStorageBTreeNodeSimpleWrapper` from
+`loadChildOfThisNode`) — per-tx wrapper-graph staleness, i.e. the Phase-3b core: canonical
+per-id instance registry (single-flight init already done) + re-land of canonical sharing.
 Every fix below is gated by the suites built in the previous sessions: YAML engine round-trip (11),
 BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10+1).
 
@@ -127,6 +135,49 @@ listed here because ResourceCache transit interacts with it)
   integration test) — no test asserts on log output.
 - **Revert:** restore DEBUG levels / 2.11.1 / delete `.gitignore`.
 
+### R-13. Snapshot-serial MVCC gate (commit-order visibility) — KEEP (2026-10-16)
+- **What:** the old visibility gates compared reader `timestart` against `record.timestamp` —
+  the OWNER'S BEGIN time. Any reader that began inside the writer's `[begin, commit)` window was
+  treated as "after the version" and served the new value: committed deletes returned null to
+  snapshot readers (DeleteIsolation N-1 losses), committed inserts leaked as phantoms
+  (GraphPhantom leaks). Fix: a global commit counter (`XdStorageTransaction.COMMIT_SEQUENCE`,
+  starts at 1) — `CacheRecord.commit()` stamps `commitSerial`; every real transaction stamps
+  `snapshotSerial` at construction; `CacheRecord.servesCommittedVersion` gates committed
+  records by `readerSerial < commitSerial` (exact commit-order snapshot), locked records and
+  mock transactions (serial 0/null — Mockito returns 0L for boxed Long) fall back to the old
+  timestart comparison. `getObjectForTransaction` now checks own-changes FIRST, then the gate.
+- **Verified:** RC/snapshot/MVCC/real-cloner/BTree-entity/collection/consistency suites 90/90;
+  DeleteIsolation materialization invariant holds (~17k scans/run, was 10+ violations/run);
+  `XmlDataStorageMultithreadsTest` pair and `PhantomReadIsolationStressTest` flipped green
+  (flaky 1-2/3 since); `testOneThread` stable green.
+- **Revert:** drop `commitSerial`/`snapshotSerial` and restore the timestart-only comparison in
+  `getObjectForTransaction`.
+
+### R-14. Seen-keys snapshot fallback in id-index by-id — KEEP (2026-10-16)
+- **What:** tree-key removal is not versioned — a foreign delete-commit removes the key from
+  the B+Tree permanently, so a reader whose scan saw the key got a tree-miss on later by-id
+  (`tree.find` short-circuits before the data cache can serve the materialized pre-image).
+  `XdStorageBTreeIndexResource` now records `txId → (objectId → resourceId)` for every visible
+  key it scans/reads (`rememberSeenKey`) and `getObjectResourceId` falls back to that map on a
+  tree miss; cleared in `release`/`rollback`/`rollbackPerformingFirstPhaseCommit`.
+- **Verified:** full suite green on all btree/resource/assertion suites; DeleteIsolation scan
+  invariants hold.
+- **Revert:** remove the map + the fallback in `getObjectResourceId`.
+
+### R-15. Write-out integrity: readUnsafe serves latest committed — KEEP (2026-10-16)
+- **What:** `readUnsafeInternal`'s steady-state branch routed through the snapshot switch — a
+  committer that began BEFORE a neighbor's commit would write the neighbor's OLD value into the
+  resource file (latent resurrection bug, amplified by R-13). The else-branch now serves
+  `record.getObject()` (latest committed) for foreign records; own changes still go through
+  the own-change branches.
+- **Verified:** ConsistencyTest two-phase commit tests green; full suite green.
+- **Revert:** restore `record.getObjectForTransaction(transaction)` in the else-branch.
+
+### R-16. blockingTime waiter map leak — KEEP (Phase D-2, 2026-10-16)
+- **What:** `CacheRecord.lock` removes the waiter's timing entry after acquisition (was: one
+  leaked entry per (record, waiting tx) forever).
+- **Revert:** delete the `blockingTime.remove(...)` after `locked.set(true)`.
+
 ---
 
 ## 2. PROJECT ANALYSIS
@@ -167,22 +218,29 @@ listed here because ResourceCache transit interacts with it)
 3. `watch` RC freshness — **DONE 2026-10-16** (R-9, pinned by RC-11).
 4. Acceptance: RC suite green (now 11 tests incl. RC-11), snapshot tests stay green — **met**.
 
-### Phase C — Fix the remaining red (the delete-flow / Phase 3b core) — **PARTIAL, acceptance NOT met**
+### Phase C — Fix the remaining red (the delete-flow / Phase 3b core) — **SUBSTANTIAL PROGRESS, residual is the 3b core**
 1. Single-flight tree-record initialization — **DONE** (`createTreeLock` double-check in
    `XdStorageBTreeIndexResource.insert`). The **canonical instance registry was NOT implemented** —
    the shipped approach is the R-4 live-instance guard instead; structural BTree changes are still
    global and unversioned.
 2. `readByReference` infra wiring — **DONE earlier** (unwrap via `getWrappedObjectOrSameObject`).
 3. Contract-A delete of insert-locked records — **DONE earlier** (R-5 stamping).
-4. Acceptance: `DeleteIsolation`, `GraphPhantom`, `testOneThread`, `XdStorageStressTest` green —
-   **NOT met**: all still red at HEAD (re-measured 2026-10-16). The root cause stands: record-level
-   MVCC cannot isolate or undo in-place B+Tree topology changes. Next real step is structural
-   versioning / canonical per-id instance registry (Phase 3b proper), not more record-cache fixes.
+4. Snapshot visibility of the delete/insert window — **DONE 2026-10-16** (R-13/R-14/R-15):
+   the record-level MVCC window is closed and the DeleteIsolation materialization invariant
+   holds; `testOneThread` stable green.
+5. **Residual (stable red 3/3):** readers descend a per-tx WRAPPER clone of the node graph that
+   never re-syncs — after foreign join cascades the clone holds dangling child ids and
+   `loadChildOfThisNode` throws `cannot load by reference XdStorageBTreeNodeSimpleWrapper`.
+   Next step (Phase 3b proper, the plan's original item 1): **canonical per-id instance
+   registry** for tree/node records so all transactions traverse ONE live graph (the RW-lock +
+   retry-from-root budgets already handle transient states), then delete-isolation of STRUCTURE
+   itself (defer structural deletes or version the topology) — record-level MVCC cannot fix
+   torn topology. `StressTest` (cyclic locker deadlock) belongs to the same liveness family.
 
 ### Phase D — Performance (after correctness)
-1. RC scan cost: reuse unchanged clones (the by-id read and now `watch` compare
+1. RC scan cost: reuse unchanged clones (the by-id read and `watch` compare
    `recordVersion`; the full/predicate scans still re-clone every row in RC — open).
-2. `blockingTime` map cleanup in `CacheRecord.lock` (still leaks entries after acquisition).
+2. `blockingTime` map cleanup in `CacheRecord.lock` — **DONE 2026-10-16** (R-16).
 3. Counter/index records: consider batching `storage.update` calls in hot insert paths.
 
 ---

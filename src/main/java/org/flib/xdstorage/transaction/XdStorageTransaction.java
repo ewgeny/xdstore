@@ -30,6 +30,24 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
     private final Long timestart;
 
+    /**
+     * Снапшот-номер транзакции: значение глобального счетчика коммитов на момент НАЧАЛА транзакции.
+     * Граница видимости SNAPSHOT: запись видна в старой версии, пока ее commitSerial больше снапшот-номера.
+     * Для моков (без конструктора) остается null — кэш откатывается к timestart-сравнению.
+     */
+    private final Long snapshotSerial;
+
+    /**
+     * Глобальный счетчик фактических коммитов (порядок коммитов, независимый от часов).
+     * Начинается с 1: значение 0 зарезервировано как «нет номера» — Mockito-моки транзакций
+     * возвращают 0L для неснаппированного Long, и кэш откатывает их к timestart-сравнению.
+     */
+    private static final AtomicLong COMMIT_SEQUENCE = new AtomicLong(1);
+
+    public static long nextCommitSerial() {
+        return COMMIT_SEQUENCE.incrementAndGet();
+    }
+
     private final Set<Object> resourcesIds;
 
     protected final Map<Object, IXdStorageResourceObject> resources;
@@ -58,10 +76,16 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         this.timeout = timeout;
         this.transactionId = transactionId;
         this.timestart = System.nanoTime();
+        this.snapshotSerial = COMMIT_SEQUENCE.get();
         this.resourcesIds = Collections.synchronizedSet(new HashSet<>());
         this.resources = new ConcurrentHashMap<>();
         this.forCommit = new PriorityBlockingQueue<>();
         this.lockedResources = new ArrayList<>();
+    }
+
+    /** Снапшот-номер транзакции; null для мок-транзакций, созданных мимо конструктора. */
+    public Long getSnapshotSerial() {
+        return snapshotSerial;
     }
 
     @Override

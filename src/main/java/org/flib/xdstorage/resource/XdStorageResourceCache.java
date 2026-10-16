@@ -57,6 +57,17 @@ public class XdStorageResourceCache {
         this.isolationLevel = isolationLevel == null ? XdStorageIsolationLevel.SNAPSHOT : isolationLevel;
     }
 
+
+    private Map<Object, ObjectChange> readObjectsOfTransaction(final XdStorageTransaction transaction) {
+        final String transactionId = transaction.getTransactionId();
+        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
+        if (readObjects == null) {
+            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
+            readObjects = readObjectsByTransaction.get(transactionId);
+        }
+        return readObjects;
+    }
+
     public XdStorageResourceCache(final XdStorageServicesLocator services, final Class<?> clazz, final XdStorageObjectIdField field) {
         this.services = services;
         this.field = field;
@@ -92,11 +103,7 @@ public class XdStorageResourceCache {
 
     private <T> void fillAndCloneCacheOnlyIfNotExistsInternal(final List<T> objects, final Collection<T> result, final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        if (tmpReadObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> tmpReadObjects = readObjectsOfTransaction(transaction);
 
         for (final T object : objects) {
             final Object objectId = field.get(object);
@@ -161,11 +168,7 @@ public class XdStorageResourceCache {
         final java.util.concurrent.atomic.AtomicBoolean hasError = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        if (tmpReadObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> tmpReadObjects = readObjectsOfTransaction(transaction);
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
         final List<T> result = Collections.synchronizedList(new java.util.LinkedList<>());
@@ -297,11 +300,7 @@ public class XdStorageResourceCache {
         final AtomicBoolean hasError = new AtomicBoolean(false);
 
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        if (tmpReadObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> tmpReadObjects = readObjectsOfTransaction(transaction);
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
         // =========================================================================
@@ -419,11 +418,7 @@ public class XdStorageResourceCache {
 
     private <T> Collection<T> readInternal(final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final List<T> result = Collections.synchronizedList(new ArrayList<>());
 
@@ -502,11 +497,7 @@ public class XdStorageResourceCache {
 
     private <T> Collection<T> readUnsafeInternal(final XdStorageTransaction transaction) {
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final List<T> result = Collections.synchronizedList(new ArrayList<>());
 
@@ -542,7 +533,10 @@ public class XdStorageResourceCache {
                         object = record.prevObject;
                     }
                 } else {
-                    object = record.getObjectForTransaction(transaction);
+                    // WRITE-OUT (коммит/откат ресурса): для чужих закоммиченных записей берем
+                    // ПОСЛЕДНЕЕ закоммиченное состояние, а не снапшотную route'ировку — иначе
+                    // коммиттер, начавший раньше соседа, перезаписал бы файл его старой версией
+                    object = record.getObject();
                 }
             }
             if (object != null) {
@@ -579,11 +573,7 @@ public class XdStorageResourceCache {
 
     private Object readInternal(final Object id, final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        if (tmpReadObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            tmpReadObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> tmpReadObjects = readObjectsOfTransaction(transaction);
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
         CacheRecord record = cache.get(id);
@@ -667,11 +657,7 @@ public class XdStorageResourceCache {
 
     private void readByReferenceInternal(final Object reference, final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new HashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final Object objectId = field.get(reference);
         if (objectId == null) {
@@ -848,11 +834,7 @@ public class XdStorageResourceCache {
                         throw new XdStorageRuntimeException("object of " + newObject.getClass() + " with idgeneration " + id + " can not be changed by transaction " + transactionId);
                     }
 
-                    Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-                    if (readObjects == null) {
-                        readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-                        readObjects = readObjectsByTransaction.get(transactionId);
-                    }
+                    Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
                     readObjects.put(id, new ObjectChange(object, Change.insert, transaction.getTimestart()));
 
                     synchronized (record) {
@@ -869,11 +851,7 @@ public class XdStorageResourceCache {
             });
         } else {
             final String transactionId = transaction.getTransactionId();
-            Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-            if (readObjects == null) {
-                readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-                readObjects = readObjectsByTransaction.get(transactionId);
-            }
+            Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
             final Object objectId = field.get(newObject);
             if (objectId == null) {
@@ -1007,11 +985,7 @@ public class XdStorageResourceCache {
             throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " was deleted by another transaction");
         }
 
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final ObjectChange change = readObjects.get(objectId);
         synchronized (record) {
@@ -1083,11 +1057,7 @@ public class XdStorageResourceCache {
             throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " was deleted by another transaction");
         }
 
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         synchronized (record) {
             final ObjectChange change = readObjects.get(objectId);
@@ -1154,11 +1124,7 @@ public class XdStorageResourceCache {
     public void prepareCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
         final String transactionId = transaction.getTransactionId();
 
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final Map<Object, CacheRecord> map = changes.get(transactionId);
         if (map != null) {
@@ -1217,11 +1183,7 @@ public class XdStorageResourceCache {
     public void performCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
         final String transactionId = transaction.getTransactionId();
 
-        Map<Object, ObjectChange> readObjects = readObjectsByTransaction.get(transactionId);
-        if (readObjects == null) {
-            readObjectsByTransaction.putIfAbsent(transactionId, new ConcurrentHashMap<>());
-            readObjects = readObjectsByTransaction.get(transactionId);
-        }
+        Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final Map<Object, CacheRecord> map = changes.get(transactionId);
         if (map != null) {
@@ -1453,6 +1415,12 @@ public class XdStorageResourceCache {
         /** Версия записи: растет при каждой мутации состояния (для RC-освежения чтений). */
         private volatile long version;
 
+        /**
+         * Номер фактического коммита текущей версии (граница видимости SNAPSHOT-читателей).
+         * 0 = версия пришла с диска/еще не коммитилась в памяти — видна всем читателям.
+         */
+        private volatile long commitSerial;
+
         private CacheRecord() {
             // do nothing
         }
@@ -1627,6 +1595,9 @@ public class XdStorageResourceCache {
                         }
                     }
                     locked.set(true);
+                    // Phase D: запись о времени ожидания больше не нужна после захвата —
+                    // иначе на записи течет по одному entry на каждую ждавшую транзакцию
+                    blockingTime.remove(transaction.getTransactionId());
                 }
                 this.transaction = transaction;
             }
@@ -1669,6 +1640,12 @@ public class XdStorageResourceCache {
             this.prevTimestamp = this.timestamp;
             this.timestamp = tx.getTimestart();
 
+            // НОМЕР ФАКТИЧЕСКОГО КОММИТА: граница видимости снапшотных читателей.
+            // timestart владельца (метится при НАЧАЛЕ его транзакции) лжет читателям,
+            // начавшим в окне [начало владельца, коммит]: версия еще не была видна,
+            // когда они стартовали. Порядок по счетчику коммитов устраняет окно.
+            this.commitSerial = XdStorageTransaction.nextCommitSerial();
+
             // =========================================================================
             // ФИНАЛЬНЫЙ АРХИТЕКТУРНЫЙ ШТРИХ: Свобождаем тип изменения ноды!
             // Мы обязаны сохранить историю в previousChange для старых транзакций,
@@ -1697,18 +1674,40 @@ public class XdStorageResourceCache {
 
 
         private Object getObjectForTransaction(XdStorageTransaction transaction) {
-            Object object = null;
-            if (servesSnapshotVersion(transaction, this)) {
-                object = this.prevObject;
-            } else if (isChangedByTransaction(transaction)) {
+            Object object;
+            if (isChangedByTransaction(transaction)) {
                 // СОБСТВЕННЫЕ незакоммиченные мутации: newObject (null после своего delete = скрыто)
                 object = this.newObject;
+            } else if (servesCommittedVersion(transaction)) {
+                // читатель зафиксировал снапшот ДО фактического коммита текущей версии — видит предыдущую
+                object = this.prevObject;
             } else if (canBeChangedByTransaction(transaction)) {
                 object = this.object;
             } else {
                 object = this.prevObject;
             }
             return object;
+        }
+
+        /**
+         * SNAPSHOT-гейт видимости версии: читатель, начавший транзакцию раньше фактического
+         * коммита версии (порядок по счетчику коммитов, а не по часам), видит предыдущую версию.
+         * Для мок-транзакций (без снапшот-номера) и незакоммиченных (locked) записей границей
+         * остается timestart владельца. READ_COMMITTED: гейт выключен — всегда последнее
+         * закоммиченное состояние.
+         */
+        private boolean servesCommittedVersion(XdStorageTransaction transaction) {
+            if (isolationLevel == XdStorageIsolationLevel.READ_COMMITTED) {
+                return false;
+            }
+            if (this.state == State.committed) {
+                // 0 = «нет снапшот-номера» (мок-транзакции Mockito) — откат к timestart-сравнению
+                final Long readerSerial = transaction.getSnapshotSerial();
+                return readerSerial != null && readerSerial > 0
+                        ? readerSerial < this.commitSerial
+                        : transaction.getTimestart() < this.timestamp;
+            }
+            return transaction.getTimestart() < this.timestamp;
         }
     }
 
