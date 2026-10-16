@@ -582,6 +582,14 @@ public class XdStorageResourceCache {
         final Map<Object, ObjectChange> readObjects = tmpReadObjects;
 
         CacheRecord record = cache.get(id);
+
+        // ФАЗА 2: барьер невидимой незакоммиченной вставки (как в readByReference):
+        // создатель дерева еще не закоммитил — читатель ограниченно ждет развязки,
+        // иначе создается ВТОРОЕ пустое дерево и ключи расходятся по разным графам
+//        if (record != null) {
+//            waitForRecordResolution(record, id, transaction);
+//            record = cache.get(id);
+//        }
         ObjectChange materialized = readObjects.get(id);
 
         // READ COMMITTED: если версия записи изменилась с момента материализации
@@ -676,10 +684,10 @@ public class XdStorageResourceCache {
         // мы обязаны ограниченно дождаться развязки чужой транзакции (коммит -> узел
         // виден; откат -> запись изъята из кэша и честно считается отсутствующей).
         // =========================================================================
-        if (record != null) {
-            waitForRecordResolution(record, objectId, transaction);
-            record = cache.get(objectId);
-        }
+//        if (record != null) {
+//            waitForRecordResolution(record, objectId, transaction);
+//            record = cache.get(objectId);
+//        }
 
         Object object = null;
 
@@ -731,28 +739,28 @@ public class XdStorageResourceCache {
      * откат изымает запись из кэша (ожидание прекращается — записи больше нет),
      * смерть владельца обрабатывается обычным контуром очистки.
      */
-    private void waitForRecordResolution(final CacheRecord initialRecord, final Object objectId,
-                                         final XdStorageTransaction transaction) throws XdStorageException {
-        final long timeout = transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L;
-        final long deadlineNano = System.nanoTime() + timeout * 1_000_000L;
-        CacheRecord record = initialRecord;
-
-        while (isInvisibleUncommittedMutation(record, transaction)) {
-            if (System.nanoTime() >= deadlineNano) {
-                return; // честный отказ дальше по контракту "cannot load by reference"
-            }
-            try {
-                Thread.sleep(5);
-            } catch (final InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new XdStorageException("waiting for record resolution interrupted", e);
-            }
-            record = cache.get(objectId);
-            if (record == null) {
-                return; // запись изъята (откат вставки) — записи больше нет
-            }
-        }
-    }
+//    private void waitForRecordResolution(final CacheRecord initialRecord, final Object objectId,
+//                                         final XdStorageTransaction transaction) throws XdStorageException {
+//        final long timeout = transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L;
+//        final long deadlineNano = System.nanoTime() + timeout * 1_000_000L;
+//        CacheRecord record = initialRecord;
+//
+//        while (isInvisibleUncommittedMutation(record, transaction)) {
+//            if (System.nanoTime() >= deadlineNano) {
+//                return; // честный отказ дальше по контракту "cannot load by reference"
+//            }
+//            try {
+//                Thread.sleep(5);
+//            } catch (final InterruptedException e) {
+//                Thread.currentThread().interrupt();
+//                throw new XdStorageException("waiting for record resolution interrupted", e);
+//            }
+//            record = cache.get(objectId);
+//            if (record == null) {
+//                return; // запись изъята (откат вставки) — записи больше нет
+//            }
+//        }
+//    }
 
     private boolean isInvisibleUncommittedMutation(final CacheRecord record, final XdStorageTransaction transaction) {
         if (record == null || record.isCommitedState()) {
@@ -1495,7 +1503,8 @@ public class XdStorageResourceCache {
         }
 
         public boolean isChangedByTransaction(final XdStorageTransaction transaction) {
-            return this.change != Change.read && this.transaction != null && this.transaction == transaction;
+            return this.change != Change.read && this.transaction != null && this.transaction == transaction
+                    && transaction.getTimestart() == timestamp;
         }
 
         public Object getObject() {

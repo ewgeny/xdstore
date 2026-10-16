@@ -414,13 +414,13 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     retryInsert.set(true);
                     return; // unlockWrite текущей ноды выполняет finally ниже
                 }
+                child.lockWrite(transaction);
                 // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
                 // устаревшей инстанции родителя (остаточная двойственность инстанций после
                 // подгрузки ссылок). Контейнер ребенка известен точно — это current.
                 child.setParent(current);
                 // Фиксация через фасад обязательна: parent — персистентное поле ноды
                 storage.update(child, transaction);
-                child.lockWrite(transaction);
             } finally {
                 current.unlockWrite();
             }
@@ -733,12 +733,12 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     retryDelete.set(true);
                     return; // unlockWrite текущей ноды выполняет finally ниже
                 }
+                child.lockWrite(transaction);
                 // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
                 // устаревшей инстанции родителя; фактический контейнер — current.
                 child.setParent(current);
                 // Фиксация через фасад обязательна: parent — персистентное поле ноды
                 storage.update(child, transaction);
-                child.lockWrite(transaction);
             } finally {
                 current.unlockWrite();
             }
