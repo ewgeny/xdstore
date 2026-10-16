@@ -63,7 +63,8 @@ public final class XdStorageBTreeInvariants {
         // ИНВАРИАНТ 1 + сбор множества листьев, достижимых из корня
         final Set<Object> leavesViaRoot = new HashSet<>();
         if (tree.getRoot() != null) {
-            descendCollectingLeaves(tree.getRoot(), storage, transaction, leavesViaRoot, context, new HashSet<>());
+            descendCollectingLeaves(tree.getRoot(), storage, transaction, leavesViaRoot, context, new HashSet<>(),
+                    tree.isMultiple());
         }
 
         if (tree.getFirstLeaf() == null) {
@@ -137,9 +138,44 @@ public final class XdStorageBTreeInvariants {
         }
     }
 
+    /**
+     * TRIPWIRE: мгновенная проверка структурной целостности ноды сразу ПОСЛЕ мутации
+     * (join/borrow/split/root-collapse). Для внутренней ноды: разделители строго возрастают,
+     * дети == ключи + 1, id детей не дублируются. Бросает немедленно — имя операции в сообщении
+     * указывает мутатор, разъехавшийся пары keys/children.
+     */
+    static void checkStructuralAlignment(final XdStorageBTreeNode node, final String op) throws XdStorageException {
+        if (node == null || node.getChildren().isEmpty()) {
+            return; // лист или пустая нода — пары keys/children не проверяемы здесь
+        }
+        final List<Comparable> keys = node.getKeys();
+        // Для multiple-деревьев равные разделители легитимны (дубликаты ключа лежат в разных листьях)
+        final boolean allowEqualSeparators = node.getTree() != null && node.getTree().isMultiple();
+        for (int i = 1; i < keys.size(); ++i) {
+            final int cmp = keys.get(i - 1).compareTo(keys.get(i));
+            if (cmp > 0 || (cmp == 0 && !allowEqualSeparators)) {
+                throw new XdStorageException("[tripwire:" + op + "] нода " + node.getId()
+                        + ": дубликат/убывание разделителя keys[" + (i - 1) + "]=" + keys.get(i - 1)
+                        + " >= keys[" + i + "]=" + keys.get(i));
+            }
+        }
+        if (node.getChildren().size() != keys.size() + 1) {
+            throw new XdStorageException("[tripwire:" + op + "] нода " + node.getId()
+                    + ": children=" + node.getChildren().size() + " при keys=" + keys.size());
+        }
+        final Set<Object> seenChildIds = new HashSet<>();
+        for (final XdStorageBTreeNode child : node.getChildren()) {
+            if (child != null && child.getId() != null && !seenChildIds.add(child.getId())) {
+                throw new XdStorageException("[tripwire:" + op + "] нода " + node.getId()
+                        + ": дубликат ребенка " + child.getId() + " в списке детей");
+            }
+        }
+    }
+
     private static void descendCollectingLeaves(final XdStorageBTreeNode node, final IXdStorage storage,
                                                 final XdStorageTransaction transaction, final Set<Object> leaves,
-                                                final String context, final Set<Object> visited)
+                                                final String context, final Set<Object> visited,
+                                                final boolean allowEqualSeparators)
             throws XdStorageException, XdStorageConnectionException {
         if (node == null) {
             return;
@@ -159,7 +195,8 @@ public final class XdStorageBTreeInvariants {
         // растут промахи спуска ("does not exists") и сироты цепочки листьев.
         final List<Comparable> nodeKeys = node.getKeys();
         for (int i = 1; i < nodeKeys.size(); ++i) {
-            if (nodeKeys.get(i - 1).compareTo(nodeKeys.get(i)) >= 0) {
+            final int cmp = nodeKeys.get(i - 1).compareTo(nodeKeys.get(i));
+            if (cmp > 0 || (cmp == 0 && !allowEqualSeparators)) {
                 throw new XdStorageException(context + ": нарушение монотонности разделителей внутренней ноды " + node.getId()
                         + ": keys[" + (i - 1) + "]=" + nodeKeys.get(i - 1) + " >= keys[" + i + "]=" + nodeKeys.get(i)
                         + " (сдвиг пары keys/children в join/borrow)");
@@ -185,7 +222,7 @@ public final class XdStorageBTreeInvariants {
                 }
                 resolved = child;
             }
-            descendCollectingLeaves(resolved, storage, transaction, leaves, context, visited);
+            descendCollectingLeaves(resolved, storage, transaction, leaves, context, visited, allowEqualSeparators);
         }
     }
 }

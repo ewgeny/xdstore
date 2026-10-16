@@ -495,9 +495,11 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             }
         }
 
-        if (!isLeaf) {
-            this.getKeys().remove(midKey);
-        } else {
+        // Разделитель midKey УЖЕ изъят из 'this' итератором в блоке переноса последнего ребенка
+        // (keyListIterator.previous() + remove()). Повторное remove(midKey) для unique-деревьев
+        // молча не срабатывает, а для multiple-деревьев удаляет ВТОРОЙ равный разделитель —
+        // у ноды остается keys = children - 1 (каскад: спуски мисроутят, join'ы сиротят листья).
+        if (isLeaf) {
             chainDebug("SPLIT this=" + this.getId() + " right=" + right.getId() + " oldNext=" + (this.getNextTreeNodeOnThisLevel() != null ? this.getNextTreeNodeOnThisLevel().getId() : null));
             right.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
             this.setNextTreeNodeOnThisLevel(right);
@@ -603,9 +605,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             }
         }
 
-        if (!isLeaf) {
-            this.getKeys().remove(midKey);
-        } else {
+        // Разделитель midKey уже изъят итератором (см. комментарий в splitAndInsertIntoParent) —
+        // повторный remove(midKey) ломал multiple-деревья (двойное удаление равного разделителя).
+        if (isLeaf) {
             chainDebug("SPLIT this=" + this.getId() + " right=" + right.getId() + " oldNext=" + (this.getNextTreeNodeOnThisLevel() != null ? this.getNextTreeNodeOnThisLevel().getId() : null));
             right.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
             this.setNextTreeNodeOnThisLevel(right);
@@ -822,6 +824,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 storage.update(child, transaction);
                 getTree().setRoot(child);
                 storage.update(getTree(), transaction);
+                XdStorageBTreeInvariants.checkStructuralAlignment(child, "rootCollapse.child");
             }
         } else if (parent.getKeys().size() <= getTree().getT() - 1) {
             this.getParent().joinWithNeightbor(deepLockedNode, storage, transaction);
@@ -877,10 +880,22 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         // ФАЗА 2: изъятие правого соседа по ID (fallback на инстанс при отсутствии ID)
         removeChildById(this.getParent(), right.getId(), right);
         storage.delete(right, transaction);
-        // Спускаем разделительный ключ из родителя во внутренний узел 'this'
-        if (!rightChildren.isEmpty()) {
-            final Comparable separatorKey = findLeftKey(deepLockedNode, rightChildren.get(0), storage, transaction);
-            if (separatorKey != null) {
+        // Спускаем разделительный ключ из родителя во внутренний узел 'this'.
+        // КАНОН B-ДЕРЕВА: разделитель между this и right — это РОВНО parent.keys[currentNodeIndex];
+        // спуск findLeftKey к левому листу правого поддерева возвращает null на транзитно пустой
+        // ноде, и слияние тогда переносит детей БЕЗ разделителя — пары keys/children разъезжаются
+        // (children = keys + 2), дальше спуски мисроутят удаления и сироты цепочки листьев.
+        // Разделитель между this и right — parent.keys[currentNodeIndex] — уходит из родителя
+        // ВСЕГДА (и для листьев, и для внутренних узлов); при внутреннем слиянии он дополнительно
+        // спускается в 'this', при листьевом — просто исчезает (листья не требуют разделителя).
+        {
+            final List<Comparable> parentKeys = this.getParent().getKeys();
+            if (currentNodeIndex < 0 || currentNodeIndex >= parentKeys.size()) {
+                throw new XdStorageException("joinWithRight: разделитель parent.keys[" + currentNodeIndex
+                        + "] не существует (keys=" + parentKeys.size() + ") — родитель разъехался до слияния");
+            }
+            final Comparable separatorKey = parentKeys.remove(currentNodeIndex);
+            if (!rightChildren.isEmpty()) {
                 this.getKeys().add(separatorKey);
             }
         }
@@ -920,16 +935,14 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             this.setNextTreeNodeOnThisLevel(right.getNextTreeNodeOnThisLevel());
         }
 
-        int keyKeyDeleteIndex = currentNodeIndex;
-        if (keyKeyDeleteIndex >= this.getParent().getKeys().size()) {
-            keyKeyDeleteIndex = this.getParent().getKeys().size() - 1;
-        }
-        if (keyKeyDeleteIndex >= 0 && !this.getParent().getKeys().isEmpty()) {
-            this.getParent().getKeys().remove(keyKeyDeleteIndex);
-        }
+        // Разделитель уже изъят из родителя выше (parent.keys.remove(currentNodeIndex)) —
+        // вычитание ВТОРОГО ключа здесь и создавало сдвиг пар keys/children.
+        // Ребенок right уже изъят removeChildById выше: parent снова children == keys + 1.
 
         storage.update(this.getParent(), transaction);
         storage.update(this, transaction);
+        XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "joinWithRight.parent");
+        XdStorageBTreeInvariants.checkStructuralAlignment(this, "joinWithRight.this");
     }
 
     private void joinWithLeftNeightbor(final XdStorageBTreeNode deepLockedNode, final int currentNodeIndex, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
@@ -949,9 +962,20 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             removeChildById(this.getParent(), this.getId(), this);
             storage.delete(this, transaction);
 
-            if (!thisChildren.isEmpty()) {
-                final Comparable separatorKey = findLeftKey(deepLockedNode, thisChildren.get(0), storage, transaction);
-                if (separatorKey != null) {
+            // КАНОН B-ДЕРЕВА: разделитель между left и this — это РОВНО parent.keys[currentNodeIndex - 1].
+            // findLeftKey здесь давал null на транзитно пустой ноде -> слияние без разделителя
+            // -> children = keys + 2 (см. комментарий в joinWithRightNeightbor).
+            // Зеркально joinWithRight: разделитель parent.keys[currentNodeIndex - 1] уходит из
+            // родителя всегда; при внутреннем слиянии спускается в left, при листьевом — исчезает.
+            {
+                final List<Comparable> parentKeys = this.getParent().getKeys();
+                final int separatorIndex = currentNodeIndex - 1;
+                if (separatorIndex < 0 || separatorIndex >= parentKeys.size()) {
+                    throw new XdStorageException("joinWithLeft: разделитель parent.keys[" + separatorIndex
+                            + "] не существует (keys=" + parentKeys.size() + ") — родитель разъехался до слияния");
+                }
+                final Comparable separatorKey = parentKeys.remove(separatorIndex);
+                if (!thisChildren.isEmpty()) {
                     left.getKeys().add(separatorKey);
                 }
             }
@@ -990,19 +1014,13 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                 left.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
             }
 
-            int leftKeyDeleteIndex = currentNodeIndex - 1;
-            if (leftKeyDeleteIndex >= this.getParent().getKeys().size()) {
-                leftKeyDeleteIndex = this.getParent().getKeys().size() - 1;
-            } else if (leftKeyDeleteIndex < 0) {
-                leftKeyDeleteIndex = 0;
-            }
-
-            if (leftKeyDeleteIndex >= 0 && leftKeyDeleteIndex < this.getParent().getKeys().size() && !this.getParent().getKeys().isEmpty()) {
-                this.getParent().getKeys().remove(leftKeyDeleteIndex);
-            }
+            // Разделитель уже изъят из родителя выше (parent.keys.remove(currentNodeIndex - 1)) —
+            // второй вычет здесь создавал сдвиг пар keys/children при слиянии.
 
             storage.update(this.getParent(), transaction);
             storage.update(left, transaction);
+            XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "joinWithLeft.parent");
+            XdStorageBTreeInvariants.checkStructuralAlignment(left, "joinWithLeft.left");
         }
     }
 
@@ -1095,6 +1113,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             storage.update(this.getParent(), transaction);
             storage.update(right, transaction);
             storage.update(this, transaction);
+            XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "borrowRight.parent");
+            XdStorageBTreeInvariants.checkStructuralAlignment(this, "borrowRight.this");
+            XdStorageBTreeInvariants.checkStructuralAlignment(right, "borrowRight.right");
 
             return true;
         }
@@ -1145,6 +1166,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             storage.update(this.getParent(), transaction);
             storage.update(left, transaction);
             storage.update(this, transaction);
+            XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "borrowLeft.parent");
+            XdStorageBTreeInvariants.checkStructuralAlignment(this, "borrowLeft.this");
+            XdStorageBTreeInvariants.checkStructuralAlignment(left, "borrowLeft.left");
 
             return true;
         }

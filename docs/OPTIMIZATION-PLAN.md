@@ -198,9 +198,36 @@ listed here because ResourceCache transit interacts with it)
   differs → planet-tree shape differs → ~50% of shapes hit the corrupting cascade. In-suite
   runs pass because the Hi-Lo id counter is pre-advanced by earlier test classes (different
   shape — luck, not correctness).
-- **Next:** find the exact join/borrow site that desyncs (keys, children) — instrument with the
-  new invariant as the tripwire; same Phase-3b structural family.
+- **Next:** ~~find the exact join/borrow site that desyncs (keys, children)~~ **RESOLVED — see R-18.**
 - **Revert:** remove the CHAIN_DEBUG blocks + the two new checks in `descendCollectingLeaves`.
+
+### R-18. Tripwire + two structural root-cause fixes (join separator, split double-remove) — KEEP (2026-10-16)
+- **What:**
+  1. **Tripwire** `XdStorageBTreeInvariants.checkStructuralAlignment(node, op)` — called at the
+     end of EVERY structural mutation (joinWithRight/Left, both borrows, root-collapse):
+     separators monotone (equal allowed for multiple-trees), children == keys + 1, no duplicate
+     child ids. Fires immediately with the op name; btree suites stay green on healthy trees.
+  2. **Join separator fix:** both joins demoted the separator via `findLeftKey` (a leftmost
+     descent that returns null on transitively-empty nodes → merge WITHOUT the separator →
+     children = keys + 2) and then subtracted a second key with a clamp-hack. Now: the
+     separator is exactly `parent.keys[currentNodeIndex | i-1]` — removed from the parent
+     always, demoted into the survivor for internal merges, dropped for leaf merges.
+  3. **Split double-remove fix (deterministic, duplicate trees):** internal splits removed
+     `midKey` TWICE — once by the list iterator in the last-child migration block, once by
+     `this.getKeys().remove(midKey)` (first-equal-occurrence scan). For unique trees the second
+     remove silently no-ops; for multiple trees it eats another equal separator → the split node
+     keeps `keys = children - 1`. The redundant second removal is gone from both
+     `splitAndInsertIntoParent` and `splitAndCreateNewRoot`.
+  4. The new validator checks + tripwire are multiple-aware (equal separators legal when
+     `tree.isMultiple()`).
+- **Verified:** `duplicateKeysSurviveSplitAndJoin` (previously silent corruption, caught by the
+  tripwire) green; btree suites 45/45; **`XmlDataStorageMultithreadsTest#testOneThread` 10/10
+  isolated runs green (was 5/10 failing) + 3/3 in-suite**; full suite 471 tests — stable red
+  unchanged (DeleteIsolation/GraphPhantom/StressTest = concurrent wrapper-staleness family,
+  CompositeObject boolean), `PhantomReadIsolation`/`Xml.testMultithreads`/integration remain
+  flaky 1-2/3.
+- **Revert:** restore `findLeftKey` demote + clamp key removal in the joins, restore the
+  `remove(midKey)` lines in both splits, drop the tripwire calls.
 
 ---
 
@@ -260,6 +287,7 @@ listed here because ResourceCache transit interacts with it)
    retry-from-root budgets already handle transient states), then delete-isolation of STRUCTURE
    itself (defer structural deletes or version the topology) — record-level MVCC cannot fix
    torn topology. `StressTest` (cyclic locker deadlock) belongs to the same liveness family.
+   **The single-threaded corruption is GONE (R-18): `testOneThread` is 10/10 green isolated.**
 
 ### Phase D — Performance (after correctness)
 1. RC scan cost: reuse unchanged clones (the by-id read and `watch` compare
