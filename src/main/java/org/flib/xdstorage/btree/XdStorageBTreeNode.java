@@ -33,7 +33,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     private XdStorageBTreeNode nextTreeNodeOnThisLevel;
 
     /** Диагностика цепочки листьев (включается -Dxdstorage.chain.debug=true). */
-    static final boolean CHAIN_DEBUG = Boolean.getBoolean("xdstorage.chain.debug");
+    public static final boolean CHAIN_DEBUG = Boolean.getBoolean("xdstorage.chain.debug");
 
 
     private static String idsOf(final List<XdStorageBTreeNode> nodes) {

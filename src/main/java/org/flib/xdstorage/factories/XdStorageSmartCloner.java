@@ -159,23 +159,28 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         final Class<?> cl = XdStorageObjectUtils.getEntityClass(reference.getClass());
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-//        if (isBTreeInfrastructure(object)) {
-//            final Object canonical = XdStorageObjectUtils.getWrappedObjectOrSameObject(object);
-//            if (reference instanceof IXdStorageSimpleWrapper) {
-//                final java.lang.reflect.Field innerField =
-//                        XdStorageWrapperFieldLocator.getSimpleWrapperObjectField(reference.getClass());
-//                if (innerField != null) {
-//                    innerField.setAccessible(true);
-//                    innerField.set(reference, canonical);
-//                    ((IXdStorageSimpleWrapper) reference).setReference__(false);
-//                    return;
-//                }
-//            }
-//            if (reference != null && reference.getClass() == canonical.getClass()) {
-//                XdStorageClonerFieldPacker.packFields(reference, canonical, clInfo, storage, transaction, this);
-//                return;
-//            }
-//        }
+        if (isBTreeInfrastructure(object)) {
+            // ФАЗА 3B: канонический инстанс. SimpleWrapper-ссылка ПЕРЕЗАКАНВАЕТСЯ на живой
+            // канонический инстанс (inner подменяется через поле 'object') — граф дерева
+            // всегда один на все транзакции; пос-транзакционные клоны устаревали и висли.
+            // packFields живого канона запрещен: он подменял живые списки children/keys копиями.
+            final Object canonical = XdStorageObjectUtils.getWrappedObjectOrSameObject(object);
+            if (reference instanceof IXdStorageSimpleWrapper) {
+                final java.lang.reflect.Field innerField =
+                        XdStorageWrapperFieldLocator.getSimpleWrapperObjectField(reference.getClass());
+                if (innerField != null) {
+                    innerField.setAccessible(true);
+                    innerField.set(reference, canonical);
+                    ((IXdStorageSimpleWrapper) reference).setReference__(false);
+                    return;
+                }
+            }
+            if (canonical != null && reference.getClass() == canonical.getClass()) {
+                // plain-заглушка того же класса: наполняем полями канона (списки канона не мутируются)
+                XdStorageClonerFieldPacker.packFields(reference, canonical, clInfo, storage, transaction, this);
+                return;
+            }
+        }
         if (clInfo.getPolicy() == XdStoragePolicy.StoreWithParentObject) {
             XdStorageObjectUtils.fillObject(reference, object);
         }
@@ -237,13 +242,13 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         return result;
     }
 
-//    private static boolean isBTreeInfrastructure(final Object object) {
-//        if (object == null) {
-//            return false;
-//        }
-//        final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(object.getClass());
-//        return entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
-//                || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
-//                || entityClass.getName().contains("org.flib.xdstorage.btree");
-//    }
+    private static boolean isBTreeInfrastructure(final Object object) {
+        if (object == null) {
+            return false;
+        }
+        final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(object.getClass());
+        return entityClass == org.flib.xdstorage.btree.XdStorageBTree.class
+                || entityClass == org.flib.xdstorage.btree.XdStorageBTreeNode.class
+                || entityClass.getName().contains("org.flib.xdstorage.btree");
+    }
 }

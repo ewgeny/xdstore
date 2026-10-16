@@ -5,6 +5,7 @@ import org.flib.xdstorage.IXdStoragePredicate;
 import org.flib.xdstorage.IXdStorageWatcher;
 import org.flib.xdstorage.btree.IXdStorageBTreeViewer;
 import org.flib.xdstorage.btree.XdStorageBTree;
+import org.flib.xdstorage.btree.XdStorageBTreeNode;
 import org.flib.xdstorage.btree.XdStorageBTreeId;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
@@ -257,10 +258,20 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         final IXdStorage storage = services.getStorage();
         final XdStorageBTreeId bTreeId = new XdStorageBTreeId(objectClInfo.getClazz(), "id_index");
         final XdStorageBTree tree = storage.load(XdStorageBTree.class, bTreeId, transaction);
+        if (XdStorageBTreeNode.CHAIN_DEBUG && tree != null) {
+            System.out.println("[CHAIN] find id=" + id + " tree@" + System.identityHashCode(tree)
+                    + " root=" + (tree.getRoot() != null ? tree.getRoot().getId() : null)
+                    + " rootKeys=" + (tree.getRoot() != null ? tree.getRoot().getKeys() : null)
+                    + " firstLeaf=" + (tree.getFirstLeaf() != null ? tree.getFirstLeaf().getId() : null)
+                    + " firstLeafKeys=" + (tree.getFirstLeaf() != null ? tree.getFirstLeaf().getKeys().size() : null));
+        }
         if (tree != null) {
             final List<Object> result = tree.find((Comparable) id, storage, transaction);
             if (!result.isEmpty()) {
                 return result.get(0);
+            }
+            if (XdStorageBTreeNode.CHAIN_DEBUG) {
+                System.out.println("[CHAIN] MISS id=" + id + " tree@" + System.identityHashCode(tree));
             }
             // SNAPSHOT-фолбэк: ключ уже удален из дерева чужим коммитом, но снапшот этой
             // транзакции его видел (скан/чтение до коммита) — дороже промаха берем

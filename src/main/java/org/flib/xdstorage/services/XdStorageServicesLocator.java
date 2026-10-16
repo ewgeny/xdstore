@@ -111,11 +111,20 @@ public class XdStorageServicesLocator {
         return cloner;
     }
 
+    /** ФАЗА 3B: реестр канонических инстансов B+Дерева (на один storage). */
+    private final org.flib.xdstorage.resource.XdStorageCanonicalInstanceRegistry canonicalInstances =
+            new org.flib.xdstorage.resource.XdStorageCanonicalInstanceRegistry();
+
+    public org.flib.xdstorage.resource.XdStorageCanonicalInstanceRegistry getCanonicalInstances() {
+        return canonicalInstances;
+    }
+
     public IXdStorageReferenceProvider getReferencesProvider() {
         return referencesProvider;
     }
 
     public void shutdown() {
         this.executor.shutdown();
+        this.canonicalInstances.clear();
     }
 }

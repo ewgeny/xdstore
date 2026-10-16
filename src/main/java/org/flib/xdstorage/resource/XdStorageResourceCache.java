@@ -49,6 +49,13 @@ public class XdStorageResourceCache {
 
     private volatile XdStorageIsolationLevel isolationLevel = XdStorageIsolationLevel.SNAPSHOT;
 
+    /**
+     * ФАЗА 3B: кэш инфраструктуры B+Дерева (деревья/узлы). Граф — общее мутируемое
+     * состояние: читатели получают ЖИВОЙ канонический инстанс (без клонирования и без
+     * пос-транзакционных копий), record-level MVCC к структуре не применяется.
+     */
+    private final boolean infrastructureCache;
+
     public XdStorageIsolationLevel getIsolationLevel() {
         return isolationLevel;
     }
@@ -71,6 +78,7 @@ public class XdStorageResourceCache {
     public XdStorageResourceCache(final XdStorageServicesLocator services, final Class<?> clazz, final XdStorageObjectIdField field) {
         this.services = services;
         this.field = field;
+        this.infrastructureCache = clazz != null && clazz.getName().contains("org.flib.xdstorage.btree");
         this.clazz = clazz;
         this.cloner = this.services.getCloner();
 //        setIsolationLevel(IsolationLevel.READ_COMMITTED);
@@ -82,14 +90,37 @@ public class XdStorageResourceCache {
 
     public void fillCache(final Collection<Object> objects) {
         for (final Object object : objects) {
-            cache.putIfAbsent(field.get(object), createReadRecord(object));
+            // ФАЗА 3B: parse-копия уступает место живому каноническому инстансу (если он есть)
+            final Object objectCanonical = adoptCanonicalInstance(object);
+            cache.putIfAbsent(field.get(objectCanonical), createReadRecord(objectCanonical));
         }
     }
 
     public <T> void fillCacheOnlyIfNotExists(final Collection<T> objects) {
         for (final Object object : objects) {
-            cache.putIfAbsent(field.get(object), createReadRecord(object));
+            final Object objectCanonical = adoptCanonicalInstance(object);
+            cache.putIfAbsent(field.get(objectCanonical), createReadRecord(objectCanonical));
         }
+    }
+
+    /**
+     * ФАЗА 3B: для инфраструктуры B+Дерева — канонизация parse-копии при наполнении кэша.
+     * Если живой инстанс уже зарегистрирован (писатель мутирует его), parse-копия отбрасывается
+     * и записи кэша получают канонический инстанс; иначе parse-копия сама регистрируется.
+     */
+    private Object adoptCanonicalInstance(final Object parsed) {
+        if (!infrastructureCache || parsed == null) {
+            return parsed;
+        }
+        final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();
+        if (registry == null) {
+            return parsed; // мок-locator без реестра (юнит-сьюты)
+        }
+        final Object parsedId = field.get(parsed);
+        if (parsedId == null) {
+            return parsed;
+        }
+        return registry.adoptOrRegister(clazz, parsedId, parsed);
     }
 
     public <T> void fillAndCloneCacheOnlyIfNotExists(final List<T> objects, final Collection<T> result, final XdStorageTransaction transaction) throws XdStorageException {
@@ -106,11 +137,15 @@ public class XdStorageResourceCache {
         Map<Object, ObjectChange> tmpReadObjects = readObjectsOfTransaction(transaction);
 
         for (final T object : objects) {
-            final Object objectId = field.get(object);
-            final Object clonedObject = cloner.cloneAndWrap(object, services.getStorage(), transaction);
+            final Object objectCanonical = adoptCanonicalInstance(object);
+            final Object objectId = field.get(objectCanonical);
+            final Object objectToCache = objectCanonical;
+            final Object clonedObject = infrastructureCache
+                    ? objectToCache
+                    : cloner.cloneAndWrap(objectToCache, services.getStorage(), transaction);
             tmpReadObjects.putIfAbsent(objectId, new ObjectChange(clonedObject, Change.read, System.nanoTime()));
             result.add((T) tmpReadObjects.get(objectId).object);
-            cache.putIfAbsent(field.get(object), createReadRecord(object));
+            cache.putIfAbsent(objectId, createReadRecord(objectToCache));
         }
     }
 
@@ -578,13 +613,11 @@ public class XdStorageResourceCache {
 
         CacheRecord record = cache.get(id);
 
-        // ФАЗА 2: барьер невидимой незакоммиченной вставки (как в readByReference):
-        // создатель дерева еще не закоммитил — читатель ограниченно ждет развязки,
-        // иначе создается ВТОРОЕ пустое дерево и ключи расходятся по разным графам
-//        if (record != null) {
-//            waitForRecordResolution(record, id, transaction);
-//            record = cache.get(id);
-//        }
+        // ФАЗА 3B: барьер невидимой незакоммиченной вставки/апдейта для инфраструктуры дерева
+        // (реестр канонических инстансов теперь канонизирует parse-копии при fillCache — R-19/R-20)
+        if (infrastructureCache && record != null && waitForRecordResolution(record, id, transaction)) {
+            record = cache.get(id);
+        }
         ObjectChange materialized = readObjects.get(id);
 
         // READ COMMITTED: если версия записи изменилась с момента материализации
@@ -603,6 +636,20 @@ public class XdStorageResourceCache {
 
         if (record != null) {
             Object object = null;
+
+            if (infrastructureCache) {
+                // ФАЗА 3B: живой канонический граф — без клонирования, без пос-транзакционных копий
+                synchronized (record) {
+                    object = record.getObject() != null
+                            ? record.getObject()
+                            : (record.isChangedByTransaction(transaction) ? record.getNewObject() : null);
+                }
+                if (object != null) {
+                    readObjects.putIfAbsent(id, new ObjectChange(object, Change.read, System.nanoTime()));
+                    return readObjects.get(id).object;
+                }
+                return null;
+            }
 
             // Канонический MVCC-барьер вычисления видимости в оперативной памяти
             synchronized (record) {
@@ -667,22 +714,33 @@ public class XdStorageResourceCache {
         CacheRecord record = cache.get(objectId);
 
         // =========================================================================
-        // ФАЗА 2: БАРЬЕР НЕВИДИМОЙ НЕЗАКОММИЧЕННОЙ ВСТАВКИ.
-        // Граф B+ Дерева — общее состояние без версионирования: параллельный писатель
-        // публикует указатели на новые узлы (сплиты) немедленно, а сами узлы видимы
-        // только после коммита. Читатель, зашедший по такому указателю, раньше падал
-        // с "cannot load by reference". По контракту Read Committed для обхода структуры
-        // мы обязаны ограниченно дождаться развязки чужой транзакции (коммит -> узел
-        // виден; откат -> запись изъята из кэша и честно считается отсутствующей).
+        // ФАЗА 3B: БАРЬЕР НЕВИДИМОЙ НЕЗАКОММИЧЕННОЙ ВСТАВКИ (только инфраструктура дерева).
+        // Параллельный писатель публикует указатели на новые узлы (сплиты) немедленно,
+        // а сами узлы видимы после коммита. Читатель, зашедший по такому указателю,
+        // ограниченно ждет развязки чужой транзакции (коммит -> узел виден; откат ->
+        // запись изъята из кэша и честно считается отсутствующей).
         // =========================================================================
-//        if (record != null) {
-//            waitForRecordResolution(record, objectId, transaction);
-//            record = cache.get(objectId);
-//        }
+        if (infrastructureCache && record != null && waitForRecordResolution(record, objectId, transaction)) {
+            record = cache.get(objectId);
+        }
 
         Object object = null;
 
         if (record != null) {
+            if (infrastructureCache) {
+                // ФАЗА 3B: живой канонический инстанс — наполняем ссылку из канона
+                synchronized (record) {
+                    object = record.getObject() != null
+                            ? record.getObject()
+                            : (record.isChangedByTransaction(transaction) ? record.getNewObject() : null);
+                }
+                if (object != null) {
+                    cloner.fillAndWrap(reference, object, services.getStorage(), transaction);
+                    readObjects.putIfAbsent(objectId, new ObjectChange(reference, Change.read, System.nanoTime()));
+                    return;
+                }
+                throw new XdStorageException("cannot load by reference object of " + reference.getClass() + " with idgeneration " + field.get(reference));
+            }
             synchronized (record) {
                 if (record.isUpdateChange()) {
                     if (record.isCommitedState()) {
@@ -730,28 +788,41 @@ public class XdStorageResourceCache {
      * откат изымает запись из кэша (ожидание прекращается — записи больше нет),
      * смерть владельца обрабатывается обычным контуром очистки.
      */
-//    private void waitForRecordResolution(final CacheRecord initialRecord, final Object objectId,
-//                                         final XdStorageTransaction transaction) throws XdStorageException {
-//        final long timeout = transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L;
-//        final long deadlineNano = System.nanoTime() + timeout * 1_000_000L;
-//        CacheRecord record = initialRecord;
-//
-//        while (isInvisibleUncommittedMutation(record, transaction)) {
-//            if (System.nanoTime() >= deadlineNano) {
-//                return; // честный отказ дальше по контракту "cannot load by reference"
-//            }
-//            try {
-//                Thread.sleep(5);
-//            } catch (final InterruptedException e) {
-//                Thread.currentThread().interrupt();
-//                throw new XdStorageException("waiting for record resolution interrupted", e);
-//            }
-//            record = cache.get(objectId);
-//            if (record == null) {
-//                return; // запись изъята (откат вставки) — записи больше нет
-//            }
-//        }
-//    }
+    /**
+     * ФАЗА 3B: ограниченное ожидание развязки чужой незакоммиченной мутации записи
+     * (ТОЛЬКО инфраструктурные кэши — вызовы скоупятся флагом infrastructureCache).
+     * Ждем пока запись остается невидимой незакоммиченной вставкой/апдейтом ЖИВОЙ
+     * чужой транзакции. Возвращает true, если ждали и запись могла смениться
+     * (вызывающий обязан перечитать cache.get). Бюджет — минимум из таймаута
+     * транзакции и 250 мс: коммиты занимают миллисекунды, а честный отказ дальше
+     * по контракту "cannot load by reference" предпочтительнее долгого блока.
+     */
+    private boolean waitForRecordResolution(final CacheRecord initialRecord, final Object objectId,
+                                            final XdStorageTransaction transaction) throws XdStorageException {
+        if (!isInvisibleUncommittedMutation(initialRecord, transaction)) {
+            return false;
+        }
+        final long timeout = Math.min(transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L, 250L);
+        final long deadlineNano = System.nanoTime() + timeout * 1_000_000L;
+        CacheRecord record = initialRecord;
+
+        while (isInvisibleUncommittedMutation(record, transaction)) {
+            if (System.nanoTime() >= deadlineNano) {
+                return true; // честный отказ дальше по контракту "cannot load by reference"
+            }
+            try {
+                Thread.sleep(5);
+            } catch (final InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new XdStorageException("waiting for record resolution interrupted", e);
+            }
+            record = cache.get(objectId);
+            if (record == null) {
+                return false; // запись изъята (откат вставки) — записи больше нет
+            }
+        }
+        return true;
+    }
 
     private boolean isInvisibleUncommittedMutation(final CacheRecord record, final XdStorageTransaction transaction) {
         if (record == null || record.isCommitedState()) {
@@ -920,9 +991,18 @@ public class XdStorageResourceCache {
      * Материализация объекта для записи в кэш: живая инстанция для B+ Дерева, изолированный клон для доменных объектов.
      */
     private Object materializeForCache(final Object newObject) throws XdStorageException {
-        return isBTreeInfrastructureObject(newObject)
+        final Object materialized = isBTreeInfrastructureObject(newObject)
                 ? XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject)
                 : cloner.unwrapAndClone(newObject);
+        // ФАЗА 3B: живой инстанс инфраструктуры становится каноническим при первой записи
+        final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();
+        if (materialized != null && isBTreeInfrastructureObject(materialized) && registry != null) {
+            final Object materializedId = field.get(materialized);
+            if (materializedId != null) {
+                registry.adoptOrRegister(clazz, materializedId, materialized);
+            }
+        }
+        return materialized;
     }
 
     public void update(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {

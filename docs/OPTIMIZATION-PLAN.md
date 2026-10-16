@@ -7,15 +7,15 @@ Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retain
 boolean-field distortion (`isActive` expected true, was false on reload — under investigation by
 the author).
 
-**Status after the 2026-10-16 MVCC session (R-13..R-16 below): 469 tests / 4 stable red**
-(CompositeObjectPersistent boolean + DeleteIsolation + GraphPhantom + StressTest),
-2 flaky (PhantomReadIsolation 2/3, Xml `testMultithreads` 1/3, integration contention 1/3).
-`testOneThread` — historically the most stubborn — is stable GREEN. The DeleteIsolation
-materialization invariant (scan size == materialized count, no null links) holds across
-~17k scans per run; the residual red is readers crashing on **dangling B+Tree child refs
-during descent** (`cannot load by reference XdStorageBTreeNodeSimpleWrapper` from
-`loadChildOfThisNode`) — per-tx wrapper-graph staleness, i.e. the Phase-3b core: canonical
-per-id instance registry (single-flight init already done) + re-land of canonical sharing.
+**Status after the 2026-10-16 sessions (R-13..R-20 below): 469 tests / 3 stable red**
+(`GraphPhantom` writer-side, `StressTest` cyclic-locker liveness, `CompositeObjectPersistentTest`
+boolean-field distortion — author's investigation), flaky: Xml `testMultithreads` ~1/3
+(concurrent purge vs rolled-back tx), integration contention 1/3.
+**`DeleteIsolation`, `PhantomReadIsolation` and `testOneThread` are stable GREEN** — the
+record-level MVCC window is closed (R-13/R-14), the single-threaded tree corruption is fixed
+(R-18), and the canonical instance registry + live-serving is landed (R-20). The remaining
+stress reds are the concurrent wrapper/liveness family: `GraphPhantom`'s writer-side
+search-index crash and `StressTest`'s cyclic locker deadlock.
 Every fix below is gated by the suites built in the previous sessions: YAML engine round-trip (11),
 BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10+1).
 
@@ -228,6 +228,56 @@ listed here because ResourceCache transit interacts with it)
   flaky 1-2/3.
 - **Revert:** restore `findLeftKey` demote + clamp key removal in the joins, restore the
   `remove(midKey)` lines in both splits, drop the tripwire calls.
+
+### R-19. Phase 3b canonical-graph re-land: IMPLEMENTED, then FROZEN behind comments — KEEP as groundwork (2026-10-16)
+- **What shipped (all flag/comment-gated, zero behavior change at HEAD):**
+  1. `XdStorageResourceCache.infrastructureCache` flag (class-name based) + live-instance read
+     branches in `readInternal(id)`/`readByReferenceInternal` + the scoped bounded wait
+     `waitForRecordResolution` (250ms cap, 5ms polls, `isInvisibleUncommittedMutation` predicate)
+     re-enabled for infra caches — ALL COMMENTED OUT.
+  2. `XdStorageSmartCloner.fillAndWrapForOneLevel`: canonical pass-through block re-landed and
+     RE-COMMENTED (SimpleWrapper refs re-anchor inner to the live canonical via
+     `XdStorageWrapperFieldLocator`; packFields of the live canonical stays forbidden).
+  3. CHAIN_DEBUG find-state dump in `BTreeIndexResource.getObjectResourceId`.
+- **Why frozen — the blocking finding:** with live-serving ON, all 96 resource suites passed and
+  `DeleteIsolation` flipped GREEN, but the generation/giant/Xml family broke. Evidence
+  (`[CHAIN] find id=200 tree@… root=2 rootKeys=[] firstLeaf=1 firstLeafKeys=0`): the reader's
+  tree record holds the **prepare()-parsed COPY of the tree** (root/firstLeaf are unresolved
+  id-stubs), while the writer mutated a different in-memory instance — the instance duality
+  lives at the RESOURCE-PREPARE layer, not only in the cloner. Canonical serving without
+  **re-wiring parsed graphs at prepare()** (node.tree/parent/next-chain + root/firstLeaf
+  resolution to canonical instances) feeds readers bare stubs. The cloner-only swap additionally
+  broke lazy-getter and observable-wrapper flows (mid-flight inner swap).
+- **Phase 3b remaining design (next session):** (1) at resource `prepare()`/`fillCache`, re-wire
+  parsed infra graphs to the canonical in-memory instances (registry keyed by (class, id)); (2)
+  re-enable the live-serving branches + waits (they are written and safe per the 96/96 gate);
+  (3) the cloner pass-through last, after wrappers no longer carry per-tx graphs.
+- **Revert:** delete the commented blocks + the flag + the wait helper + the find dump.
+
+### R-20. Phase 3b LANDED: canonical instance registry + live-serving + waits — KEEP (2026-10-16 night)
+- **What:**
+  1. **`XdStorageCanonicalInstanceRegistry`** (per-storage, held by `XdStorageServicesLocator`,
+     cleared on shutdown): (class, id) → canonical live instance. Adoption hooks:
+     `fillCache`/`fillCacheOnlyIfNotExists`/`fillAndCloneCacheOnlyIfNotExists` — a prepare()-parsed
+     copy YIELDS to the registered live instance (this was the missing piece from R-19: readers
+     got stub-wired parsed copies while the writer mutated a different instance);
+     `materializeForCache` — the writer's live instance registers as canonical at first write.
+     Mock locators (null registry) skip adoption — unit suites unaffected.
+  2. **Live-serving un-frozen**: the infra branches in `readInternal(id)`/`readByReferenceInternal`
+     (serve the canonical graph, no clones, own-uncommitted via newObject) and the scoped bounded
+     wait `waitForRecordResolution` (250ms cap) are ACTIVE for infra caches.
+  3. **Cloner pass-through: tried and RE-FROZEN** — with the registry in place it still deadlocks
+     the concurrent wrapper flows (mid-flight inner swap; run hung in `testMultithreads`). The
+     packFields-into-wrapper-snapshot it would replace is now a much smaller window; revisit only
+     after wrappers stop carrying per-tx graphs.
+- **Verified:** strategy/giant gate 7/7 (the first re-land's casualties), resource+btree gate
+  148/148, full suite ×3: **469 tests / 4→3 red** — `DeleteIsolation` and
+  `PhantomReadIsolation` are **STABLE GREEN for the first time in project history**;
+  `testOneThread` green. Remaining stable red: `GraphPhantom` (writer-side), `StressTest`
+  (cyclic locker deadlock), `CompositeObject` boolean (author's), `Xml.testMultithreads`
+  flaky ~1/3 (concurrent purge vs rolled-back tx: "cannot load by reference" during afterEach).
+- **Revert:** delete the registry class + the locator field, un-adopt fill paths, re-comment the
+  infra branches/waits (all changes are localized and marked ФАЗА 3B).
 
 ---
 
