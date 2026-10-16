@@ -122,6 +122,15 @@ public final class XdStorageBTreeInvariants {
             onlyViaRoot.removeAll(leavesViaChain);
             final Set<Object> onlyViaChain = new HashSet<>(leavesViaChain);
             onlyViaChain.removeAll(leavesViaRoot);
+            if (XdStorageBTreeNode.CHAIN_DEBUG) {
+                final StringBuilder dump = new StringBuilder("[CHAIN] divergence dump: ");
+                XdStorageBTreeNode cur = tree.getFirstLeaf();
+                while (cur != null) {
+                    dump.append(cur.getId()).append("->").append(cur.getNextTreeNodeOnThisLevel() != null ? cur.getNextTreeNodeOnThisLevel().getId() : "null").append(' ');
+                    cur = cur.getNextTreeNodeOnThisLevel();
+                }
+                System.out.println(dump);
+            }
             throw new XdStorageException(context + ": рассинхрон структуры: листьев только из корня: " + onlyViaRoot
                     + ", листьев только из цепочки: " + onlyViaChain
                     + " (из корня: " + leavesViaRoot.size() + ", из цепочки: " + leavesViaChain.size() + ")");
@@ -142,6 +151,23 @@ public final class XdStorageBTreeInvariants {
         if (node.getChildren().isEmpty()) {
             leaves.add(node.getId());
             return;
+        }
+
+        // ИНВАРИАНТ: разделители внутренней ноды СТРОГО возрастают, а число детей
+        // ровно на единицу больше числа ключей. Дубль/убывание разделителя — первый
+        // симптом каскадного сбоя join/borrow (сдвиг пары keys/children), из которого
+        // растут промахи спуска ("does not exists") и сироты цепочки листьев.
+        final List<Comparable> nodeKeys = node.getKeys();
+        for (int i = 1; i < nodeKeys.size(); ++i) {
+            if (nodeKeys.get(i - 1).compareTo(nodeKeys.get(i)) >= 0) {
+                throw new XdStorageException(context + ": нарушение монотонности разделителей внутренней ноды " + node.getId()
+                        + ": keys[" + (i - 1) + "]=" + nodeKeys.get(i - 1) + " >= keys[" + i + "]=" + nodeKeys.get(i)
+                        + " (сдвиг пары keys/children в join/borrow)");
+            }
+        }
+        if (node.getChildren().size() != nodeKeys.size() + 1) {
+            throw new XdStorageException(context + ": внутренняя нода " + node.getId() + " имеет children=" + node.getChildren().size()
+                    + " при keys=" + nodeKeys.size() + " (ожидалось children == keys + 1)");
         }
 
         final List<XdStorageBTreeNode> children = new ArrayList<>(node.getChildren());

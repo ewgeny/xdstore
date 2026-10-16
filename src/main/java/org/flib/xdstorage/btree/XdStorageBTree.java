@@ -362,6 +362,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
             }
 
             if (root == null) {
+                if (XdStorageBTreeNode.CHAIN_DEBUG) {
+                    System.out.println("[CHAIN] UPDATE-MISS tree=" + id + " key=" + key + " wasInitialized=" + wasInitialized);
+                    new Exception("update-miss-stack").printStackTrace(System.out);
+                }
                 unlockWrite();
                 throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
             }

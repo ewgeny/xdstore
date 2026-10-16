@@ -32,6 +32,24 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private XdStorageBTreeNode nextTreeNodeOnThisLevel;
 
+    /** Диагностика цепочки листьев (включается -Dxdstorage.chain.debug=true). */
+    static final boolean CHAIN_DEBUG = Boolean.getBoolean("xdstorage.chain.debug");
+
+
+    private static String idsOf(final List<XdStorageBTreeNode> nodes) {
+        final StringBuilder sb = new StringBuilder("[");
+        for (final XdStorageBTreeNode n : nodes) {
+            sb.append(n != null ? n.getId() : "null").append(',');
+        }
+        return sb.append(']').toString();
+    }
+
+    private static void chainDebug(final String event) {
+        if (CHAIN_DEBUG) {
+            System.out.println("[CHAIN] " + event);
+        }
+    }
+
     public Long getId() {
         return id;
     }
@@ -480,6 +498,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         if (!isLeaf) {
             this.getKeys().remove(midKey);
         } else {
+            chainDebug("SPLIT this=" + this.getId() + " right=" + right.getId() + " oldNext=" + (this.getNextTreeNodeOnThisLevel() != null ? this.getNextTreeNodeOnThisLevel().getId() : null));
             right.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
             this.setNextTreeNodeOnThisLevel(right);
         }
@@ -587,6 +606,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         if (!isLeaf) {
             this.getKeys().remove(midKey);
         } else {
+            chainDebug("SPLIT this=" + this.getId() + " right=" + right.getId() + " oldNext=" + (this.getNextTreeNodeOnThisLevel() != null ? this.getNextTreeNodeOnThisLevel().getId() : null));
             right.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
             this.setNextTreeNodeOnThisLevel(right);
         }
@@ -894,6 +914,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         }
 
         if (rightChildren.isEmpty()) {
+            chainDebug("JOIN-RIGHT this=" + this.getId() + " absorbing right=" + right.getId() + " right.next=" + (right.getNextTreeNodeOnThisLevel() != null ? right.getNextTreeNodeOnThisLevel().getId() : null)
+                    + " this.nextBefore=" + (this.getNextTreeNodeOnThisLevel() != null ? this.getNextTreeNodeOnThisLevel().getId() : null)
+                    + " parent=" + this.getParent().getId() + " parentChildren=" + idsOf(this.getParent().getChildren()));
             this.setNextTreeNodeOnThisLevel(right.getNextTreeNodeOnThisLevel());
         }
 
@@ -960,6 +983,10 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
             }
 
             if (thisChildren.isEmpty()) {
+                chainDebug("JOIN-LEFT left=" + left.getId() + " absorbing this=" + this.getId() + " this.next=" + (this.getNextTreeNodeOnThisLevel() != null ? this.getNextTreeNodeOnThisLevel().getId() : null)
+                        + " left.nextBefore=" + (left.getNextTreeNodeOnThisLevel() != null ? left.getNextTreeNodeOnThisLevel().getId() : null)
+                        + " parent=" + this.getParent().getId() + " parentChildren=" + idsOf(this.getParent().getChildren())
+                        + " parentKeys=" + this.getParent().getKeys());
                 left.setNextTreeNodeOnThisLevel(this.getNextTreeNodeOnThisLevel());
             }
 
@@ -1142,6 +1169,14 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         }
 
         if (!deleted) {
+            if (CHAIN_DEBUG) {
+                final Comparable firstKey = getKeys().isEmpty() ? null : getKeys().get(0);
+                final Comparable lastKey = getKeys().isEmpty() ? null : getKeys().get(getKeys().size() - 1);
+                chainDebug("DELETE-MISS leaf=" + getId() + " key=" + key + " leafRange=[" + firstKey + ".." + lastKey + "]"
+                        + " parent=" + (getParent() != null ? getParent().getId() : null)
+                        + " parentKeys=" + (getParent() != null ? getParent().getKeys() : null)
+                        + " parentChildren=" + (getParent() != null ? idsOf(getParent().getChildren()) : null));
+            }
             throw new XdStorageException("object of " + tree.getId() + " with idgeneration " + key + " does not exists");
         }
 

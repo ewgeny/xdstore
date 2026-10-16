@@ -178,6 +178,30 @@ listed here because ResourceCache transit interacts with it)
   leaked entry per (record, waiting tx) forever).
 - **Revert:** delete the `blockingTime.remove(...)` after `locked.set(true)`.
 
+### R-17. Structural diagnostics + separator/children invariants (testOneThread investigation) — KEEP (2026-10-16)
+- **What:** flag-gated diagnostics `-Dxdstorage.chain.debug=true` in the B+Tree (chain rewrites
+  at splits/joins with parent state, delete-miss dumps, update-miss stacks) + TWO new validator
+  checks in `descendCollectingLeaves`: separator strict monotonicity and children == keys + 1
+  per internal node. Both fire only on real corruption (btree suites 45/45, full suite unchanged).
+- **Why — the testOneThread investigation (10 isolated runs: 5 failed, all in the afterEach
+  single-threaded purge):** two visible symptoms, ONE defect. (a) validator divergence
+  `листьев только из корня: [41]` — a leaf orphaned from the chain: `JOIN-LEFT left=40
+  absorbing this=45` relinked `40.next=45.next` while leaf 41 still sat between them in the
+  chain — the join follows PARENT-ARRAY adjacency, not chain adjacency. (b) `does not exists`
+  (thrown by `XdStorageBTreeNode.deleteFromThisNode:1172`) — the descent delivered a delete to
+  a leaf whose key range does not contain the key. The captured first domino: a parent with a
+  DUPLICATE separator (647, 647) and an out-of-key-order child (44 between 36 and 37); the new
+  invariant catches it earlier as `children=39 при keys=37` — a join/borrow adds children
+  without the matching key updates. After the misalignment: descents misroute → wrong-leaf
+  deletes → wrong-neighbor joins → chain orphans.
+- **Flakiness mechanism:** galaxy UUID ids differ per JVM → save order of systems/planets
+  differs → planet-tree shape differs → ~50% of shapes hit the corrupting cascade. In-suite
+  runs pass because the Hi-Lo id counter is pre-advanced by earlier test classes (different
+  shape — luck, not correctness).
+- **Next:** find the exact join/borrow site that desyncs (keys, children) — instrument with the
+  new invariant as the tripwire; same Phase-3b structural family.
+- **Revert:** remove the CHAIN_DEBUG blocks + the two new checks in `descendCollectingLeaves`.
+
 ---
 
 ## 2. PROJECT ANALYSIS
