@@ -6,6 +6,7 @@ import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
+import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.lock.XdStorageReadWriteLock;
 import org.flib.xdstorage.transaction.IXdStorageTransaction;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
@@ -45,6 +46,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
         this.isReference = false;
         this.multiple = multiple;
         this.t = t;
+
+        if (t <= 1) {
+            throw new XdStorageRuntimeException("Parameter t of BTree cannot be letter or equal 1");
+        }
     }
 
     private final XdStorageReadWriteLock lock = new XdStorageReadWriteLock();
@@ -131,6 +136,9 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     public void setT(final int t) {
+        if (t <= 1) {
+            throw new XdStorageRuntimeException("Parameter t of BTree cannot be letter or equal 1");
+        }
         this.t = t;
     }
 

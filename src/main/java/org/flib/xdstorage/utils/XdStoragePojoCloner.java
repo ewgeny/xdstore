@@ -10,6 +10,10 @@ public final class XdStoragePojoCloner {
     private XdStoragePojoCloner() {}
 
     public static Object clonePojo(final Object parent, final Object src, final Map<Object, Object> visited) throws Exception {
+        return clonePojo(parent, src, visited, false);
+    }
+
+    public static Object clonePojo(final Object parent, final Object src, final Map<Object, Object> visited, boolean isRootClone) throws Exception {
         if (src == null || src instanceof Class<?>) {
             return src;
         }
@@ -67,7 +71,7 @@ public final class XdStoragePojoCloner {
             idField.set(clone, id);
         }
 
-        if (clInfo.getPolicy() != XdStoragePolicy.StoreWithParentObject) {
+        if (clInfo.getPolicy() != XdStoragePolicy.StoreWithParentObject && !isRootClone) {
             return clone;
         }
 

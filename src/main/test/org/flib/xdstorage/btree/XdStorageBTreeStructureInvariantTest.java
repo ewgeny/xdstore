@@ -149,7 +149,7 @@ public class XdStorageBTreeStructureInvariantTest {
                 }
             }
 
-            storage.save(bTree, txDelete);
+//            storage.save(bTree, txDelete);
             txDelete.commit();
             System.out.println(" -> Все элементы успешно удалены. Проверяем корень...");
         } catch (Throwable e) {

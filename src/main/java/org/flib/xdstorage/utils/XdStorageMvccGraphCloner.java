@@ -42,7 +42,7 @@ public final class XdStorageMvccGraphCloner {
 
             boolean isRootCall = XdStorageCloningContext.isRootCall();
             try {
-                return (TObject) XdStoragePojoCloner.clonePojo(null, object, visited);
+                return (TObject) XdStoragePojoCloner.clonePojo(null, object, visited, true);
             } finally {
                 if (isRootCall) XdStorageCloningContext.clear();
             }
