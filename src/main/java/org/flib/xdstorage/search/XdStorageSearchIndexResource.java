@@ -138,6 +138,11 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
 
         // Локальное ленивое чтение дерева в рамках текущей транзакции пользователя
         XdStorageBTree tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
+        // ФАЗА 3B: реестр канонических инстансов — живое дерево могло потерять запись кэша
+        // (откат создателя/eviction), но граф остается каноническим: восстанавливаем ссылку
+        if (tree == null) {
+            tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, searchBTreeId);
+        }
 
         // =========================================================================
         // КАНОНИЧЕСКОЕ ИСПРАВЛЕНИЕ (Полная ликвидация сторонних потоков и транзакций):
@@ -176,6 +181,13 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
             throw new XdStorageException("Сбой инициализации индексной структуры: деревья поиска не найдены");
         }
 
+        // Идемпотентность: search-insert вызывается на КАЖДОМ save() объекта. Повторная
+        // запись уже проиндексированного объекта — no-op (обратная запись в key-дереве есть).
+        final List<Object> alreadyIndexed = keyTree.find((Comparable) record.getId(), storage, transaction);
+        if (alreadyIndexed != null && !alreadyIndexed.isEmpty()) {
+            return;
+        }
+
         final XdStorageSearchKeyIndexRecord hashIndexRecord = new XdStorageSearchKeyIndexRecord(record.getId(), record.getPrimaryIndexValue());
 
         // Атомарно пишем данные в индексы в рамках ЕДИНОЙ транзакции
@@ -201,6 +213,11 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
             keyTree = storage.load(XdStorageBTree.class, keyBTreeId);
         }
         if (keyTree == null) {
+            // ФАЗА 3B: реестр канонических инстансов — живое дерево могло потерять запись кэша
+            // (откат создателя/eviction); граф остается каноническим — восстанавливаем ссылку.
+            keyTree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, keyBTreeId);
+        }
+        if (keyTree == null) {
             throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");
         }
 
@@ -218,6 +235,14 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         XdStorageBTree tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
         if (tree == null) {
             tree = storage.load(XdStorageBTree.class, searchBTreeId); // Загружаем глобальный мета-объект напрямую
+        }
+        if (tree == null) {
+            // ФАЗА 3B: реестр канонических инстансов — живое дерево могло потерять запись кэша
+            // (откат создателя/eviction); граф остается каноническим — восстанавливаем ссылку.
+            tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, searchBTreeId);
+        }
+        if (tree == null && Boolean.getBoolean("xdstorage.chain.debug")) {
+            System.out.println("[CHAIN] SEARCH-TREE-MISS id=" + searchBTreeId + " recordId=" + record.getId());
         }
         if (tree == null) {
             throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");

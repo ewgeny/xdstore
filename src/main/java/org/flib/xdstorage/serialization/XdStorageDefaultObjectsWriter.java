@@ -37,6 +37,16 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         this.idGenerator = idGenerator;
     }
 
+    /**
+     * Класс для атрибута class="/имени типа при записи: у обернутых инстансов
+     * (Observable/Simple/Unmodifiable wrapper'ы сгенерированных классов) пишем
+     * ИМЯ СУЩНОСТИ, а не сгенерированного класса — иначе перечитание ловит
+     * ClassNotFoundException по классам, которых нет в компилируемом classpath.
+     */
+    private static Class<?> entityClassOf(final Object value) {
+        return XdStorageObjectUtils.getEntityClass(value.getClass());
+    }
+
     @Override
     public void writeReferences(final Writer writer, final XdStorageObjectIdField field, final Collection<Object> references) throws XdStorageIOException {
         try {
@@ -83,7 +93,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writer.append("\" classObjectId=\"");
         writer.append(field.get(object).getClass().getName());
         final Object value = field.get(object);
-        final Class<?> cl = value.getClass();
+        final Class<?> cl = entityClassOf(value);
         if (cl == Class.class) {
             writer.append("\" objectId=\"");
             writer.append(((Class)value).getName());
@@ -132,7 +142,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
                 continue;
             }
 
-            final Class<?> c = value.getClass();
+            final Class<?> c = entityClassOf(value);
             if (c.isArray()) {
                 writeArray(property.getName(), c, value, writer, level + 1);
             } else if (simpleTypeHelper.isSimpleType(c, value)) {
@@ -174,7 +184,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         final int length = Array.getLength(array);
         for (int i = 0; i < length; ++i) {
             final Object object = Array.get(array, i);
-            final Class<?> c = object != null ? object.getClass() : null;
+            final Class<?> c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 1);
             } else if (c.isArray()) {
@@ -205,7 +215,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         final int length = Array.getLength(array);
         for (int i = 0; i < length; ++i) {
             final Object object = Array.get(array, i);
-            final Class<?> c = object != null ? object.getClass() : null;
+            final Class<?> c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 1);
             } else if (c.isArray()) {
@@ -255,7 +265,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writeNewLevelAndTabulations(writer, level);
         writer.append("<collection name=\"").append(name).append("\" class=\"").append(cl.getName()).append("\">");
         for (final Object object : collection) {
-            final Class<?> c = object != null ? object.getClass() : null;
+            final Class<?> c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 1);
             } else if (c.isArray()) {
@@ -283,7 +293,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writeNewLevelAndTabulations(writer, level);
         writer.append("<collection class=\"").append(cl.getName()).append("\">");
         for (final Object object : collection) {
-            final Class<?> c = object != null ? object.getClass() : null;
+            final Class<?> c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 1);
             } else if (c.isArray()) {
@@ -314,7 +324,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
             writeNewLevelAndTabulations(writer, level + 1);
             writer.append("<entry>");
             final Object key = pair.getKey();
-            Class<?> c = key != null ? key.getClass() : null;
+            Class<?> c = key != null ? entityClassOf(key) : null;
             if (key == null) {
                 writeNull(writer, level + 2);
             } else if (c.isArray()) {
@@ -334,7 +344,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
             }
 
             final Object object = pair.getValue();
-            c = object != null ? object.getClass() : null;
+            c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 2);
             } else if (c.isArray()) {
@@ -367,7 +377,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
             writeNewLevelAndTabulations(writer, level + 1);
             writer.append("<entry>");
             final Object key = pair.getKey();
-            Class<?> c = key != null ? key.getClass() : null;
+            Class<?> c = key != null ? entityClassOf(key) : null;
             if (key == null) {
                 writeNull(writer, level + 2);
             } else if (c.isArray()) {
@@ -387,7 +397,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
             }
 
             final Object object = pair.getValue();
-            c = object != null ? object.getClass() : null;
+            c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 2);
             } else if (c.isArray()) {
@@ -554,7 +564,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         }
         writer.append(field.get(object).getClass().getName());
         final Object value = field.get(object);
-        final Class<?> cl = value.getClass();
+        final Class<?> cl = entityClassOf(value);
         if (cl == Class.class) {
             writer.append("\" objectId=\"");
             writer.append(((Class)value).getName());

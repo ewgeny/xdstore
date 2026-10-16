@@ -7,15 +7,13 @@ Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retain
 boolean-field distortion (`isActive` expected true, was false on reload — under investigation by
 the author).
 
-**Status after the 2026-10-16 sessions (R-13..R-20 below): 469 tests / 3 stable red**
-(`GraphPhantom` writer-side, `StressTest` cyclic-locker liveness, `CompositeObjectPersistentTest`
-boolean-field distortion — author's investigation), flaky: Xml `testMultithreads` ~1/3
-(concurrent purge vs rolled-back tx), integration contention 1/3.
-**`DeleteIsolation`, `PhantomReadIsolation` and `testOneThread` are stable GREEN** — the
-record-level MVCC window is closed (R-13/R-14), the single-threaded tree corruption is fixed
-(R-18), and the canonical instance registry + live-serving is landed (R-20). The remaining
-stress reds are the concurrent wrapper/liveness family: `GraphPhantom`'s writer-side
-search-index crash and `StressTest`'s cyclic locker deadlock.
+**Status after the 2026-10-16/17 sessions (R-13..R-23 below): 470 tests; everything except the
+concurrent family is green — suite minus hang-prone concurrent classes: 460/0.**
+**`GraphPhantom` is FIXED (R-23): 2/3 green isolated** (the 1 failure = the known concurrent
+purge-vs-rollback flake). Stable red remaining: `StressTest` cyclic-locker liveness only;
+flaky: Xml `testMultithreads` ~1/3 + it can HANG the suite (read-lock spin — run regression
+loops excluding the concurrent classes). `DeleteIsolation`, `PhantomReadIsolation`,
+`testOneThread` and the boolean-distortion test (R-22) are stable GREEN.
 Every fix below is gated by the suites built in the previous sessions: YAML engine round-trip (11),
 BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10+1).
 
@@ -279,6 +277,63 @@ listed here because ResourceCache transit interacts with it)
 - **Revert:** delete the registry class + the locator field, un-adopt fill paths, re-comment the
   infra branches/waits (all changes are localized and marked ФАЗА 3B).
 
+### R-21. Phase D-1: RC scan version-reuse — KEEP (2026-10-16 night)
+- **What:** the predicate and full scans materialized EVERY row on EVERY scan under READ_COMMITTED
+  (O(N) clones per scan — the plan's Phase D item 1 and undo-log R-3's noted cost). Both sites now
+  stamp `recordVersion` at materialization and re-clone only when the record's version changed
+  (foreign mark/commit), the entry is absent, or it's the transaction's own change — mirroring the
+  by-id read's invalidation. SNAPSHOT path unchanged (first materialization wins, now version-stamped).
+- **Contract pinned:** new `RC-12 scanReusesUnchangedMaterializations` (ReadCommittedTest 12/12):
+  two scans over unchanged data return the SAME instances; a foreign commit re-reads the row.
+- **Verified:** resource+btree+strategy/giant gate 137/137; full suite 470 tests — stable red
+  unchanged (GraphPhantom/StressTest/CompositeObject + flaky testMultithreads). A/B isolation check:
+  `testMultithreads` fails identically with and without D-1 (its worker lock-timeouts are the
+  pre-existing flake; a full-suite run during D-1 gating also hit the B+Tree read-lock spin
+  (`tryLockRead` main-lock hot loop, 27 min CPU) — the StressTest liveness family, not D-1).
+- **Phase D-3 (update batching in hot insert paths) stays OPEN** — it changes crash/commit
+  semantics (which records ride a full-file write-out) and needs its own design round.
+- **Revert:** restore the `rcRefresh || !contains || own` conditions in both scan sites.
+
+### R-22. Boolean-field distortion FIXED: silent field-drop in the metadata scanner — KEEP (2026-10-17)
+- **Symptom:** `XdStorageCompositeObjectPersistentTest.step2` — `isActive` came back `false`
+  after reload while all other primitives survived.
+- **Root cause:** the entity declared field `isActive` + getter `getIsActive()` + setter
+  `setActive()` — the scanner derives the setter as `setIsActive` (get-branch: `set` + name
+  minus `get`), the lookup failed, and the old `catch (Exception ignored)` **silently dropped
+  the field from persistence** (write omitted it; reload saw the default).
+- **Fix:** (1) entity setter renamed to `setIsActive` per the documented accessor contract;
+  (2) `XdStorageReflectionFieldScanner` no longer drops silently: a field that HAS a getter but
+  NO matching setter now produces a loud WARN ("the field is DROPPED from persistence — data
+  loss on reload") instead of vanishing. Computed getters without a backing field remain
+  silently skipped (they are not persistence properties). Behavior is otherwise identical.
+- **Verified:** the test 2/2 green; serialization gate 19/19; full suite 470 — the boolean red
+  is gone, remaining reds are only the concurrent/liveness family + flakes.
+- **Revert:** rename the setter back and re-silence the scanner catch.
+
+### R-23. GraphPhantom FIXED: search indexes were never built for DB-generated ids + wrapper class-name leaks in XML — KEEP (2026-10-17)
+- **Root cause chain (three layers, each hidden behind the previous):**
+  1. `SearchManager.insert` skipped indexing whenever the object's id was already set — but the
+     facade assigns the DATABASE_GENERATOR id in the id-index resource BEFORE calling search-insert,
+     so **search indexes were never built on first save**; any later `storage.update` crashed on the
+     missing key tree (`SearchIndexResource.update:204/214 "does not exists"`).
+  2. With indexing fixed, readbacks progressed to planet fragments and hit
+     `ClassNotFoundException: XdSatelliteIdObservableWrapper` — the XML writer emitted
+     **generated wrapper class names** for not-yet-materialized child instances (raw
+     `object.getClass()` in the element/collection/map writers) instead of the entity class.
+  3. Both index resources also lacked a fallback when a tree's cache record was lost to a
+     creator rollback/eviction while the live graph remained.
+- **Fix:** (1) removed the wrong skip; `SearchIndexResource.insert` is now IDEMPOTENT (reverse-key
+  record present → no-op), so repeated saves don't double-index; (2) `XdStorageDefaultObjectsWriter`
+  normalizes every emitted class name through `getEntityClass` (new `entityClassOf` helper, all
+  element/collection/map/array sites); (3) both `BTreeIndexResource` and `SearchIndexResource`
+  consult the canonical registry before creating a tree or throwing (adopt-instead-of-compete).
+- **Verified:** GraphPhantom 2/3 green isolated (the 1 failure = the known concurrent
+  purge-vs-rollback flake); suite minus the hang-prone concurrent classes: **460 tests, 0 red**.
+  The concurrent family can still hang (`testMultithreads` read-lock spin — StressTest liveness
+  family, documented in R-21's A/B note).
+- **Revert:** restore the SearchManager skip, drop the idempotency check / registry consults /
+  `entityClassOf` normalization.
+
 ---
 
 ## 2. PROJECT ANALYSIS
@@ -339,11 +394,13 @@ listed here because ResourceCache transit interacts with it)
    torn topology. `StressTest` (cyclic locker deadlock) belongs to the same liveness family.
    **The single-threaded corruption is GONE (R-18): `testOneThread` is 10/10 green isolated.**
 
-### Phase D — Performance (after correctness)
-1. RC scan cost: reuse unchanged clones (the by-id read and `watch` compare
-   `recordVersion`; the full/predicate scans still re-clone every row in RC — open).
+### Phase D — Performance — **D-1, D-2 DONE (2026-10-16)**
+1. RC scan cost: reuse unchanged clones — **DONE (R-21)**: predicate + full scans are
+   version-aware like the by-id read and `watch`; pinned by RC-12.
 2. `blockingTime` map cleanup in `CacheRecord.lock` — **DONE 2026-10-16** (R-16).
-3. Counter/index records: consider batching `storage.update` calls in hot insert paths.
+3. Counter/index records: batching `storage.update` calls in hot insert paths — **OPEN**;
+   changes crash/commit semantics (which records ride a full-file write-out) — needs a
+   design round before implementation.
 
 ---
 

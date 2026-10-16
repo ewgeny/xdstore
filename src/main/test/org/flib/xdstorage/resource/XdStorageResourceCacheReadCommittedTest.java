@@ -171,6 +171,40 @@ public class XdStorageResourceCacheReadCommittedTest extends AbstractXdStorageRe
     }
 
     @Test
+    @DisplayName("RC-12: скан переиспользует материализованные копии неизменившихся строк (Phase D-1)")
+    public void scanReusesUnchangedMaterializations() throws Exception {
+        // первый скан материализует копии
+        final List<Object> firstPass = new ArrayList<>(resourceCache.read(reader, (IXdStoragePredicate<Object>) e -> true));
+        assertEquals(3, firstPass.size(), "База не заполнена");
+
+        // второй скан БЕЗ чужих коммитов — экземпляры должны быть ТЕ ЖЕ самые (переиспользование)
+        final List<Object> secondPass = new ArrayList<>(resourceCache.read(reader, (IXdStoragePredicate<Object>) e -> true));
+        assertEquals(firstPass.size(), secondPass.size());
+        for (int i = 0; i < firstPass.size(); i++) {
+            assertSame(firstPass.get(i), secondPass.get(i),
+                    "Phase D-1 нарушен: скан переклонировал неизменившуюся строку");
+        }
+
+        // чужой коммит — строка обязана перечитаться (новый инстанс, новое значение)
+        resourceCache.update(new TestEntity(1L, "Committed_1"), writer);
+        writerCommit();
+        final List<Object> thirdPass = new ArrayList<>(resourceCache.read(reader, (IXdStoragePredicate<Object>) e -> true));
+        boolean foundUpdated = false;
+        for (int i = 0; i < firstPass.size(); i++) {
+            final Object fresh = thirdPass.stream()
+                    .filter(o -> ((TestEntity) org.flib.xdstorage.utils.XdStorageObjectUtils
+                            .getWrappedObjectOrSameObject(o)).getId().equals(1L))
+                    .findFirst().orElse(null);
+            if (((TestEntity) org.flib.xdstorage.utils.XdStorageObjectUtils
+                    .getWrappedObjectOrSameObject(firstPass.get(i))).getId().equals(1L)) {
+                foundUpdated = fresh != null && fresh != firstPass.get(i);
+            }
+        }
+        assertTrue(foundUpdated, "Phase D-1: чужой коммит не перечитан сканом");
+        assertTrue(values().contains("Committed_1"), "RC: свежее значение не видно");
+    }
+
+    @Test
     @DisplayName("RC-11: watch() — чужой закоммиченный апдейт виден в открытой TX (свежесть материализации)")
     public void watchSeesFreshCommittedUpdate() throws Exception {
         // скан ДО чужого коммита материализует в TX-кэше копии со старыми значениями

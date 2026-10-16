@@ -299,19 +299,11 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
         final Class<?> cl = object.getClass();
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
-        // СИНТАКСИЧЕСКИ И АЛГОРИТМИЧЕСКИ ТОЧНОЕ ИСПРАВЛЕНИЕ ЯДРА ПОИСКА:
-        // Извлекаем поле первичного ключа из метаданных класса сущности.
-        final XdStorageObjectIdField idField = clInfo.getIdField();
-        if (idField != null) {
-            final Object objectId = idField.get(object);
-            // Если первичный ключ (например, ID 111) уже успешно присвоен СУБД на предыдущем каскадном шаге,
-            // это означает, что поисковый индекс для этой сущности уже полностью и легитимно построен!
-            // Мы просто fail-safe выходим, полностью ликвидируя ложные накаты на B+ Дерево и concurrent modification!
-            if (objectId != null) {
-                return;
-            }
-        }
-
+        // ВНИМАНИЕ (исправление GraphPhantom/R-23): прежний skip "id уже установлен -> индекс
+        // построен" был НЕВЕРЕН для DATABASE_GENERATOR: фасад присваивает ид в индексном ресурсе
+        // ДО вызова search-insert, поэтому первичное индексирование пропускалось НАВСЕГДА,
+        // а последующий update падал на отсутствующем key-дереве. Идемпотентность повторных
+        // save() обеспечивает SearchIndexResource.insert (проверка обратной записи).
         final Map<String, XdStorageSearchIndex> indexes = clInfo.getIndexes();
         insert(cl, indexes, object, transaction);
     }

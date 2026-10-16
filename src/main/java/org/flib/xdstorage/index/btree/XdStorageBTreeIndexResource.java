@@ -443,9 +443,18 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         final XdStorageBTreeId bTreeId = new XdStorageBTreeId(objectClInfo.getClazz(), "id_index");
         XdStorageBTree tree = storage.load(XdStorageBTree.class, bTreeId, transaction);
         if (tree == null) {
+            // ФАЗА 3B: реестр канонических инстансов — живое дерево могло потерять запись кэша
+            // (откат создателя/eviction); граф остается каноническим — восстанавливаем ссылку
+            // ВМЕСТО создания конкурентного второго дерева.
+            tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, bTreeId);
+        }
+        if (tree == null) {
             createTreeLock.lock();
             try {
                 tree = storage.load(XdStorageBTree.class, bTreeId, transaction);
+                if (tree == null) {
+                    tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, bTreeId);
+                }
                 if (tree == null) {
                     tree = new XdStorageBTree(bTreeId, false, objectClInfo.getIndexFillingValue());
                     storage.save(tree, transaction);

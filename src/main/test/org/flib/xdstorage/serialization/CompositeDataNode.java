@@ -65,7 +65,7 @@ public class CompositeDataNode {
         this.threshold = threshold;
     }
 
-    public void setActive(boolean active) {
+    public void setIsActive(boolean active) {
         isActive = active;
     }
 }

@@ -253,15 +253,22 @@ public class XdStorageResourceCache {
             if (object != null) {
                 try {
                     final Object objectId = field.get(object);
-                    // READ COMMITTED: читатель видит последнее закоммиченное состояние —
-                    // перечитываем свежую копию, даже если запись уже материализована в TX
+                    // Phase D-1: в READ COMMITTED перечитываем свежую копию ТОЛЬКО когда версия
+                    // записи изменилась с момента материализации (чужой mark/commit) или это своя
+                    // мутация. Раньше каждый скан переклонировал ВСЕ строки — O(N) клонов на скан.
                     final boolean rcRefresh = isolationLevel == XdStorageIsolationLevel.READ_COMMITTED;
-                    if (rcRefresh || !readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
+                    final ObjectChange materialized = readObjects.get(objectId);
+                    final boolean needsRematerialize = materialized == null
+                            || record.isChangedByTransaction(transaction)
+                            || (rcRefresh && materialized.recordVersion != record.getVersion());
+                    if (needsRematerialize) {
                         Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
+                        final ObjectChange oc = new ObjectChange(cloned, Change.read, System.nanoTime());
+                        oc.recordVersion = record.getVersion();
                         if (rcRefresh) {
-                            readObjects.put(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                            readObjects.put(objectId, oc);
                         } else {
-                            readObjects.putIfAbsent(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                            readObjects.putIfAbsent(objectId, oc);
                         }
                     }
                     Object objectToReturn = readObjects.get(objectId).object;
@@ -497,11 +504,18 @@ public class XdStorageResourceCache {
                 final Object objectId = field.get(object);
                 synchronized (result) {
                     synchronized (record) {
-                        // READ COMMITTED: перечитываем свежую копию последнего закоммиченного состояния
-                        if (isolationLevel == XdStorageIsolationLevel.READ_COMMITTED
-                                || !readObjects.containsKey(objectId) || record.isChangedByTransaction(transaction)) {
+                        // Phase D-1: в RC перечитываем ТОЛЬКО при изменившейся версии записи
+                        // (или своя мутация); SNAPSHOT — материализация при отсутствии, как раньше
+                        final ObjectChange materialized = readObjects.get(objectId);
+                        final boolean needsRematerialize = materialized == null
+                                || record.isChangedByTransaction(transaction)
+                                || (isolationLevel == XdStorageIsolationLevel.READ_COMMITTED
+                                    && materialized.recordVersion != record.getVersion());
+                        if (needsRematerialize) {
                             Object cloned = cloner.cloneAndWrap(object, services.getStorage(), transaction);
-                            readObjects.put(objectId, new ObjectChange(cloned, Change.read, System.nanoTime()));
+                            final ObjectChange oc = new ObjectChange(cloned, Change.read, System.nanoTime());
+                            oc.recordVersion = record.getVersion();
+                            readObjects.put(objectId, oc);
                         }
                     }
                     result.add((T) readObjects.get(objectId).object);
@@ -618,6 +632,17 @@ public class XdStorageResourceCache {
         if (infrastructureCache && record != null && waitForRecordResolution(record, id, transaction)) {
             record = cache.get(id);
         }
+        // ФАЗА 3B: записи нет (eviction / откат создателя удалил незакоммиченную запись) —
+        // канонический ЖИВОЙ инстанс остается в реестре; восстанавливаем запись кэша из него.
+        // Без этого читатель/писатель дерева получал null ("does not exists") при живом графе.
+        if (infrastructureCache && record == null) {
+            final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();
+            final Object canonical = registry != null ? registry.get(clazz, id) : null;
+            if (canonical != null) {
+                cache.putIfAbsent(id, createReadRecord(canonical));
+                record = cache.get(id);
+            }
+        }
         ObjectChange materialized = readObjects.get(id);
 
         // READ COMMITTED: если версия записи изменилась с момента материализации
@@ -647,6 +672,15 @@ public class XdStorageResourceCache {
                 if (object != null) {
                     readObjects.putIfAbsent(id, new ObjectChange(object, Change.read, System.nanoTime()));
                     return readObjects.get(id).object;
+                }
+                if (Boolean.getBoolean("xdstorage.chain.debug")) {
+                    synchronized (record) {
+                        System.out.println("[CHAIN] INFRA-NULL id=" + id + " tx=" + transaction.getTransactionId()
+                                + " state=" + record.state + " change=" + record.change
+                                + " objectNull=" + (record.object == null)
+                                + " own=" + record.isChangedByTransaction(transaction)
+                                + " owner=" + (record.transaction != null ? record.transaction.getTransactionId() : null));
+                    }
                 }
                 return null;
             }
@@ -712,6 +746,16 @@ public class XdStorageResourceCache {
         }
 
         CacheRecord record = cache.get(objectId);
+
+        // ФАЗА 3B: записи нет — восстанавливаем из реестра канонических инстансов (см. readInternal)
+        if (infrastructureCache && record == null) {
+            final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();
+            final Object canonical = registry != null ? registry.get(clazz, objectId) : null;
+            if (canonical != null) {
+                cache.putIfAbsent(objectId, createReadRecord(canonical));
+                record = cache.get(objectId);
+            }
+        }
 
         // =========================================================================
         // ФАЗА 3B: БАРЬЕР НЕВИДИМОЙ НЕЗАКОММИЧЕННОЙ ВСТАВКИ (только инфраструктура дерева).
@@ -793,16 +837,17 @@ public class XdStorageResourceCache {
      * (ТОЛЬКО инфраструктурные кэши — вызовы скоупятся флагом infrastructureCache).
      * Ждем пока запись остается невидимой незакоммиченной вставкой/апдейтом ЖИВОЙ
      * чужой транзакции. Возвращает true, если ждали и запись могла смениться
-     * (вызывающий обязан перечитать cache.get). Бюджет — минимум из таймаута
-     * транзакции и 250 мс: коммиты занимают миллисекунды, а честный отказ дальше
-     * по контракту "cannot load by reference" предпочтительнее долгого блока.
+     * (вызывающий обязан перечитать cache.get). Бюджет — таймаут транзакции (до 3 с):
+     * создатель ленивого дерева держит его незакоммиченным весь СВОЙ tx — под
+     * конкуренцией lockForCommit это секунды, и короткий бюджет давал конкурентное
+     * ВТОРОЕ дерево (createTreeLock double-check) и "does not exists" у апдейтеров.
      */
     private boolean waitForRecordResolution(final CacheRecord initialRecord, final Object objectId,
                                             final XdStorageTransaction transaction) throws XdStorageException {
         if (!isInvisibleUncommittedMutation(initialRecord, transaction)) {
             return false;
         }
-        final long timeout = Math.min(transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L, 250L);
+        final long timeout = Math.min(transaction.getTimeout() > 0 ? transaction.getTimeout() : 5000L, 3000L);
         final long deadlineNano = System.nanoTime() + timeout * 1_000_000L;
         CacheRecord record = initialRecord;
 
@@ -999,7 +1044,16 @@ public class XdStorageResourceCache {
         if (materialized != null && isBTreeInfrastructureObject(materialized) && registry != null) {
             final Object materializedId = field.get(materialized);
             if (materializedId != null) {
-                registry.adoptOrRegister(clazz, materializedId, materialized);
+                final Object canonical = registry.adoptOrRegister(clazz, materializedId, materialized);
+                if (Boolean.getBoolean("xdstorage.chain.debug")) {
+                    System.out.println("[CHAIN] REGISTER class=" + clazz.getName() + " id=" + materializedId
+                            + " instance@" + System.identityHashCode(materialized)
+                            + (canonical != materialized ? " ADOPTED-EXISTING@" + System.identityHashCode(canonical) : " NEW"));
+                }
+                return canonical != null ? canonical : materialized;
+            } else if (Boolean.getBoolean("xdstorage.chain.debug")) {
+                System.out.println("[CHAIN] REGISTER-SKIP-NULL-ID class=" + clazz.getName()
+                        + " object@" + System.identityHashCode(materialized));
             }
         }
         return materialized;
