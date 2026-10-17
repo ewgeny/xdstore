@@ -63,7 +63,13 @@ public class XdStorageClassGenerator {
 
     private static Map<Class<?>, Class<?>> compileGeneratedClassesCode(final Class<?> cl, final Map<String, String> generatedCode) throws IOException {
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        if (compiler == null) return new HashMap<>();
+        if (compiler == null) {
+            // SILENT-LOSS BARRIER: без компилятора (JRE) сгенерированные обертки не создаются,
+            // движок уходит в dummy-обертки с поврежденными equals/hashCode — молчать нельзя.
+            log.error("No system Java compiler available (running on a JRE?) — wrapper generation for {} "
+                    + "silently degrades to dummy wrappers (broken equals/hashCode contracts!)", cl.getName());
+            return new HashMap<>();
+        }
 
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         final XdStorageJavaSourceFromString[] files = new XdStorageJavaSourceFromString[generatedCode.size()];
@@ -78,6 +84,12 @@ public class XdStorageClassGenerator {
         JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, options, null, compilationUnits);
 
         boolean success = task.call();
+        if (!success) {
+            // SILENT-LOSS BARRIER: ошибка компиляции обертки раньше проглатывалась — движок
+            // уходил в dummy-обертки без единого следа в логе. Печатаем диагностику компилятора.
+            log.error("Wrapper compilation FAILED for {} ({} files): {}", cl.getName(), generatedCode.size(),
+                    diagnostics.getDiagnostics());
+        }
         if (success) {
             try {
                 final Map<Class<?>, Class<?>> result = new HashMap<>();

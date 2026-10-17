@@ -1,5 +1,7 @@
 package org.flib.xdstorage.trigger;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.resource.XdStorageObjectChange;
 import org.flib.xdstorage.resource.XdStorageObjectOperationType;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
@@ -12,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class XdStorageTriggerManager {
+
+    private static final Logger log = LogManager.getLogger(XdStorageTriggerManager.class);
 
     // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ ЯДРА: Переводим списки триггеров на CopyOnWriteArrayList.
     // Это открывает дорогу к абсолютно LOCK-FREE параллельному чтению и выполнению триггеров
@@ -61,8 +65,14 @@ public class XdStorageTriggerManager {
         if (list != null) {
             for (final IXdStorageTrigger<?> trigger : list) {
                 if (trigger.getType() == XdStorageObjectOperationType.Insert || trigger.getType() == XdStorageObjectOperationType.INSERT) {
-                    ((IXdStorageTrigger<T>) trigger)
-                            .perform(null, XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject), transaction);
+                    try {
+                        ((IXdStorageTrigger<T>) trigger)
+                                .perform(null, XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject), transaction);
+                    } catch (final RuntimeException e) {
+                        log.error("Trigger {} failed on INSERT of {} — rethrowing (the transaction will roll back)",
+                                trigger.getClass().getName(), newObject.getClass().getName(), e);
+                        throw e;
+                    }
                 }
             }
         }
@@ -76,8 +86,14 @@ public class XdStorageTriggerManager {
         if (list != null) {
             for (final IXdStorageTrigger<?> trigger : list) {
                 if (trigger.getType() == XdStorageObjectOperationType.Update || trigger.getType() == XdStorageObjectOperationType.UPDATE) {
-                    ((IXdStorageTrigger<T>) trigger)
-                            .perform(XdStorageObjectUtils.getWrappedObjectOrSameObject(oldObject), XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject), transaction);
+                    try {
+                        ((IXdStorageTrigger<T>) trigger)
+                                .perform(XdStorageObjectUtils.getWrappedObjectOrSameObject(oldObject), XdStorageObjectUtils.getWrappedObjectOrSameObject(newObject), transaction);
+                    } catch (final RuntimeException e) {
+                        log.error("Trigger {} failed on UPDATE of {} — rethrowing (the transaction will roll back)",
+                                trigger.getClass().getName(), newObject.getClass().getName(), e);
+                        throw e;
+                    }
                 }
             }
         }
@@ -91,7 +107,13 @@ public class XdStorageTriggerManager {
         if (list != null) {
             for (final IXdStorageTrigger<?> trigger : list) {
                 if (trigger.getType() == XdStorageObjectOperationType.Delete || trigger.getType() == XdStorageObjectOperationType.DELETE) {
-                    ((IXdStorageTrigger<T>) trigger).perform(XdStorageObjectUtils.getWrappedObjectOrSameObject(oldObject), null, transaction);
+                    try {
+                        ((IXdStorageTrigger<T>) trigger).perform(XdStorageObjectUtils.getWrappedObjectOrSameObject(oldObject), null, transaction);
+                    } catch (final RuntimeException e) {
+                        log.error("Trigger {} failed on DELETE of {} — rethrowing (the transaction will roll back)",
+                                trigger.getClass().getName(), oldObject.getClass().getName(), e);
+                        throw e;
+                    }
                 }
             }
         }

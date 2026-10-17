@@ -29,6 +29,9 @@ import java.util.Set;
  */
 public final class XdStorageBTreeInvariants {
 
+    private static final org.apache.logging.log4j.Logger log =
+            org.apache.logging.log4j.LogManager.getLogger(XdStorageBTreeInvariants.class);
+
     private XdStorageBTreeInvariants() {
         // utility class
     }
@@ -48,6 +51,11 @@ public final class XdStorageBTreeInvariants {
         tree.lockWrite(transaction);
         try {
             validateUnderTreeLock(tree, storage, transaction, context);
+        } catch (final XdStorageException e) {
+            // Нарушение инварианта — всегда громко: исключение уйдет в откат транзакции,
+            // но сам факт структурного повреждения обязан остаться в логе ERROR навсегда.
+            log.error("B+Tree INVARIANT VIOLATION: {}", e.getMessage(), e);
+            throw e;
         } finally {
             tree.unlockWrite();
         }

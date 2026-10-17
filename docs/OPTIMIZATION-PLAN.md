@@ -355,6 +355,20 @@ listed here because ResourceCache transit interacts with it)
 - **First catch:** the WARN set immediately surfaced a real `unlockWrite by main rejected:
   write lock held by null` leak signal and 35 retry-budget exhaustions in one concurrency test.
 - **Verified:** no-flake suite 460/0 green with the logging in place.
+- **Extension (full-coverage pass):** logging added to the remaining silent parts:
+  - `XdStorageClassGenerator`: **ERROR** when no system JavaCompiler exists (JRE) and when
+    wrapper compilation fails with diagnostics — both previously fell back to dummy wrappers
+    SILENTLY (broken equals/hashCode contracts with zero trace).
+  - `XdStorageTriggerManager`: **ERROR** when a trigger throws on insert/update/delete
+    (rethrown — behavior unchanged, but the failing trigger class and operation are now named).
+  - `XdStorageDefaultObjectsReader`: **WARN** on "premature end of file" partial reads
+    (truncated resource file = data-loss signal, previously returned silently).
+  - `XdStorageLongIdGenerator` / `XdStorageIntegerIdGenerator`: **WARN** when a generated id
+    escapes its Hi-Lo batch (refetch race suspected).
+  - `XdStorageBTreeInvariants`: **ERROR** at every invariant violation (single choke point in
+    `validateLeafChain` — preserves the structural damage report in the log alongside rollback).
+  - `XdStorageAbstractResourcesManager`: DEBUG on resource eviction.
+- **Verified:** no-flake suite 460/0; suite log volume still ~240 KB.
 - **Revert:** remove the added log statements (all additive, no control-flow changes).
 
 ### R-25. StressTest FIXED: buffered persistence IO — KEEP (2026-10-17)

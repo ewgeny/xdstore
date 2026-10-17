@@ -1,5 +1,8 @@
 package org.flib.xdstorage.idgeneration;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
@@ -19,6 +22,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
+
+    private static final Logger log = LogManager.getLogger(XdStorageIntegerIdGenerator.class);
 
     private final int PART_OF_IDENTIFIERS = 100;
     private final XdStorageServicesLocator services;
@@ -62,6 +67,7 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
 
             // Жесткий Fail-Safe инвариант безопасности:
             if (identifier > lastIdentifierOfPart.get(cl)) {
+                log.warn("Hi-Lo buffer exhausted for {}: generated id {} escaped its batch — refetch race suspected", cl.getName(), identifier);
                 throw new XdStorageException("Критический сбой Hi-Lo буфера: сгенерированный ID вышел за пределы пачки!");
             }
 
