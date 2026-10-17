@@ -556,6 +556,25 @@ listed here because ResourceCache transit interacts with it)
   SURVIVES leak events via per-galaxy skips instead of failing.
 - **Revert:** remove the try/finally wrappers + the sampler; restore the bare validate calls.
 
+### R-34. Record-arbitration bypass for infra REVERTED — contract A validated — KEEP arbitration (2026-10-17)
+- **Attempted:** skipping `canBeChangedByTransaction` arbitration for infrastructure records
+  (the R-27 no-op latch leaves stale transaction pointers that spuriously fail the check inside
+  tree write cascades — "node 44 can not be updated"). All 8 sites were bypassed.
+- **Result:** the BTreeEntity **contract-A test immediately failed** — foreign delete of an
+  insert-locked record MUST throw loudly; the bypass silently proceeded. The "spurious"
+  canBeChanged failures during cascades are CORRECT contention arbitration (another live tx
+  owns the record) — the bug was never the arbitration, it was the LEAK on the throw path
+  (fixed by R-33's try/finally).
+- **Reverted:** all 8 sites back to exact arbitration; contract A preserved; suites green
+  (68/68 on the combined gate).
+- **Residual:** testMultithreads still times out on ~1/3 of isolated runs with 4–11
+  "leaked write-lock" events — a leak path OUTSIDE the B+Tree retry loops (not covered by
+  the R-33 finally). Next session: run with the in-test watchdog (unfiltered stacks) until
+  it fires, and correlate each "leaked write-lock" holder-tx with its last logged operation
+  (the correlation script pattern from this session: /tmp/leak-hunt.sh).
+
+### R-29b. The two separable failure modes of testMultithreads + the diagnostic watchdog — TOOLS IN PLACE (2026-10-17)
+
 ### R-29b. The two separable failure modes of testMultithreads + the diagnostic watchdog — TOOLS IN PLACE (2026-10-17)
 - **The test now self-diagnoses**: an in-JVM watchdog thread dumps **all** thread stacks
   (unfiltered — the first attempt's `Thread-` filter hid the holder) if the worker join loop
