@@ -371,6 +371,28 @@ listed here because ResourceCache transit interacts with it)
   the remaining failures are pure concurrency-timing races (purge vs rolled-back tx), not IO.
 - **Revert:** unwrap the buffered readers/writers (8+1 sites).
 
+### R-26. Fair-queue RW lock + the remaining flake characterized — PARTIAL, next layer documented (2026-10-17)
+- **Diagnosed (testMultithreads isolated, caught in the act):** the flake's first layer was
+  **read-lock starvation** — `XdStorageReadWriteLock.lockRead` timed out (3 s) during
+  concurrent mass-delete cascades, and the generated lazy getter escalates that transient
+  timeout into `markRollbackOnly`, killing the whole worker tx (and the purge tx hits the same).
+- **Fixed:** true shared reads confirmed (the exclusivity lives only in `tryLockWrite`'s
+  sole-reader upgrade guard) + **fair queue**: waiting WRITERS block only NEW readers
+  (nested re-entries of a holder are exempt — self-deadlock guard); writers are NOT blocked
+  by waiting readers. An intermediate reader-priority variant starved writers (6 write-timeout
+  runs) and was replaced by the fair queue.
+- **Result:** read-lock timeouts GONE (0 occurrences in failing runs); the no-flake suite is
+  460/0 green with the new lock.
+- **The remaining flake peeled one layer down:** the failure is now **per-record latch timeouts**
+  (`CacheRecord.lock` "Object with id N is locked for update" — the `blockingTime` waiter
+  budget) under 25-worker contention — a different, deeper mechanism than the RW lock. Next
+  round: per-record latch fairness/timeout tuning (candidate: bounded wait + loud retry hint,
+  or striping), then re-measure the flaky trio.
+- **Also remaining:** the frozen cloner pass-through (still deadlocks concurrent wrapper flows),
+  D-3 batching design (open; changes crash semantics), StressTest un-re-verified with the final
+  lock (was green at R-25 state).
+- **Revert:** remove `waitingWriters` + the two checks and the lockWrite/lockRead wrapping.
+
 ---
 
 ## 2. PROJECT ANALYSIS
