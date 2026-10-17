@@ -54,7 +54,7 @@ public class InsertSystemOperation implements Runnable {
 
             tx.commit();
             System.out.println("InsertSystemOperation Commited");
-        } catch (final XdStorageException | XdStorageConnectionException e) {
+        } catch (final RuntimeException | XdStorageException | XdStorageConnectionException e) {
             log.info("error", e);
             tx.rollback();
             System.out.println("InsertSystemOperation Rolledback");

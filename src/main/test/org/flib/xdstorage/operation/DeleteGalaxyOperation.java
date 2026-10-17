@@ -72,7 +72,7 @@ public class DeleteGalaxyOperation implements Runnable {
 
             tx.commit();
             System.out.println("DeleteGalaxyOperation Commited");
-        } catch (final XdStorageException | XdStorageConnectionException e) {
+        } catch (final RuntimeException | XdStorageException | XdStorageConnectionException e) {
             log.info("error", e);
             tx.rollback();
             System.out.println("DeleteGalaxyOperation Rolledback");

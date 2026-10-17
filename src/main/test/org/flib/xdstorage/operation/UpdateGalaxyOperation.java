@@ -53,7 +53,7 @@ public class UpdateGalaxyOperation implements Runnable {
 
             tx.commit();
             System.out.println("UpdateGalaxyOperation Commited");
-        } catch (final XdStorageException | XdStorageConnectionException e) {
+        } catch (final RuntimeException | XdStorageException | XdStorageConnectionException e) {
             log.info("error", e);
             tx.rollback();
             System.out.println("UpdateGalaxyOperation Rolledback");

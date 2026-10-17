@@ -40,7 +40,7 @@ public class InsertUniverseOperation implements Runnable {
 
             tx.commit();
             System.out.println("InsertUniverseOperation Commited");
-        } catch (final XdStorageException | XdStorageConnectionException e) {
+        } catch (final RuntimeException | XdStorageException | XdStorageConnectionException e) {
             log.info("error", e);
             tx.rollback();
             System.out.println("InsertUniverseOperation Rolledback");

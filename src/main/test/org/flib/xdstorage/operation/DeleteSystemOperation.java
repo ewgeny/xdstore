@@ -63,7 +63,7 @@ public class DeleteSystemOperation implements Runnable {
 
             tx.commit();
             System.out.println("DeleteSystemOperation Commited");
-        } catch (final XdStorageException | XdStorageConnectionException e) {
+        } catch (final RuntimeException | XdStorageException | XdStorageConnectionException e) {
             log.info("error", e);
             tx.rollback();
             System.out.println("DeleteSystemOperation Rolledback");
