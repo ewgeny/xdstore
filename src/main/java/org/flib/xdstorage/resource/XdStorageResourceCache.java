@@ -37,6 +37,15 @@ public class XdStorageResourceCache {
 
     private final Map<String, Map<Object, CacheRecord>> changes = new ConcurrentHashMap<>();
 
+    /**
+     * ЖУРНАЛ ОТКАТА (undo-change-log): записи кэша в ПОРЯДКЕ первой мутации транзакцией.
+     * rollback() проигрывает журнал в ОБРАТНОМ порядке — это дает полный контроль над
+     * откатом (каждая мутация имеет ровно одну точку отмены) и диагностическую картину
+     * "что именно делала транзакция" при сбое отката. Очищается при commit (изменения
+     * стали постоянными), rollback и clear.
+     */
+    private final Map<String, java.util.Deque<CacheRecord>> undoLogByTransaction = new ConcurrentHashMap<>();
+
     private final Map<String, Map<Object, IXdStorageIdObservableWrapper>> changesUnidentifiedObjectsByTransaction = new ConcurrentHashMap<>();
 
     private final Map<String, Map<Object, ObjectChange>> readObjectsByTransaction = new ConcurrentHashMap<>();
@@ -64,6 +73,11 @@ public class XdStorageResourceCache {
         this.isolationLevel = isolationLevel == null ? XdStorageIsolationLevel.SNAPSHOT : isolationLevel;
     }
 
+
+    /** Журнал отката транзакции (создается при первой регистрации мутации). */
+    private java.util.Deque<CacheRecord> undoLogOf(final String transactionId) {
+        return undoLogByTransaction.computeIfAbsent(transactionId, k -> new java.util.ArrayDeque<>());
+    }
 
     private Map<Object, ObjectChange> readObjectsOfTransaction(final XdStorageTransaction transaction) {
         final String transactionId = transaction.getTransactionId();
@@ -970,7 +984,9 @@ public class XdStorageResourceCache {
                         changes.putIfAbsent(transactionId, new ConcurrentHashMap<>());
                         map = changes.get(transactionId);
                     }
-                    map.put(id, record);
+                    if (map.put(id, record) == null) {
+                        undoLogOf(transactionId).addLast(record); // первая мутация записи — в журнал отката
+                    }
                 }
             });
         } else {
@@ -1019,7 +1035,9 @@ public class XdStorageResourceCache {
                 changes.putIfAbsent(transactionId, new ConcurrentHashMap<>());
                 map = changes.get(transactionId);
             }
-            map.put(objectId, record);
+            if (map.put(objectId, record) == null) {
+                undoLogOf(transactionId).addLast(record); // первая мутация записи — в журнал отката
+            }
         }
     }
 
@@ -1164,7 +1182,9 @@ public class XdStorageResourceCache {
             changes.putIfAbsent(transactionId, new ConcurrentHashMap<>());
             map = changes.get(transactionId);
         }
-        map.put(objectId, record);
+        if (map.put(objectId, record) == null) {
+            undoLogOf(transactionId).addLast(record); // первая мутация записи — в журнал отката
+        }
     }
 
     // =========================================================================
@@ -1240,7 +1260,9 @@ public class XdStorageResourceCache {
             changes.putIfAbsent(transactionId, new ConcurrentHashMap<>());
             map = changes.get(transactionId);
         }
-        map.put(objectId, record);
+        if (map.put(objectId, record) == null) {
+            undoLogOf(transactionId).addLast(record); // первая мутация записи — в журнал отката
+        }
     }
 
     public boolean hasChanges(final XdStorageTransaction transaction) throws XdStorageException {
@@ -1261,6 +1283,7 @@ public class XdStorageResourceCache {
         readObjectsByTransaction.remove(transactionId);
         changesUnidentifiedObjectsByTransaction.remove(transactionId);
         changes.remove(transactionId);
+        undoLogByTransaction.remove(transactionId);
     }
 
     public void prepareCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
@@ -1383,6 +1406,7 @@ public class XdStorageResourceCache {
 
     public void commit(final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
+        undoLogByTransaction.remove(transactionId); // изменения стали постоянными — журнал отката не нужен
         final Map<Object, CacheRecord> map = changes.remove(transactionId);
         if (map != null) {
             final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
@@ -1415,10 +1439,14 @@ public class XdStorageResourceCache {
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
         final Map<Object, CacheRecord> map = changes.remove(transactionId);
-        if (map != null) {
-            final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
+        final java.util.Deque<CacheRecord> undoLog = undoLogByTransaction.remove(transactionId);
+
+        // UNDO-CHANGE-LOG: проигрываем журнал мутаций В ОБРАТНОМ порядке — каждая мутация
+        // имеет ровно одну точку отмены, и откат строго инвертирует хронологию транзакции.
+        if (undoLog != null) {
+            final java.util.Iterator<CacheRecord> it = undoLog.descendingIterator();
             while (it.hasNext()) {
-                final CacheRecord record = it.next().getValue();
+                final CacheRecord record = it.next();
 
                 if (log.isDebugEnabled()) {
                     log.debug("ROLLBACK by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + record.getObject() + "\r\n NEW OBJECT: " + record.getNewObject());
@@ -1428,10 +1456,33 @@ public class XdStorageResourceCache {
                 boolean isInsertOp = record.isInsertChange() && record.isChangedByTransaction(transaction);
                 Object recordId = record.getId();
 
+                try {
+                    synchronized (record) {
+                        record.rollback();
+                    }
+
+                    if (isInsertOp && recordId != null) {
+                        cache.remove(recordId);
+                    }
+                    record.unlock(transaction);
+                } catch (final RuntimeException e) {
+                    // Откат не завершился: оставшиеся записи журнала содержат незакрытые мутации.
+                    // Без этого ERROR половина отката была бы НЕЗаметной.
+                    log.error("ROLLBACK FAILED mid-journal for transaction {} on record {} — {} undo entries left unprocessed",
+                            transactionId, recordId, countRemaining(it), e);
+                    throw e;
+                }
+            }
+        } else if (map != null) {
+            // Журнал отсутствует (транзакция из старого кода/мока) — прежний порядок по карте
+            final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
+            while (it.hasNext()) {
+                final CacheRecord record = it.next().getValue();
+                boolean isInsertOp = record.isInsertChange() && record.isChangedByTransaction(transaction);
+                Object recordId = record.getId();
                 synchronized (record) {
                     record.rollback();
                 }
-
                 if (isInsertOp && recordId != null) {
                     cache.remove(recordId);
                 }
@@ -1443,8 +1494,18 @@ public class XdStorageResourceCache {
         readObjectsByTransaction.remove(transactionId);
     }
 
+    private static int countRemaining(final java.util.Iterator<?> it) {
+        int n = 0;
+        while (it.hasNext()) {
+            it.next();
+            ++n;
+        }
+        return n;
+    }
+
     public void rollbackFailedCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> committed) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
+        undoLogByTransaction.remove(transactionId);
         final Map<Object, CacheRecord> map = changes.remove(transactionId);
         if (map != null) {
             for (final XdStorageObjectChange change : committed) {

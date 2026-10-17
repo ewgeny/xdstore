@@ -457,6 +457,66 @@ listed here because ResourceCache transit interacts with it)
   recorded here and in the lock source comment so they are not re-attempted blind.
 - **Revert:** n/a (both variants reverted; source comment carries the history).
 
+### R-31. testMultithreads: the wedge ROOT-CAUSED and FIXED (timeout-sweeper reschedule); the remaining wall is purge O(N²) validation — KEEP (2026-10-17)
+- **The wedge root cause (proven):** jstack on a wedged run reports the JVM **unresponsive**
+  (GC-thrash symptom, not a lock deadlock). Mechanism: the lazy getter marks the tx rollback-only
+  → the timeout sweeper's deferred rollback saw `activeThreads > 0` and **returned silently**,
+  relying on "re-call at final unlock" — which never comes when the triggering exception is
+  swallowed (broadened operation catches). Result: the tx stays rollback-only forever with
+  latched records, live maps, and locked tree records → other workers block on them → memory
+  and lock pileup → the wedge. (The stack trace evidence: `XdatStorageStressTest` had logged
+  the sweeper's "deferred" message before hangs; jstack un-responsive confirmed memory.)
+- **Fix:** `registerRollbackOnlyTransaction` RESCHEDULES itself (200 ms delay via the executor)
+  instead of returning — the rollback always completes.
+- **Also landed:** the worker-side fixes from R-29a are RE-APPLIED and KEPT (9 operation
+  catches broadened + best-effort per-galaxy purge, no rethrow).
+- **Result:** the wedge is gone (3 runs, no freeze/dump needed); workers complete. The test now
+  exceeds its time budget in the **afterEach purge**: ~1250 sequential tree deletes, each
+  running the FULL structural validator (full leaf-chain walk + full descend + per-node
+  checks) → O(N²) ≈ 780k node visits — the known purge-scaling wall.
+- **Next step (precise):** validator sampling in `BTreeIndexResource.delete/insert` — always run
+  the O(1)-per-node checks (children==keys+1, separator monotonicity), run the FULL chain walk
+  every Nth op (N=25) and always on tree-emptied purge. Cuts purge validation to O(N) while
+  keeping the loud-corruption guarantee (deep verifier suites still pin correctness).
+- **Verified:** no-flake suite 460/0 with the reschedule fix.
+- **Revert:** restore the silent `return` in `registerRollbackOnlyTransaction`; git-restore the
+  operation/purge test files.
+- **What:** a true ordered undo journal. `undoLogByTransaction` (per-tx `Deque<CacheRecord>`)
+  records each record at its FIRST mutation (all four registration sites — insertInternal
+  observable/plain, update, delete — push when `changes.map.put` returns null, i.e. the record
+  enters the transactional contour). `rollback()` now replays the journal in **REVERSE order**
+  (descendingIterator) instead of unordered map iteration — each mutation has exactly one undo
+  point and the rollback strictly inverts the transaction's chronology. `commit` discards the
+  journal (changes became permanent); `rollbackFailedCommit` and `clear` remove it.
+- **Failure diagnostics:** a mid-journal rollback failure is no longer silent — ERROR with the
+  record id and the count of unprocessed entries, then rethrow (previously a half-rolled-back
+  state was unnoticeable).
+- **Compatibility:** the unordered-map fallback remains for transactions without a journal
+  (legacy/mocks); `hasChanges`/prepareCommit/performCommit/commit flows untouched (the `changes`
+  map stays the write-set source of truth — the journal is the ordered view over it).
+- **Verified:** no-flake suite 460 tests — 459 green + 1 concurrency flake
+  (XdStorageBTreeStressTest parallel-find, green 2/2 on rerun; known family).
+- **Revert:** remove `undoLogByTransaction`/`undoLogOf`, restore the map-iteration loop in
+  `rollback`, drop the `if (map.put(...) == null)` wrappers at the 4 registration sites.
+
+### R-29a. testMultithreads worker-side experiment REVERTED; a NEW WEDGE observed — next session MUST capture a live jstack (2026-10-17)
+- **Attempted:** (1) broadening all 9 operation catches to include RuntimeException — the lazy
+  getters wrap the SAME lock-contention into XdStorageRuntimeException, which escaped the
+  operations' `catch (XdStorageException | XdStorageConnectionException)` rollback path and
+  landed in exThread; (2) making the afterEach purge best-effort per-galaxy + no rethrow.
+- **Result:** RUN 1 green, but RUN 2 WEDGED — 3 worker threads stuck indefinitely (main spinning
+  in the countThreads join loop; log frozen mid-run). Pre-change isolated runs failed FAST with
+  clear exceptions (no wedge). The wedge is a NEW phenomenon correlated with swallowing the
+  runtime exception inside an operation: the operation's tx is rollback-only/damaged, the
+  subsequent in-operation storage calls or `tx.rollback()` appear to block unboundedly somewhere
+  (suspects: `skipOrWaitForInternalTransactions`, the sweeper's `synchronized(transaction)`
+  interplay, or an unbounded resource-manager section). **Next session: script a run + jstack the
+  live JVM at the wedge (prepare the dump script BEFORE the run — twice the dump window was missed).**
+- **Reverted:** operation catches + purge tolerance restored to HEAD (git restore); verified
+  no-flake suite 460/0 at the restored state. The known behavior returns: testMultithreads
+  flaky/failing with loud exceptions (no wedge).
+- **Revert:** n/a (already at HEAD).
+
 ---
 
 ## 2. PROJECT ANALYSIS

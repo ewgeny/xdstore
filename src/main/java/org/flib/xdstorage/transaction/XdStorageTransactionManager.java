@@ -267,7 +267,21 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
                     AtomicLong activeThreads = transactionActiveThreadsCounter.get(transaction.getTransactionId());
                     if (activeThreads != null && activeThreads.get() > 0) {
                         log.debug("Фоновый откат отложен: транзакция удерживается активными параллельными потоками.");
-                        return; // Повторный вызов произойдет при финальном анлоке транзакции пользователем
+                        // R-31: отложенный откат обязан ПЕРЕЗАПЛАНИРОВАТЬСЯ, а не теряться.
+                        // Раньше полагались на "повторный вызов при финальном анлоке" — но если
+                        // последний вызов свалился через lazy-getter (исключение проглочено
+                        // вызывающим кодом), повторного вызова НЕТ: транзакция навсегда
+                        // остается rollback-only с защелкнутыми записями и живыми картами —
+                        // утечка памяти и мертвые блокировки для всех последующих транзакций.
+                        services.getExecutor().submit(() -> {
+                            try {
+                                Thread.sleep(200); // дать активным потокам шанс выйти
+                            } catch (final InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                            }
+                            registerRollbackOnlyTransaction(transaction);
+                        });
+                        return;
                     }
 
                     Collection<IXdStorageResourceObject> resources = transaction.getResources();
