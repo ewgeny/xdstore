@@ -1,5 +1,7 @@
 package org.flib.xdstorage;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.index.IXdStorageIndexDaoResource;
@@ -27,6 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * methods for object persistence.
  */
 class XdStorage implements IXdFileStorage {
+
+    private static final Logger log = LogManager.getLogger(XdStorage.class);
 
     private final String name;
 
@@ -222,6 +226,8 @@ class XdStorage implements IXdFileStorage {
                 throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
                         + XdStoragePolicy.StoreAsSingleObject);
             }
+
+            log.info("saved {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
@@ -324,6 +330,8 @@ class XdStorage implements IXdFileStorage {
                 throw exceptions[0];
             if (conExceptions[0] != null)
                 throw conExceptions[0];
+
+            log.info("saved collection of {} ({} objects) by tx {}", objects.iterator().hasNext() ? objects.iterator().next().getClass().getSimpleName() : "?", objects.size(), transaction.getTransactionId());
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
@@ -1094,6 +1102,7 @@ class XdStorage implements IXdFileStorage {
     public void delete(final Object reference, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         if (reference == null)
             throw new XdStorageException("reference cannot be null");
+        log.debug("delete {} requested by tx {}", reference.getClass().getSimpleName(), transaction.getTransactionId());
         if (transaction == null)
             throw new XdStorageException("transaction cannot be null");
 
@@ -1135,6 +1144,8 @@ class XdStorage implements IXdFileStorage {
                 throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
                         + XdStoragePolicy.StoreAsSingleObject);
             }
+
+            log.info("deleted {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }

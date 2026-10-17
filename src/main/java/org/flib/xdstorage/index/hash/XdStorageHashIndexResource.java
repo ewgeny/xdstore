@@ -1,5 +1,8 @@
 package org.flib.xdstorage.index.hash;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
@@ -27,6 +30,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResource {
+
+    private static final Logger log = LogManager.getLogger(XdStorageHashIndexResource.class);
 
     private final IXdStorageObjectsReader reader;
 

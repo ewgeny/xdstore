@@ -370,6 +370,19 @@ listed here because ResourceCache transit interacts with it)
   - `XdStorageAbstractResourcesManager`: DEBUG on resource eviction.
 - **Verified:** no-flake suite 460/0; suite log volume still ~240 KB.
 - **Revert:** remove the added log statements (all additive, no control-flow changes).
+- **Full-coverage extension (all classes):** loggers added to every remaining substantive
+  class — `XdStorageBTreeNode` (DEBUG: split/join completion), `XdStorage` facade (DEBUG:
+  delete dispatch), `XdStorageSearchManager` (DEBUG: per-record index delete), `XdStorageSmartCloner`
+  (DEBUG: btree-infra live pass-through), `XdStorageResource` (DEBUG: prepare object counts),
+  `XdStorageDefaultObjectsReader/Writer` (loggers for the existing WARN + future diagnostics),
+  hash index resources. Discipline: per-operation traces are DEBUG (invisible at the default
+  INFO config — 0 DEBUG lines in the suite log), anomalies WARN, rare lifecycle INFO.
+  DEBUG traces activate with a one-line config change when diagnosing.
+- **INFO operation flow (show-the-project log):** the facade now logs INFO on every
+  successful `save` (object and collection, with class/object count) and every `delete`,
+  plus `XStorageResource.prepare` logs the from-disk load with object counts. A full suite
+  run produces a complete readable operation trace: ~3400 INFO lines / ~570 KB — saves,
+  deletes, tree creations, prepares, transactions, cleanups in order.
 
 ### R-25. StressTest FIXED: buffered persistence IO — KEEP (2026-10-17)
 - **Root cause:** the "cyclic locker deadlock" was never a deadlock — it was **unbuffered IO**.

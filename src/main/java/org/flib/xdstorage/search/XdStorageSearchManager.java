@@ -1,5 +1,8 @@
 package org.flib.xdstorage.search;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.IXdStorageWatcher;
 import org.flib.xdstorage.XdStoragePolicy;
@@ -28,6 +31,8 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class XdStorageSearchManager implements IXdStorageSearchManager {
+
+    private static final Logger log = LogManager.getLogger(XdStorageSearchManager.class);
 
     protected final XdStorageServicesLocator services;
 
@@ -367,6 +372,7 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
     private void delete(final Class<?> cl, final Map<String, XdStorageSearchIndex> indexes, final Object reference,
                         final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+        log.debug("search-index delete for {} ({} index(es)) by tx {}", cl.getName(), indexes.size(), transaction.getTransactionId());
         for (XdStorageSearchIndex index : indexes.values()) {
             final IXdStorageSearchIndexDaoResource searchIndexResource = services.getResourcesManager().lockSearchIndexResource(clInfo, index.getName(), transaction);
             searchIndexResource.delete(buildIndexRecord(index, reference, transaction), transaction);

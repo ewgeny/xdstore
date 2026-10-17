@@ -1,5 +1,8 @@
 package org.flib.xdstorage.serialization;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.exceptions.XdStorageIOException;
 import org.flib.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 import org.flib.xdstorage.object.XdStorageIdentifiableObject;
@@ -22,6 +25,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
+
+    private static final Logger log = LogManager.getLogger(XdStorageDefaultObjectsReader.class);
 
     private IXdStorageSimpleTypeHelper simpleTypeHelper;
 

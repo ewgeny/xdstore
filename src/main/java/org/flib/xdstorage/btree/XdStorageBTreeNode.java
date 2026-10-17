@@ -1,5 +1,8 @@
 package org.flib.xdstorage.btree;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.annotations.*;
@@ -15,6 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
 public class XdStorageBTreeNode implements IXdStorageBTreeNode {
+
+    private static final Logger log = LogManager.getLogger(XdStorageBTreeNode.class);
 
     @XdStorageObjectId
     @XdStorageObjectFieldProperties(idGeneratorType = XdStorageIdGeneratorType.DATABASE_GENERATOR)
@@ -510,6 +515,8 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         storage.update(right, transaction);
         storage.update(this, transaction);
 
+        log.debug("B+Tree node {} split into {} (tree {})", this.getId(), right.getId(), getTree().getId());
+
         final List<XdStorageBTreeNode> childrenOfParent = this.getParent().getChildren();
         final List<Comparable> keysOfParent = this.getParent().getKeys();
 
@@ -941,6 +948,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
         storage.update(this.getParent(), transaction);
         storage.update(this, transaction);
+        log.debug("B+Tree parent {} after join-with-right", this.getParent().getId());
         XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "joinWithRight.parent");
         XdStorageBTreeInvariants.checkStructuralAlignment(this, "joinWithRight.this");
     }
@@ -1019,6 +1027,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
             storage.update(this.getParent(), transaction);
             storage.update(left, transaction);
+            log.debug("B+Tree parent {} after join-with-left", this.getParent().getId());
             XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "joinWithLeft.parent");
             XdStorageBTreeInvariants.checkStructuralAlignment(left, "joinWithLeft.left");
         }

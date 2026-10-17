@@ -1,5 +1,8 @@
 package org.flib.xdstorage.factories;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.code.IXdStorageSimpleWrapper;
@@ -17,6 +20,8 @@ import org.flib.xdstorage.utils.XdStorageObjectUtils;
  * Избавлен от прямой работы с рефлексивными полями, делегируя задачи Packer и Unpacker процессорам.
  */
 public class XdStorageSmartCloner implements IXdStorageCloner {
+
+    private static final Logger log = LogManager.getLogger(XdStorageSmartCloner.class);
 
     private final IXdStorageReferenceProvider referencesProvider;
 
@@ -99,6 +104,7 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         if (cl == org.flib.xdstorage.btree.XdStorageBTree.class ||
                 cl == org.flib.xdstorage.btree.XdStorageBTreeNode.class ||
                 cl.getName().contains("org.flib.xdstorage.btree")) {
+            log.debug("clone: btree-infrastructure instance of {} passed through live (identity preserved)", cl.getName());
             return toClone; // Возвращаем живой инстанс без рекурсивного переклонирования
         }
 

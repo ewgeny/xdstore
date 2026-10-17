@@ -1,5 +1,8 @@
 package org.flib.xdstorage.resource;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.idgeneration.IXdStorageIdGenerator;
@@ -22,6 +25,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageResource extends XdStorageAbstractResource {
+
+    private static final Logger log = LogManager.getLogger(XdStorageResource.class);
 
     private final IXdStorageObjectsReader reader;
 
@@ -167,6 +172,7 @@ public class XdStorageResource extends XdStorageAbstractResource {
             }
 
             Collection<Object> objects = readAsObjects();
+            log.info("resource {} prepared from disk: {} objects", getFileName(), objects != null ? objects.size() : 0);
             if (objects != null)
                 cache.fillCache(objects);
             postPrepare(transaction);
