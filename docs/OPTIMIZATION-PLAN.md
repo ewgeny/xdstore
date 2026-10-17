@@ -378,6 +378,13 @@ listed here because ResourceCache transit interacts with it)
   hash index resources. Discipline: per-operation traces are DEBUG (invisible at the default
   INFO config — 0 DEBUG lines in the suite log), anomalies WARN, rare lifecycle INFO.
   DEBUG traces activate with a one-line config change when diagnosing.
+- **Resource-cache & transaction-management depth (final extension):** `XStorageResourceCache`
+  logs INFO on every commit ("commit of tx X: N record(s) became permanent") and every rollback
+  ("rollback of tx X: N record(s) reverted in reverse mutation order"); per-op INSERT/UPDATE/
+  DELETE cleaned to parameterized DEBUG with class/id. `XStorageTransactionManager.beginTransaction`
+  now logs the timeout and nesting ("Started transaction X (timeout N ms, nested in Y)").
+  Suite volume: ~5700 INFO lines / ~900 KB — cache commits and transaction lifecycle fully
+  visible at default config. Suite 460/0 green.
 - **INFO operation flow (show-the-project log):** the facade now logs INFO on every
   successful `save` (object and collection, with class/object count) and every `delete`,
   plus `XStorageResource.prepare` logs the from-disk load with object counts. A full suite

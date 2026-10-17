@@ -931,7 +931,7 @@ public class XdStorageResourceCache {
     }
 
     private void insertInternal(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
-        log.debug("INSERT by transaction " + transaction.getTransactionId() + " OBJECT \r\n" + newObject);
+        log.debug("INSERT by transaction {} of {}", transaction.getTransactionId(), newObject.getClass().getSimpleName());
         if (IXdStorageIdObservableWrapper.class.isAssignableFrom(newObject.getClass())) {
             final String transactionId = transaction.getTransactionId();
 
@@ -1134,7 +1134,7 @@ public class XdStorageResourceCache {
     }
 
     private void updateInternalAfterLock(final Object newObject, final XdStorageTransaction transaction, CacheRecord record) throws XdStorageException {
-        log.debug("UPDATE by transaction " + transaction.getTransactionId() + " OBJECT \r\n" + newObject);
+        log.debug("UPDATE by transaction {} of {}", transaction.getTransactionId(), newObject.getClass().getSimpleName());
 
         final String transactionId = transaction.getTransactionId();
         final Object objectId = field.get(newObject);
@@ -1209,7 +1209,7 @@ public class XdStorageResourceCache {
     }
 
     private void deleteInternalAfterLock(final Object objectId, final XdStorageTransaction transaction, CacheRecord record) throws XdStorageException {
-        log.debug("DELETE by transaction " + transaction.getTransactionId() + " OBJECT ID " + objectId);
+        log.debug("DELETE by transaction {} of id {}", transaction.getTransactionId(), objectId);
 
         final String transactionId = transaction.getTransactionId();
 
@@ -1409,6 +1409,7 @@ public class XdStorageResourceCache {
         undoLogByTransaction.remove(transactionId); // изменения стали постоянными — журнал отката не нужен
         final Map<Object, CacheRecord> map = changes.remove(transactionId);
         if (map != null) {
+            log.info("commit of tx {}: {} record(s) became permanent", transactionId, map.size());
             final Iterator<Entry<Object, CacheRecord>> it = map.entrySet().iterator();
             while (it.hasNext()) {
                 final CacheRecord record = it.next().getValue();
@@ -1488,6 +1489,11 @@ public class XdStorageResourceCache {
                 }
                 record.unlock(transaction);
             }
+        }
+
+        if (map != null || undoLog != null) {
+            log.info("rollback of tx {}: {} record(s) reverted in reverse mutation order",
+                    transactionId, map != null ? map.size() : 0);
         }
 
         changesUnidentifiedObjectsByTransaction.remove(transactionId);

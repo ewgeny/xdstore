@@ -115,7 +115,8 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         transactionsById.put(newTransactionId, newTransaction);
         transactionActiveThreadsCounter.put(newTransactionId, new AtomicLong(0));
 
-        log.info(String.format("Started transaction %s", newTransactionId));
+        log.info(String.format("Started transaction %s (timeout %d ms%s)", newTransactionId, timeout,
+                transaction != null ? ", nested in " + transaction.getTransactionId() : ""));
         return newTransaction;
     }
 
