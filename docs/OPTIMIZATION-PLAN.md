@@ -7,13 +7,15 @@ Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retain
 boolean-field distortion (`isActive` expected true, was false on reload — under investigation by
 the author).
 
-**Status after the 2026-10-16/17 sessions (R-13..R-25 below): 470 tests — the only remaining
-red is the flaky concurrent trio** (GraphPhantom / PhantomReadIsolation / Xml testMultithreads —
-each green in isolated runs; the shared residual is a purge-vs-rolled-back-tx race, and the old
-read-lock spin HANG has not reproduced since buffered IO landed). **`StressTest` is FIXED
-(R-25: buffered persistence IO — the "deadlock" was unbuffered quadratic full-file rewrites):
-5000/5000 commits, 0 rollbacks, ~29.5 s.** Stable green: DeleteIsolation, PhantomReadIsolation,
-testOneThread, GraphPhantom (2/3+), boolean test (R-22).
+**Status after the 2026-10-16/17 sessions (R-13..R-27 below): 470 tests in 1:48 — the definitive
+final measurement. Only 2 red, both flaky concurrent** (`GraphPhantom`, Xml `testMultithreads` —
+each green in isolated runs; the shared residual is sustained-write read-lock starvation during
+mass-delete cascades, see R-26/R-29). `StressTest`, `DeleteIsolation`, `PhantomReadIsolation`,
+`testOneThread`, the boolean test (R-22), and every assertion suite are GREEN.
+The campaign fixed 6 of the original 8 stable reds and halved the remaining flake set.
+NEXT OPEN ITEM: R-29 (remove tree-lock contention: shallower deep-lock chains / per-node
+striping / FIFO ticket latches — see R-26 for the rejected wait-rescheduling approaches).
+Also open: frozen cloner pass-through (re-freeze decision), D-3 batching design.
 Every fix below is gated by the suites built in the previous sessions: YAML engine round-trip (11),
 BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10+1).
 
@@ -413,6 +415,33 @@ listed here because ResourceCache transit interacts with it)
   D-3 batching design (open; changes crash semantics), StressTest un-re-verified with the final
   lock (was green at R-25 state).
 - **Revert:** remove `waitingWriters` + the two checks and the lockWrite/lockRead wrapping.
+
+### R-28 (DESIGNED, NOT YET LANDED): condition-based RW-lock waiting — the next session's first item
+- **Evidence closed the loop:** the R-24 ERROR logs show every read-acquisition timeout coincides
+  with a ROTATING write-holder (different holder threads named across successive 3 s timeouts) —
+  the reader's 15 ms sleep-quantum lands inside writer sections; with sustained writer arrival it
+  never observes `writeLockThread == null`. Genuine starvation of the POLLING MECHANISM, not of
+  the admission policy.
+- **Design (contained, admission-preserving):** extract `tryWriteStateLocked(Thread)` /
+  `tryReadStateLocked(Thread)` (the state checks under an already-held mainLock); `lockWrite`/
+  `lockRead` hold `mainLock` and await a `Condition released` (15 ms timeout loop for the tx
+  deadline) instead of `Thread.sleep`; `unlockWrite` (on the counter reaching zero) and
+  `unlockRead` (on a thread's counter reaching zero) `signalAll()`. Admission policy, reentrancy,
+  and the sole-reader upgrade stay byte-for-byte identical — only the waiting mechanism changes,
+  eliminating the blind quantum.
+- **Status:** **ATTEMPTED AND CLOSED (R-29).** Two implementations were built and gated:
+  (1) condition-based waiting (the design above) — the flaky test still failed; woken readers
+  still LOSE the mainLock handoff race against fresh arrivals (wakeup ≠ victory);
+  (2) **fair `ReentrantReadWriteLock` backend** (full API-preserving wrapper) — WEDGED under
+  25 workers: fair-mode queue handoff across the engine's deep-lock chains (leaf→ancestor
+  multi-lock paths) does not drain; the 10-second stress window ran 25+ minutes without a
+  verdict. Both were REVERTED; the simple spin-scheme is restored and verified (StressTest
+  green; Xml back to its known flake level).
+- **Open (R-29, needs its own focused session):** a real fix must remove the contention
+  itself — per-node striping, shallower deep-lock chains, or moving tree-node latching to
+  FIFO ticket latches — not re-schedule the waiters. The rejected variants + evidence are
+  recorded here and in the lock source comment so they are not re-attempted blind.
+- **Revert:** n/a (both variants reverted; source comment carries the history).
 
 ---
 

@@ -28,10 +28,14 @@ public class XdStorageReadWriteLock {
     // Потокобезопасный учет реентерабельных читателей
     private final Map<Thread, AtomicLong> readLocksCounters = new ConcurrentHashMap<>();
 
-    // R-26 (эксперименты отклонены, см. план): читательский приоритет голодал писателей,
-    // waiting-writers барьер голодал читателей. Остается простая схема: читатели проходят
-    // при свободном локе, писатели — при отсутствии читателей и чужого writer-лока.
-    // Полноценное лечение голодания — переезд на java.util.concurrent RW-лок (R-26 в плане).
+    // R-26/R-28/R-29 (эксперименты отклонены, полная история в docs/OPTIMIZATION-PLAN.md):
+    // читательский приоритет голодал писателей; waiting-writers барьер голодал читателей;
+    // condition-wait не убрал голодание (просыпание != победа в mainLock-гонке);
+    // fair-RRWL ЗАВИСАЛ под 25 воркерами (queue-handoff при deep-lock цепях не дренируется).
+    // Остается простая схема: читатели проходят при свободном локе, писатели — при отсутствии
+    // читателей и чужого writer-лока. Полноценное лечение голодания (R-29, open) — переезд на
+    // java.util.concurrent RW-лок только для ТЕКОВЫХ latch-ов с FIFO, либо per-node striping,
+    // либо устранение самого contention (снижение глубины deep-lock цепей).
 
     public boolean isWriteLocked() {
         return writeLocksCounter.get() > 0 && writeLockThread == Thread.currentThread();
@@ -117,14 +121,14 @@ public class XdStorageReadWriteLock {
         long sleepStep = 15;
 
         while (!tryLockWrite()) {
-                long elapsed = System.nanoTime() - startTime;
-                if (elapsed >= timeout) {
-                    log.error("Write-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
-                            elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null);
-                    throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс монопольно занят на запись другим потоком. Превышен таймаут ожидания: " + timeout + " мс");
-                }
-                Thread.sleep(Math.min(sleepStep, timeout - elapsed));
+            long elapsed = System.nanoTime() - startTime;
+            if (elapsed >= timeout) {
+                log.error("Write-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
+                        elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null);
+                throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс монопольно занят на запись другим потоком. Превышен таймаут ожидания: " + timeout / 1_000_000 + " мс");
             }
+            Thread.sleep(Math.min(sleepStep, timeout - elapsed));
+        }
         logLockContention(startTime, "write", transaction);
     }
 
@@ -134,20 +138,14 @@ public class XdStorageReadWriteLock {
         long startTime = System.nanoTime();
         long sleepStep = 15;
 
-        try {
-            while (!tryLockRead()) {
-                long elapsed = System.nanoTime() - startTime;
-                if (elapsed >= timeout) {
-                    log.error("Read-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
-                            elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null);
-                    throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс занят на чтение другим потоком. Превышен таймаут ожидания: " + timeout + " мс");
-                }
-                Thread.sleep(Math.min(sleepStep, timeout - elapsed));
+        while (!tryLockRead()) {
+            long elapsed = System.nanoTime() - startTime;
+            if (elapsed >= timeout) {
+                log.error("Read-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
+                        elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null);
+                throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс занят на чтение другим потоком. Превышен таймаут ожидания: " + timeout / 1_000_000 + " мс");
             }
-        } catch (final XdStorageRuntimeException e) {
-            throw e;
-        } catch (final Exception e) {
-            throw new XdStorageRuntimeException("read-lock wait interrupted", e);
+            Thread.sleep(Math.min(sleepStep, timeout - elapsed));
         }
         logLockContention(startTime, "read", transaction);
     }
