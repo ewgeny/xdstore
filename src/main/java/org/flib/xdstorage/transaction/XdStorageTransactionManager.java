@@ -258,6 +258,10 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         services.getExecutor().submit(() -> {
             synchronized (transaction) {
                 if (transactionsById.containsKey(transaction.getTransactionId()) && transaction.isRollbackOnly()) {
+                    // Аномалия, которую нельзя терять в логах: транзакция не смогла завершиться
+                    // сама (таймаут/конфликт) и откатывается уборщиком — все ее изменения теряются.
+                    log.warn("Rollback-only sweep: transaction {} is being rolled back by the timeout sweeper (its changes are discarded)",
+                            transaction.getTransactionId());
                     // БАРЬЕР ЗАЩИТЫ ПОТОКОВ: Фоновый уборщик выполнит откат ресурсов, но жестко ждет,
 // пока активные ForkJoin-потоки параллельного стрима полностью не выйдут из методов СУБД!
                     AtomicLong activeThreads = transactionActiveThreadsCounter.get(transaction.getTransactionId());

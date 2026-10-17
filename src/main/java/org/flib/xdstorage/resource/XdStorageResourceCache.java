@@ -120,7 +120,11 @@ public class XdStorageResourceCache {
         if (parsedId == null) {
             return parsed;
         }
-        return registry.adoptOrRegister(clazz, parsedId, parsed);
+        final Object canonical = registry.adoptOrRegister(clazz, parsedId, parsed);
+        if (log.isDebugEnabled() && canonical != parsed) {
+            log.debug("infra instance {}#{} adopted from the canonical registry; parsed copy discarded", clazz.getSimpleName(), parsedId);
+        }
+        return canonical;
     }
 
     public <T> void fillAndCloneCacheOnlyIfNotExists(final List<T> objects, final Collection<T> result, final XdStorageTransaction transaction) throws XdStorageException {
@@ -853,6 +857,10 @@ public class XdStorageResourceCache {
 
         while (isInvisibleUncommittedMutation(record, transaction)) {
             if (System.nanoTime() >= deadlineNano) {
+                // Чужая транзакция держит инфраструктурную запись невидимой дольше бюджета:
+                // читатель идет дальше с "честным отказом" — этот факт обязан быть в логе.
+                log.warn("infra record {} stayed invisible past the wait budget ({} ms, owner tx: {}) — serving absent",
+                        objectId, timeout, record.transaction != null ? record.transaction.getTransactionId() : null);
                 return true; // честный отказ дальше по контракту "cannot load by reference"
             }
             try {

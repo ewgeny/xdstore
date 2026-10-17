@@ -7,6 +7,8 @@ import org.flib.xdstorage.btree.XdStorageBTree;
 import org.flib.xdstorage.btree.XdStorageBTreeId;
 import org.flib.xdstorage.code.IXdStorageSimpleWrapper;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.index.IXdStorageChangeIndexRollback;
 import org.flib.xdstorage.resource.XdStorageAbstractResourcesManager;
@@ -31,6 +33,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResourceObject, IXdStorageSearchIndexDaoResource {
+
+    private static final Logger log = LogManager.getLogger(XdStorageSearchIndexResource.class);
 
     protected final XdStorageServicesLocator services;
 
@@ -142,6 +146,9 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         // (откат создателя/eviction), но граф остается каноническим: восстанавливаем ссылку
         if (tree == null) {
             tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, searchBTreeId);
+            if (tree != null) {
+                log.warn("search tree {} adopted from the canonical instance registry (cache record lost)", searchBTreeId);
+            }
         }
 
         // =========================================================================
@@ -157,6 +164,7 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
                 tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
                 if (tree == null) {
                     final XdStorageSearchIndex searchIndex = objectClInfo.getIndexes().get(indexName);
+                    log.info("search trees {} and {} created for class {}", searchBTreeId, keyBTreeId, objectClInfo.getClazz().getName());
 
                     // Создаем и каскадно сохраняем дерево адресации ключей в ТЕКУЩУЮ транзакцию
                     XdStorageBTree subKeyTree = new XdStorageBTree(keyBTreeId, false, searchIndex.getIndexFillingValue());
@@ -216,6 +224,9 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
             // ФАЗА 3B: реестр канонических инстансов — живое дерево могло потерять запись кэша
             // (откат создателя/eviction); граф остается каноническим — восстанавливаем ссылку.
             keyTree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, keyBTreeId);
+            if (keyTree != null) {
+                log.warn("search key tree {} adopted from the canonical instance registry (cache record lost)", keyBTreeId);
+            }
         }
         if (keyTree == null) {
             throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");
@@ -240,6 +251,9 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
             // ФАЗА 3B: реестр канонических инстансов — живое дерево могло потерять запись кэша
             // (откат создателя/eviction); граф остается каноническим — восстанавливаем ссылку.
             tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, searchBTreeId);
+            if (tree != null) {
+                log.warn("search tree {} adopted from the canonical instance registry (cache record lost)", searchBTreeId);
+            }
         }
         if (tree == null && Boolean.getBoolean("xdstorage.chain.debug")) {
             System.out.println("[CHAIN] SEARCH-TREE-MISS id=" + searchBTreeId + " recordId=" + record.getId());

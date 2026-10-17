@@ -334,6 +334,27 @@ listed here because ResourceCache transit interacts with it)
 - **Revert:** restore the SearchManager skip, drop the idempotency check / registry consults /
   `entityClassOf` normalization.
 
+### R-24. Observability pass: purposeful logging across the engine — KEEP (2026-10-17)
+- **What (INFO = rare lifecycle, WARN = anomalies/recoveries, ERROR = acquisition failures; hot
+  paths stay quiet — full suite logs ~244 KB total, vs 4.8 GB at the old DEBUG level):**
+  - `XdStorageTransactionManager`: WARN when the timeout sweeper rolls a transaction back.
+  - `XdStorageReadWriteLock`: ERROR on lock-acquisition timeout (with the holder thread —
+    leak diagnosis), WARN when an acquisition waited ≥ 1 s, WARN on rejected `unlockWrite`
+    (leaked/unbalanced lock).
+  - `XdStorageBTree`: WARN before every retry-budget-exhausted throw (per op/key/tree), INFO
+    on root creation and on tree-emptied purge.
+  - `BTreeIndexResource` / `SearchIndexResource`: INFO on lazy tree creation; WARN when a tree
+    is adopted from the canonical registry (its cache record was lost — anomaly).
+  - `XdStorageResourceCache`: WARN when an infra record stays invisible past the wait budget;
+    DEBUG on canonical adoption during fillCache.
+  - `XdStorageAtomicFile`: WARN on non-atomic-move fallback and stale `.tmp` recovery.
+  - `XdStorageProvider`: INFO on storage open/shutdown; WARN when a name returns an EXISTING
+    instance (the test-isolation gotcha, previously invisible).
+- **First catch:** the WARN set immediately surfaced a real `unlockWrite by main rejected:
+  write lock held by null` leak signal and 35 retry-budget exhaustions in one concurrency test.
+- **Verified:** no-flake suite 460/0 green with the logging in place.
+- **Revert:** remove the added log statements (all additive, no control-flow changes).
+
 ---
 
 ## 2. PROJECT ANALYSIS

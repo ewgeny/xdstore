@@ -1,5 +1,8 @@
 package org.flib.xdstorage.utils;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -16,12 +19,19 @@ import java.nio.file.StandardCopyOption;
  */
 public final class XdStorageAtomicFile {
 
+    private static final Logger log = LogManager.getLogger(XdStorageAtomicFile.class);
+
     private XdStorageAtomicFile() {
     }
 
     public static void writeReplacing(final String fileName, final ContentWriter content) throws IOException {
         final File target = new File(fileName);
         final File tmp = new File(fileName + ".tmp");
+        if (tmp.exists()) {
+            // незакрытый .tmp от предыдущего сбоя: безопасно удаляем (он не читается никем)
+            log.warn("stale temp file {} found (previous crash mid-write) — removing", tmp);
+            tmp.delete();
+        }
         try {
             if (tmp.exists())
                 tmp.delete();
@@ -53,6 +63,8 @@ public final class XdStorageAtomicFile {
             Files.move(source.toPath(), target.toPath(),
                     StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (final AtomicMoveNotSupportedException e) {
+            log.warn("atomic rename unsupported for {} — falling back to a non-atomic move "
+                    + "(a crash during the swap may lose the file; consider a filesystem with rename support)", target);
             Files.move(source.toPath(), target.toPath(),
                     StandardCopyOption.REPLACE_EXISTING);
         }

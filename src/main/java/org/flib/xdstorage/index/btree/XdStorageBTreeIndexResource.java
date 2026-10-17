@@ -1,5 +1,7 @@
 package org.flib.xdstorage.index.btree;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.IXdStoragePredicate;
 import org.flib.xdstorage.IXdStorageWatcher;
@@ -39,6 +41,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObject, IXdStorageIndexDaoResource {
+
+    private static final Logger log = LogManager.getLogger(XdStorageBTreeIndexResource.class);
 
     protected final XdStorageServicesLocator services;
 
@@ -447,6 +451,9 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
             // (откат создателя/eviction); граф остается каноническим — восстанавливаем ссылку
             // ВМЕСТО создания конкурентного второго дерева.
             tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, bTreeId);
+            if (tree != null) {
+                log.warn("id_index tree {} adopted from the canonical instance registry (cache record lost)", bTreeId);
+            }
         }
         if (tree == null) {
             createTreeLock.lock();
@@ -454,8 +461,13 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
                 tree = storage.load(XdStorageBTree.class, bTreeId, transaction);
                 if (tree == null) {
                     tree = (XdStorageBTree) services.getCanonicalInstances().get(XdStorageBTree.class, bTreeId);
+                    if (tree != null) {
+                        log.warn("id_index tree {} restored from the canonical instance registry (its cache record was lost"
+                                + " to a creator rollback/eviction)", bTreeId);
+                    }
                 }
                 if (tree == null) {
+                    log.info("id_index tree {} created for class {}", bTreeId, objectClInfo.getClazz().getName());
                     tree = new XdStorageBTree(bTreeId, false, objectClInfo.getIndexFillingValue());
                     storage.save(tree, transaction);
                 }

@@ -5,6 +5,8 @@ import org.flib.xdstorage.XdStoragePolicy;
 import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.annotations.XdStorageObjectPolicy;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.lock.XdStorageReadWriteLock;
@@ -19,6 +21,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
 public class XdStorageBTree implements IXdStorageBTreeNode {
+
+    private static final Logger log = LogManager.getLogger(XdStorageBTree.class);
 
     @XdStorageObjectId
     private XdStorageBTreeId id;
@@ -199,6 +203,8 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                 }
             }
             if (++attempts > REBALANCE_RETRY_BUDGET) {
+                log.warn("B+Tree rebalance retry budget exhausted for insert of key {} in tree {} — sustained rebalance lock contention (operation failed loudly)", key,
+                        id);
                 throw new XdStorageException("retry budget exhausted by insert of idgeneration " + key
                         + " into " + id + ": устойчивая конкуренция за блокировки ребалансировки");
             }
@@ -213,6 +219,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     }
 
     private void createRoot(final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        log.info("B+Tree {} created root (first key stored)", id);
         firstLeaf = root = new XdStorageBTreeNode(this, null);
         this.wasInitialized = true; // Фиксируем факт рождения структуры Б+ Дерева
         storage.save(root, transaction);
@@ -274,6 +281,8 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                 }
             }
             if (++attempts > REBALANCE_RETRY_BUDGET) {
+                log.warn("B+Tree rebalance retry budget exhausted for delete of key {} in tree {} — sustained rebalance lock contention (operation failed loudly)", key,
+                        id);
                 throw new XdStorageException("retry budget exhausted by delete of idgeneration " + key
                         + " from " + id + ": устойчивая конкуренция за блокировки ребалансировки");
             }
@@ -291,6 +300,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
             }
 
             if (root == null) {
+                log.info("B+Tree {} is empty after delete of key {} (root purged)", id, key);
                 unlockWrite();
                 return;
             }
@@ -346,6 +356,8 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
                 }
             }
             if (++attempts > REBALANCE_RETRY_BUDGET) {
+                log.warn("B+Tree rebalance retry budget exhausted for update of key {} in tree {} — sustained rebalance lock contention (operation failed loudly)", key,
+                        id);
                 throw new XdStorageException("retry budget exhausted by update of idgeneration " + key
                         + " in " + id + ": устойчивая конкуренция за блокировки ребалансировки");
             }
