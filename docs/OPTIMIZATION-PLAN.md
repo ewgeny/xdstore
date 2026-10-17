@@ -371,6 +371,27 @@ listed here because ResourceCache transit interacts with it)
   the remaining failures are pure concurrency-timing races (purge vs rolled-back tx), not IO.
 - **Revert:** unwrap the buffered readers/writers (8+1 sites).
 
+### R-26/R-27. RW-lock experiments REJECTED; infra latch-skip LANDED; the flake's layers mapped — KEEP latch-skip only (2026-10-17)
+- **Diagnosed (testMultithreads isolated, evidence in /tmp logs of the session):** the flake is
+  an onion. Layer 1: read-lock starvation during mass-delete cascades (lazy getters escalate the
+  transient timeout into markRollbackOnly, killing whole worker txs). Layer 2 (after layer 1 was
+  addressed): per-record latch timeouts on hot tree-node records — `CacheRecord.lock` holds the
+  latch until the holder's tx ends, so hot nodes serialize 25 workers with 3 s expiry.
+- **Rejected (both starved the other side):** reader-priority barrier (6 write-timeout runs);
+  waiting-writers barrier starving new readers (read-timeouts persisted 3/3). The simple scheme
+  (shared reads, no waiter gates) is RESTORED; the honest fix for starvation is a real
+  java.util.concurrent RW-lock redesign — open, R-26 in the plan.
+- **Landed (R-27):** infrastructure records (trees/nodes) NO LONGER take the per-record latch —
+  `CacheRecord.lock/unlock` return immediately for infrastructure caches. Structural contention
+  is already serialized by the tree's own write-lock; the latch only added a hot-node ticket
+  queue with 3 s expiry. Own-change detection survives via `record.transaction` set in
+  `createInsertRecord`/the no-op lock. Logs added earlier (R-24) cover the residual contention.
+- **Verified:** no-flake suite 460/0 + StressTest green with the latch-skip and the reverted
+  lock. testMultithreads in ISOLATION still fails ~2/3 (read-lock timeouts persist under this
+  workload's sustained write pressure — the RW-lock redesign remains the open item); in-suite
+  it stays flaky-green.
+- **Revert:** remove the two infrastructureCache guards in CacheRecord lock/unlock.
+
 ### R-26. Fair-queue RW lock + the remaining flake characterized — PARTIAL, next layer documented (2026-10-17)
 - **Diagnosed (testMultithreads isolated, caught in the act):** the flake's first layer was
   **read-lock starvation** — `XdStorageReadWriteLock.lockRead` timed out (3 s) during

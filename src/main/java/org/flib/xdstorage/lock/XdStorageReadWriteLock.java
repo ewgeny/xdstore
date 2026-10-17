@@ -28,13 +28,10 @@ public class XdStorageReadWriteLock {
     // Потокобезопасный учет реентерабельных читателей
     private final Map<Thread, AtomicLong> readLocksCounters = new ConcurrentHashMap<>();
 
-    // ФАЗА 3B/R-26: честная очередь вместо приоритетов. Наблюдаемые деградации:
-    // (а) без барьеров читатели голодали под непрерывным потоком мутаций (read-lock таймауты
-    // в lazy-геттерах, 25 воркеров); (б) при читательском приоритете голодали уже писатели.
-    // Итог: ожидающие ПИСАТЕЛИ блокируют только НОВЫХ читателей (вложенные re-entrant
-    // чтения держателя не блокируются — иначе self-deadlock), а писатели не блокируются
-    // ожидающими читателями. Очередь дренируется в порядке прихода.
-    private final java.util.concurrent.atomic.AtomicLong waitingWriters = new java.util.concurrent.atomic.AtomicLong(0);
+    // R-26 (эксперименты отклонены, см. план): читательский приоритет голодал писателей,
+    // waiting-writers барьер голодал читателей. Остается простая схема: читатели проходят
+    // при свободном локе, писатели — при отсутствии читателей и чужого writer-лока.
+    // Полноценное лечение голодания — переезд на java.util.concurrent RW-лок (R-26 в плане).
 
     public boolean isWriteLocked() {
         return writeLocksCounter.get() > 0 && writeLockThread == Thread.currentThread();
@@ -102,16 +99,6 @@ public class XdStorageReadWriteLock {
                 return false;
             }
 
-            // НОВЫЙ читатель уступает место ожидающим писателям (честная очередь).
-            // Вложенное re-entrant чтение держателя разрешено всегда — иначе,
-            // заблокировав себя на собственной блокировке, получим self-deadlock.
-            if (waitingWriters.get() > 0) {
-                final AtomicLong heldCounter = readLocksCounters.get(currentThread);
-                if (heldCounter == null || heldCounter.get() <= 0) {
-                    return false;
-                }
-            }
-
             AtomicLong counter = readLocksCounters.get(currentThread);
             if (counter == null) {
                 readLocksCounters.put(currentThread, counter = new AtomicLong(0));
@@ -129,10 +116,7 @@ public class XdStorageReadWriteLock {
         long startTime = System.nanoTime();
         long sleepStep = 15;
 
-        // Регистрируемся в очереди писателей: новые читатели будут уступать нам (fair queue)
-        waitingWriters.incrementAndGet();
-        try {
-            while (!tryLockWrite()) {
+        while (!tryLockWrite()) {
                 long elapsed = System.nanoTime() - startTime;
                 if (elapsed >= timeout) {
                     log.error("Write-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
@@ -141,9 +125,6 @@ public class XdStorageReadWriteLock {
                 }
                 Thread.sleep(Math.min(sleepStep, timeout - elapsed));
             }
-        } finally {
-            waitingWriters.decrementAndGet();
-        }
         logLockContention(startTime, "write", transaction);
     }
 

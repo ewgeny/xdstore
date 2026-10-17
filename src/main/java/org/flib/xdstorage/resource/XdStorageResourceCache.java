@@ -1696,6 +1696,17 @@ public class XdStorageResourceCache {
         private Map<String, Long> blockingTime = new HashMap<>();
 
         public void lock(final XdStorageTransaction transaction) throws XdStorageException {
+            // R-27: инфраструктурные записи (деревья/узлы) НЕ захватывают latch. Структурная
+            // конкуренция уже сериализована write-локом самого дерева; удержание latch-а до
+            // конца транзакции-держателя на горячих узлах давало "locked for update" таймауты
+            // при 25 воркерах. Своя-мутация определяется по record.transaction, проставленному
+            // в createInsertRecord/markUpdate.
+            if (infrastructureCache) {
+                if (this.transaction == null) {
+                    this.transaction = transaction;
+                }
+                return;
+            }
             boolean isOwnerAlive = this.transaction != null &&
                     services.getTransactionsManager().isTransactionAlive(this.transaction);
 
@@ -1746,6 +1757,13 @@ public class XdStorageResourceCache {
         }
 
         public void unlock(final XdStorageTransaction transaction) throws XdStorageException {
+            // R-27: инфраструктурные записи не держат latch — просто разъединяем владельца
+            if (infrastructureCache) {
+                if (this.transaction == transaction) {
+                    this.transaction = null;
+                }
+                return;
+            }
             if (this.transaction == transaction) {
                 this.transaction = null;
                 synchronized (locked) {
