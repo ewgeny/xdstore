@@ -32,6 +32,21 @@ public final class XdStorageBTreeInvariants {
     private static final org.apache.logging.log4j.Logger log =
             org.apache.logging.log4j.LogManager.getLogger(XdStorageBTreeInvariants.class);
 
+    /**
+     * R-32: сэмплирование полной валидации. Полный обход цепочки листьев + descend — O(N);
+     * на больших деревьях вызов на КАЖДУЮ операцию давал O(N²) на массовых удалениях
+     * (пурдж 1250 ключей ≈ 780к посещений узлов). Дешевые O(1)-проверки пар node
+     * (children==keys+1, монотонность разделителей) выполняются tripwire-ами после КАЖДОЙ
+     * мутации независимо; полный обход — каждая 25-я операция.
+     */
+    private static final int FULL_VALIDATION_INTERVAL = 25;
+    private static final java.util.concurrent.atomic.AtomicLong VALIDATION_SAMPLER =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    public static boolean shouldRunFullValidation() {
+        return VALIDATION_SAMPLER.incrementAndGet() % FULL_VALIDATION_INTERVAL == 1;
+    }
+
     private XdStorageBTreeInvariants() {
         // utility class
     }

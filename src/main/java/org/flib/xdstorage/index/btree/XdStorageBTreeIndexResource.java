@@ -493,8 +493,12 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         // валидацией цепочки листьев. При нарушении транзакция откатывается громко,
         // а не фиксирует битую структуру на диск молча (урок цепочки 268/1250).
         // =========================================================================
-        org.flib.xdstorage.btree.XdStorageBTreeInvariants.validateLeafChain(tree, storage, transaction,
-                "id_index insert of " + objectClInfo.getClazz().getSimpleName() + "." + objectId);
+        // R-32: полная валидация сэмплируется (каждая 25-я операция); между сэмплами
+        // структурную целостность держат tripwire-ы checkStructuralAlignment в узлах
+        if (org.flib.xdstorage.btree.XdStorageBTreeInvariants.shouldRunFullValidation()) {
+            org.flib.xdstorage.btree.XdStorageBTreeInvariants.validateLeafChain(tree, storage, transaction,
+                    "id_index insert of " + objectClInfo.getClazz().getSimpleName() + "." + objectId);
+        }
     }
 
     @Override
@@ -544,8 +548,10 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
 
         // БАРЬЕР СТРУКТУРНОЙ ЦЕЛОСТНОСТИ: слияния листьев (join/borrow) — самый опасный
         // контур ребалансировки, валидируем цепочку сразу после удаления
-        org.flib.xdstorage.btree.XdStorageBTreeInvariants.validateLeafChain(tree, storage, transaction,
-                "id_index delete of " + objectClInfo.getClazz().getSimpleName() + "." + objectId);
+        if (org.flib.xdstorage.btree.XdStorageBTreeInvariants.shouldRunFullValidation()) {
+            org.flib.xdstorage.btree.XdStorageBTreeInvariants.validateLeafChain(tree, storage, transaction,
+                    "id_index delete of " + objectClInfo.getClazz().getSimpleName() + "." + objectId);
+        }
     }
 
     @Override

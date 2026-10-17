@@ -374,6 +374,25 @@ public class XmlDataStorageMultithreadsTest {
             }
         }
 
+        // Сторожевой поток: если воркеры не завершились за 120 секунд — печатаем СТЕКИ ВСЕХ
+        // потоков (диагностика livelock без внешнего jstack) и прерываем ожидание.
+        final Thread watchdog = new Thread(() -> {
+            try {
+                Thread.sleep(120_000);
+            } catch (final InterruptedException e) {
+                return;
+            }
+            if (countThreads.get() > 0) {
+                System.err.println("=== WATCHDOG: workers did not finish in 120s — dumping all stacks ===");
+                Thread.getAllStackTraces().forEach((t, frames) -> {
+                    System.err.println("--- " + t.getName() + " ---");
+                    for (final StackTraceElement f : frames) System.err.println("    " + f);
+                });
+            }
+        });
+        watchdog.setDaemon(true);
+        watchdog.start();
+
         synchronized (countThreads) {
             while (countThreads.intValue() > 0) {
                 try {

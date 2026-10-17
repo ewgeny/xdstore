@@ -115,6 +115,7 @@
                 <version>3.0.0-M4</version>
                 <configuration>
                     <forkCount>1</forkCount>
+                    <argLine>-Xmx1g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
                     <includes>
                         <include>**/*Test.java</include>
                     </includes>

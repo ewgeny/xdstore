@@ -535,7 +535,46 @@ listed here because ResourceCache transit interacts with it)
 - **Reverted:** operation catches + purge tolerance restored to HEAD (git restore); verified
   no-flake suite 460/0 at the restored state. The known behavior returns: testMultithreads
   flaky/failing with loud exceptions (no wedge).
-- **Revert:** n/a (already at HEAD).
+
+### R-33. Write-lock leak fixed in all three B+Tree retry loops + validator sampling — KEEP (2026-10-17)
+- **The leak (proven by the purge logs):** `XdatStorageBTree.insert/delete/update` retry loops
+  acquired the tree write lock with **no try/finally** — any throw from inside the write section
+  (record-latch timeout, "does not exists", validator) leaked the lock for the JVM lifetime
+  (holder = a FINISHED thread; every later tree op burned its 3 s timeout on it — the purge's
+  crawl and the "leaked write-lock" ERRORs).
+- **Fix:** try/finally around each post-lockWrite section in all three loops. The unlock is
+  GUARDED (`if (isWriteLocked())`): the node-level `deepUnlock` inside the operations already
+  releases the deep chain (which includes the tree when the cascade reaches the root), so the
+  guard prevents double-release while still closing the residual loop-level hold.
+- **Validator sampling (R-31 next step, landed):** full structural validation runs every 25th
+  index operation (`XStorageBTreeInvariants.shouldRunFullValidation()`); between samples the
+  O(1) `checkStructuralAlignment` tripwires (already in every node mutation) carry the
+  loud-corruption guarantee. Cuts purge validation from O(N²) to O(N/25).
+- **Verified:** btree suites 45/45; Xml class: RUN 1 green, RUN 3 green; RUN 2 still hit leaked
+  locks (5 events) and timed out mid-purge — **a second, still-unidentified leak path exists**
+  (not covered by the loop-level finally; possibly a node-level deep-lock path). The purge now
+  SURVIVES leak events via per-galaxy skips instead of failing.
+- **Revert:** remove the try/finally wrappers + the sampler; restore the bare validate calls.
+
+### R-29b. The two separable failure modes of testMultithreads + the diagnostic watchdog — TOOLS IN PLACE (2026-10-17)
+- **The test now self-diagnoses**: an in-JVM watchdog thread dumps **all** thread stacks
+  (unfiltered — the first attempt's `Thread-` filter hid the holder) if the worker join loop
+  exceeds 120 s. Works without external jstack (external attach fails under this workload:
+  jstack/jcmd time out — the JVM doesn't reach the attach handshake).
+- **Two distinct, alternating failure modes measured:**
+  1. **The wedge (~1/3 of runs):** workers never finish; the R-29a dump showed 3 workers
+     blocked on `mainLock.lock()` INSIDE the RW-lock class (two in `unlockRead`, one in
+     `tryLockRead`) — a lost `mainLock` holder. The holder's stack was NOT in the first dump
+     (the Thread- filter excluded non-Thread-Named threads — main was invisible). The
+     unfiltered watchdog is now in place; the next wedged run names the holder directly.
+  2. **The purge wall (the other mode):** workers finish, then the afterEach purge crawls —
+     ~1250 sequential deletes × full-structural-validator-per-op = O(N²) ≈ 780k node visits,
+     exceeding any reasonable budget. Fix designed (R-31 "next step"): validator sampling.
+  GC-log evidence for mode 1: the wedged JVM shows a HEALTHY heap (342M→28M, 0.6 ms pauses)
+  with an allocation storm (~2 GB/min) — a livelocked retry/allocation loop, NOT GC-thrash
+  (the earlier "jstack doesn't respond" reading was safepoint starvation of the attach
+  handshake, not memory).
+- **Revert:** remove the watchdog block from the test (harmless diagnostic, KEEP recommended).
 
 ---
 

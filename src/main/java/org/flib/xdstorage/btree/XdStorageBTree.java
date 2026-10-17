@@ -211,10 +211,19 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryInsert.set(false);
             lockWrite(transaction);
-            if (root == null) {
-                createRoot(storage, transaction);
+            try {
+                if (root == null) {
+                    createRoot(storage, transaction);
+                }
+                root.insert(this, key, object, storage, transaction, retryInsert);
+            } finally {
+                // R-33: страховка утечки write-лока при throw из write-секции. deepUnlock
+                // внутри node-операций уже снял глубокую цепь (включая tree); разблокируем
+                // только если loop-уровневый захват еще держится текущим потоком.
+                if (isWriteLocked()) {
+                    unlockWrite();
+                }
             }
-            root.insert(this, key, object, storage, transaction, retryInsert);
         } while (retryInsert.get());
     }
 
@@ -289,22 +298,27 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryDelete.set(false);
             lockWrite(transaction);
+            try {
+                // Защита от фантомного зануления внутриdo-while цикла
+                if (root == null && wasInitialized) {
+                    XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                    if (freshTree != null && freshTree.getRoot() != null) {
+                        this.root = freshTree.getRoot();
+                        this.firstLeaf = freshTree.getFirstLeaf();
+                    }
+                }
 
-            // Защита от фантомного зануления внутриdo-while цикла
-            if (root == null && wasInitialized) {
-                XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
-                if (freshTree != null && freshTree.getRoot() != null) {
-                    this.root = freshTree.getRoot();
-                    this.firstLeaf = freshTree.getFirstLeaf();
+                if (root == null) {
+                    log.info("B+Tree {} is empty after delete of key {} (root purged)", id, key);
+                    return;
+                }
+                root.delete(this, key, storage, transaction, retryDelete);
+            } finally {
+                // R-33: см. комментарий в insert
+                if (isWriteLocked()) {
+                    unlockWrite();
                 }
             }
-
-            if (root == null) {
-                log.info("B+Tree {} is empty after delete of key {} (root purged)", id, key);
-                unlockWrite();
-                return;
-            }
-            root.delete(this, key, storage, transaction, retryDelete);
         } while (retryDelete.get());
     }
 
@@ -364,24 +378,29 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
 
             retryUpdate.set(false);
             lockWrite(transaction);
+            try {
+                if (root == null && wasInitialized) {
+                    XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
+                    if (freshTree != null && freshTree.getRoot() != null) {
+                        this.root = freshTree.getRoot();
+                        this.firstLeaf = freshTree.getFirstLeaf();
+                    }
+                }
 
-            if (root == null && wasInitialized) {
-                XdStorageBTree freshTree = storage.load(XdStorageBTree.class, this.id, transaction);
-                if (freshTree != null && freshTree.getRoot() != null) {
-                    this.root = freshTree.getRoot();
-                    this.firstLeaf = freshTree.getFirstLeaf();
+                if (root == null) {
+                    if (XdStorageBTreeNode.CHAIN_DEBUG) {
+                        System.out.println("[CHAIN] UPDATE-MISS tree=" + id + " key=" + key + " wasInitialized=" + wasInitialized);
+                        new Exception("update-miss-stack").printStackTrace(System.out);
+                    }
+                    throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
+                }
+                root.update(this, key, value, storage, transaction, retryUpdate);
+            } finally {
+                // R-33: см. комментарий в insert
+                if (isWriteLocked()) {
+                    unlockWrite();
                 }
             }
-
-            if (root == null) {
-                if (XdStorageBTreeNode.CHAIN_DEBUG) {
-                    System.out.println("[CHAIN] UPDATE-MISS tree=" + id + " key=" + key + " wasInitialized=" + wasInitialized);
-                    new Exception("update-miss-stack").printStackTrace(System.out);
-                }
-                unlockWrite();
-                throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
-            }
-            root.update(this, key, value, storage, transaction, retryUpdate);
         } while (retryUpdate.get());
     }
 
