@@ -42,7 +42,9 @@ public final class XdStorageAtomicFile {
 
             Writer writer = null;
             try {
-                writer = new FileWriter(tmp);
+                // Phase D: буферизация обязательна — сырой FileWriter делает syscall на каждый
+                // append сериализации; на full-file write-out это доминирующая стоимость коммита
+                writer = new java.io.BufferedWriter(new FileWriter(tmp), 1 << 16);
                 content.write(writer);
             } finally {
                 if (writer != null)

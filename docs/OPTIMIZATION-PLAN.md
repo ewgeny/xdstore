@@ -7,13 +7,13 @@ Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retain
 boolean-field distortion (`isActive` expected true, was false on reload — under investigation by
 the author).
 
-**Status after the 2026-10-16/17 sessions (R-13..R-23 below): 470 tests; everything except the
-concurrent family is green — suite minus hang-prone concurrent classes: 460/0.**
-**`GraphPhantom` is FIXED (R-23): 2/3 green isolated** (the 1 failure = the known concurrent
-purge-vs-rollback flake). Stable red remaining: `StressTest` cyclic-locker liveness only;
-flaky: Xml `testMultithreads` ~1/3 + it can HANG the suite (read-lock spin — run regression
-loops excluding the concurrent classes). `DeleteIsolation`, `PhantomReadIsolation`,
-`testOneThread` and the boolean-distortion test (R-22) are stable GREEN.
+**Status after the 2026-10-16/17 sessions (R-13..R-25 below): 470 tests — the only remaining
+red is the flaky concurrent trio** (GraphPhantom / PhantomReadIsolation / Xml testMultithreads —
+each green in isolated runs; the shared residual is a purge-vs-rolled-back-tx race, and the old
+read-lock spin HANG has not reproduced since buffered IO landed). **`StressTest` is FIXED
+(R-25: buffered persistence IO — the "deadlock" was unbuffered quadratic full-file rewrites):
+5000/5000 commits, 0 rollbacks, ~29.5 s.** Stable green: DeleteIsolation, PhantomReadIsolation,
+testOneThread, GraphPhantom (2/3+), boolean test (R-22).
 Every fix below is gated by the suites built in the previous sessions: YAML engine round-trip (11),
 BTree split/join invariants (9) + mass-delete stability (6), ResourceCache MVCC/RC (12+11+10+1).
 
@@ -354,6 +354,22 @@ listed here because ResourceCache transit interacts with it)
   write lock held by null` leak signal and 35 retry-budget exhaustions in one concurrency test.
 - **Verified:** no-flake suite 460/0 green with the logging in place.
 - **Revert:** remove the added log statements (all additive, no control-flow changes).
+
+### R-25. StressTest FIXED: buffered persistence IO — KEEP (2026-10-17)
+- **Root cause:** the "cyclic locker deadlock" was never a deadlock — it was **unbuffered IO**.
+  Every commit rewrites the whole fragment + id_index files (quadratic amplification: ~5000
+  commits serialized ~6M objects over the run), and every read/write went through RAW
+  `FileWriter`/`FileReader` — one syscall per append/parse-chunk. 50 threads × 100 ops could not
+  fit the 60 s `awaitTermination` budget; workers looked "stuck".
+- **Fix:** `XdStorageAtomicFile` wraps the temp-file writer in a 64 KB `BufferedWriter`; ALL
+  `readAsObjects`/`readAsData` paths (data + btree-index + hash-index resources) wrap their
+  `FileReader` in a 64 KB `BufferedReader`. 8 read sites + 1 write site.
+- **Verified:** StressTest ×2 isolated and ×1 in-suite: **5000/5000 commits, 0 rollbacks,
+  ~29.5 s against the 60 s budget** (was: timeout, 0 progress). Full suite 470 tests: only the
+  flaky concurrent trio red in that particular run (each green isolated). No hangs.
+- **Next candidates unlocked:** re-measure the flaky concurrent trio with the IO pressure gone;
+  the remaining failures are pure concurrency-timing races (purge vs rolled-back tx), not IO.
+- **Revert:** unwrap the buffered readers/writers (8+1 sites).
 
 ---
 

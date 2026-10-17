@@ -95,7 +95,7 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         try {
             final File file = new File(getFileName());
             if (file.exists()) {
-                Reader xmlReader = new FileReader(file);
+                Reader xmlReader = new java.io.BufferedReader(new FileReader(file), 1 << 16);
                 try {
                     if (isReferences) {
                         objects = reader.readReferences(xmlReader, idField);
@@ -141,7 +141,7 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         try {
             final File file = new File(getFileName());
             if (file.exists()) {
-                Reader xmlReader = new FileReader(file);
+                Reader xmlReader = new java.io.BufferedReader(new FileReader(file), 1 << 16);
                 try {
                     objects = reader.readData(xmlReader, idField);
                 } finally {
