@@ -64,7 +64,7 @@ public class XdStorageObjectField {
         try {
             setter.invoke(obj, value);
         } catch (final IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-            log.error("cannot set property " + getName() + obj != null ? " of " + obj.getClass() : " for null object", e);
+            log.error("cannot set property {}{}", getName(), obj != null ? " of " + obj.getClass() : " for null object", e);
         }
     }
 
@@ -73,7 +73,7 @@ public class XdStorageObjectField {
         try {
             return (T) getter.invoke(obj, new Object[]{});
         } catch (final IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-            log.error("cannot get property " + getName() + obj != null ? " of " + obj.getClass() : " from null object", e);
+            log.error("cannot get property {}{}", getName(), obj != null ? " of " + obj.getClass() : " from null object", e);
         }
         return null;
     }

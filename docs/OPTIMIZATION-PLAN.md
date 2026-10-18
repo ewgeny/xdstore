@@ -573,7 +573,201 @@ listed here because ResourceCache transit interacts with it)
   it fires, and correlate each "leaked write-lock" holder-tx with its last logged operation
   (the correlation script pattern from this session: /tmp/leak-hunt.sh).
 
-### R-29b. The two separable failure modes of testMultithreads + the diagnostic watchdog — TOOLS IN PLACE (2026-10-17)
+### R-35. The read-lock leak LOCATED but its outer fix REJECTED (lock-coupled design) — KEEP open with exact coordinates (2026-10-18)
+- **Located:** `XdatStorageBTree.find`'s read section — `lockRead` → `root.find` descent with
+  no try/finally. If the descent throws before the node-level coupling point releases the lock
+  (`XdStorageBTreeNode.find:1282` calls `tree.unlockRead`), the tree read lock leaks — and a
+  leaked READ lock blocks every subsequent tree WRITE (purge's "монопольно занят на запись" storm).
+- **Outer fix REJECTED:** try/finally around the section double-releases — the node descent
+  itself releases the read lock at the coupling point (9 failures: IllegalMonitorState
+  "Блокировка чтения не удерживается"). Reverted; the section carries the R-35 warning comment.
+- **The correct fix (next session):** make the NODE-level descent release-safe — in
+  `XdStorageBTreeNode.find` (and `deleteFromThisNode` descent), wrap the descent so the tree
+  read lock is released exactly once on any throw (track the coupling: a flag set when the
+  node released it). Same audit for `XdatStorageBTree.read`'s `firstLeaf.read` chain walk.
+- **Revert:** n/a (current state = the pre-R-35 behavior with the warning comment).
+
+### R-36. FIND RETRY BUDGET — the wedge fixed; new nested-transaction test fails pre-existing — KEEP (2026-10-18)
+- **The wedge mechanism (final):** `XdatStorageBTree.find`'s retryFind loop was the ONLY
+  unbounded retry in the engine — under sustained write pressure node-level `tryLockRead`
+  never converged, and each retry snapshot-copied collections (~2 GB/min allocation storm,
+  healthy heap, 0.6 ms GC pauses — no memory issue). Workers spun forever; jstack couldn't
+  attach (no safepoint in the counted allocation loop).
+- **Fix:** `MAX_FIND_RETRY_BUDGET = 200` (mirrors REBALANCE_RETRY_BUDGET) — on exhaustion:
+  WARN + loud `XdStorageException` (operations roll back cleanly; the test's best-effort
+  purge skips).
+- **Verified:** testMultithreads 3/3 COMPLETE (was 2/3 hung forever), 0–1 leaked-lock events
+  (was 4–11); full suite green except the new nested-transaction test.
+- **NEW: `XdStorageNestedTransactionIsolationStressTest` (committed by the author mid-session,
+  8391ea1) fails 1/1 — A/B verified PRE-EXISTING (fails identically with the campaign changes
+  stashed).** Nested transactions under parallel load — same contention family; diagnose with
+  the same watchdog/correlation toolkit.
+- **Note:** the author has been banking the campaign work as commits (64e2908 logging,
+  190ca8b improvements, f5d45e8 update, 8391ea1 nested test) — the uncommitted remainder is
+  only the final find-budget + watchdog + docs changes.
+- **Revert:** remove the budget check + the field.
+
+### R-37. XdStorageNestedTransactionIsolationStressTest: ZERO-progress failure characterized — OPEN (2026-10-18)
+- **The signature (deterministic, 1/1 runs):** 8 workers × nested-tx storm → **0 parent
+  commits, 0 nested commits, 0 nested rollbacks** — every worker fails its FIRST operation.
+  16 anomalies: 15× tree write-lock timeouts ("монопольно занят на запись", 3000–5000 ms) +
+  1× InterruptedException ("sleep interrupted" — the pool's shutdownNow).
+- **Zero progress ≠ gradual contention:** the very first inserts of all 8 workers failed —
+  something holds or corrupts the tree write-lock acquisition path systematically at the
+  nested-tx storm start. The nested facade (`beginTransaction(parentTx, timeout)` →
+  `transaction.suspend(nestedId)` → nested ops → commit/resume) is NEW code (the author's
+  current feature) — the suspend/resume + `transactionsByThreadId` replacement interplay with
+  8 parallel parent→nested chains is the prime suspect (not the B+Tree itself: the same tree
+  handles the multithreaded non-nested load fine after R-36).
+- **Diagnostics ready:** the operation catches now include RuntimeException (the worker
+  failures carry full stacks); the sweep/reschedule (R-31) keeps records from deadlocking
+  permanently; correlation recipe: grep the run log for the holder tx ids of each
+  "Write-lock acquisition failed" event and trace "Started transaction <id>" / the holder's
+  last ops — this identified the Thread-5 trail in the R-33 investigation.
+- **Also verified this session:** the author's A/B — the test fails identically with the
+  campaign changes stashed (pre-existing; not caused by R-9..R-36).
+- **The starvation cycle CAPTURED in one log window (the definitive evidence):**
+  `pool-3-thread-1` held the tree **read lock** during a slow chain walk — the walk does
+  per-node `storage.load` (disk IO for reference-stub nodes) INSIDE the read lock — while
+  `pool-3-thread-7`'s write spun its full 3 s nested budget against it, then threads
+  2/3/4/5/6/8 timed out identically. Reader holds read-lock for disk durations; writers
+  starve on the sleep-poll lock; their rollbacks trigger more scans. Mutual starvation.
+- **The fix direction (R-38, next session):** (1) take the chain walk OUT of the read lock —
+  snapshot the leaf chain under the lock, release, then load/visit (the viewer pattern
+  already accepts this: the R-35 warning comment marks the coupling contract); (2) or make
+  `storage.load` of tree nodes never hit disk mid-walk (the canonical registry + fillCache
+  adoption should already ensure this — VERIFY why reference-stub nodes still resolve to
+  disk during scans); (3) the RW lock itself stays as-is.
+- **Revert:** n/a (diagnostic entry).
+
+
+### R-38. Cold-cache disk-IO-under-lock: chain PRE-WARM + stub loads out of tree locks — KEEP (2026-10-18)
+- **Mechanism (R-37 follow-up):** on a fresh storage the first leaf-chain walk executed
+  `storage.load` of every reference-stub node (XML parse, ~0.1-1 s each) INSIDE held read
+  locks (and the firstLeaf load even under the tree WRITE lock) — all writers spun into
+  their 3-5 s timeouts: the captured R-37 window (thread-3 loading node-13/planet_idx/
+  key_planet_idx/node-2 while 7 writers starved).
+- **Fix:** `XdStorageBTree.read()` now pre-resolves the whole leaf chain BEFORE the locked
+  walk (`prewarmLeafChain`): each stub loads under ONLY its own node write lock; the tree
+  write lock is held only to read the `firstLeaf` pointer. `find()`'s root-stub load also
+  no longer takes the tree write lock. Prewarm is NON-BLOCKING (R-42): a contended stub is
+  SKIPPED (tryLockWrite) — the locked walk loads it later; a blocking prewarm crossed
+  coupled readers in opposite order and produced mutual 3 s holds (PhantomRead).
+- **`nextTreeNodeOnThisLevel` is volatile now** — prewarm reads it without the node lock.
+- **Revert:** remove prewarmLeafChain + restore the two lockWrite-wrapped load blocks.
+
+### R-40. THE WEDGE FAMILY (nested zero-progress): leaked child write-lock + MVCC chain + zombies — KEEP (2026-10-18)
+- **Deterministic trigger (single-thread repro, fails=0 needed 5 stacked fixes):**
+  1) **Child write-lock LEAK:** in `findChildAndInsert`/`findChildAndDelete` the child's
+  write lock (taken before `storage.update(child)`) leaked on ANY throw (MVCC-cache
+  conflict "can not be updated" at t=40 ms): next writer blocked on the child D holding
+  the parent-node lock, third blocked on tree.lockWrite D holding a node lock on the
+  descent — full lock-hostage cascade, all-timeout, zero progress. Fix: catch/throw
+  releases the child (`child.unlockWrite()` before rethrow).
+  2) **Nested-vs-parent self-conflict:** nested tx is a NEW transaction (new timestart),
+  so the descent's parent-pointer updates locked by the SUSPENDED parent refused the
+  nested descent — "can not be updated by transaction <own parent>". Fix: chain
+  relaxation in `canBeChangedByTransaction` (both overloads): `isOwnedByTransactionChain`
+  allows the writer chain (caller → globalTransaction) to update locked records.
+  3) **Parent-poisoning nested rollback:** `rollbackTransaction(nested)` delegated
+  `markRollbackOnly()` UPWARDS — poisoned the parent; scenario "nested rollback" failed
+  `commitTransaction(parent)` with "marked as rollback only" EVEN SINGLE-THREADED
+  (every 2nd iteration, 221/221). Fix: `markSelfAndChildrenRollbackOnly()` (downward-only
+  cascade); `rollbackTransaction(nested)` uses it — the parent survives (the test's ACID
+  contract).
+  4) **Zombie abandoned nested tx:** a nested save that threw mid-way left the nested tx
+  registered forever → parent's `skipOrWaitForInternalTransactions` waited forever →
+  zombie parent kept its record locks → everyone refused. Fix: skipOrWait force-sweeps
+  internal txs (a) abandoned ON THE CURRENT THREAD (immediate — nobody can finish them),
+  (b) expired past timeout+500ms (markSelfAndChildrenRollbackOnly + standard sweeper).
+  5) **Ghost nodes ("does not exists"):** rollback of a split leaves the new node in the
+  in-memory structure (infra mutations are in-place on the live instance; record.rollback
+  restores same-instance state), while insert-rollback `cache.remove`d its record; after
+  resource eviction the node became unresolvable — every descent through it died. Fix:
+  infra insert-rollback KEEPS the record serving (`rollbackInsertKeepServing`); update of
+  an infra object with a lost record re-materializes it; delete of an infra object with
+  a lost record is a no-op (already gone).
+- **Diagnostics added (keep):** RW-lock timeout ERROR now prints full state
+  (writeHolder/writeCount/readers map — caught the "no holder but waiters" leaks);
+  UPDATE-refused ERROR prints record state; force-sweep WARNs.
+- **Verified:** standalone 8-worker nested storm 4/4 runs fails=0 (parents 428-624);
+  XdStorageNestedTransactionIsolationStressTest GREEN (was deterministic 1/1 red).
+- **Revert:** per-item; each fix is independent and commented R-40/R-41/R-42.
+
+### R-42. Infra records exit the refuse-until-commit MVCC policy; find retry backoff — KEEP (2026-10-18)
+- **Mechanism:** after R-40, the remaining 8-worker failures were worker-vs-worker
+  "can not be updated" on hot internal nodes: each descent locked the nodes it touched
+  until COMMIT (whole parent-tx lifetime incl. the nested section) → mutual refusal
+  storms (2614 fails, 18 commits per run). Structural correctness is ALREADY guaranteed
+  by node write locks (hand-over-hand + deep-locks; R-27 said the same for latches).
+- **Fix:** infrastructure records bypass the canBeChangedByTransaction gate in
+  update/delete. FINAL SCOPE (after a contract regression): NODES
+  (`XdStorageBTreeNode` — `structuralNodeCache`) relax fully; the TREE entity relaxes
+  update but keeps the phantom contracts (uncommitted foreign INSERT cannot be
+  deleted/updated by a foreign tx — BTreeEntityTest 8/8 green). Extra: unconditional parent-pointer `storage.update` per descent replaced by
+  id-based change detection (`isSameParentId` — reference comparison always false due to
+  instance duality); `find` retry loop sleeps 1 ms per 10 retries (mutation window +
+  safepoint; the R-36 storm had none).
+- **Tests:** the 4 isolation tests' `isLockBackpressure` now recognizes
+  "retry budget exhausted" — same transient-backpressure class as lock timeouts
+  (read-only, clean rollback, retried next iteration).
+- **Verified:** storm fails 2681→147→0; full isolation family 6/6 GREEN.
+- **Revert:** drop the `infrastructure` bypasses + backoff constants.
+
+### R-41. XdStorageFacadeStressTest never ran its storm (latch bug) — FIXED, right-sized (2026-10-18)
+- **The bug:** `startLatch.countDown()` / `finishLatch.await()` existed nowhere and the
+  purge phase was INSIDE the worker-submission loop: workers parked forever on
+  startLatch (100 non-daemon pool threads = JVM never exited = suite hung AFTER the test
+  "passed" — caught live in this session's first full run: OOM storm 06:57-07:00, then
+  100 threads parked at XdStorageFacadeStressTest:62, surefire fork immortal).
+- **Fix:** submit-all → countDown → await → assert exceptions/inserts → executor
+  shutdownNow → purge → empty-check (phases moved out of the loop). Storm right-sized
+  100×2000 → 25×400 (the full 200k tx storm does not fit suite budgets; purge+ACID
+  empty-check now actually execute).
+- **Verified:** GREEN in 146 s (inserts storm + total purge + emptiness assert).
+- **Revert:** n/a.
+
+### R-43. CME при выгрузке живой ноды: serialization-guard (tryLock) + мониторные снимки писателя — KEEP (2026-10-18)
+- **The crash:** `rollbackFailedCommit` → `writeObjects` → writer iterated the LIVE node's
+  `LinkedList` (children/keys) while another worker's split mutated it — CME →
+  "invalid state of database: error by writing resource XdStorageBTreeNode-3.xml" →
+  failed commit cascades in the facade storm. Pre-existing on EVERY commit write-out
+  (not just rollbacks): write-out serializes the live canonical instance unlocked.
+- **Fix (three layers):**
+  1) `IXdStorageSerializationGuard` (serialization pkg): begin/endConsistentSerialization.
+     Node+Tree implement it with **tryLockWrite** on their own RW write lock — uncontended
+     writes are fully consistent. BLOCKING lockWrite version REJECTED empirically: guard
+     held node locks across file IO under 25 workers → hold-and-wait starvation
+     (holder-X waited Y while holder-Y waited X, 15s timeouts).
+  2) Node lists (keys/objects/children) are `Collections.synchronizedList` now
+     (constructors + setters); writer's writeCollection/writeMap snapshot via
+     `synchronized(collection){ toArray }` — same monitor → CME impossible even on the
+     contended (no-lock) path. No added contention: mutators already serialize on the
+     node write lock.
+  3) Reader fallback: non-instantiable collection/map classes (wrapper class names in
+     XML) fall back to LinkedList/HashMap.
+- **Residual (documented):** torn keys/children parity if a snapshot interleaves the
+  middle of a split's sub-steps (µs window) on the contended path — vs seconds of
+  file-IO lock-holds of the rejected variant.
+- **Verified:** facade storm (reproducer) 2/2 GREEN; full suite 471 tests / 1 failure =
+  ONLY the historical GraphPhantom tearDown flake (~1/3 isolated, identical pre-R-43);
+  0 CME / 0 write-resource errors in suite logs; nested storm repro fails=0; BTreeEntity
+  8/8; serialization round-trips green.
+- **Revert:** remove guard interface + implementations + synchronizedList + writer
+  snapshots + reader fallbacks.
+
+
+### R-44. ПОТЕРЯ ВЛОЖЕННЫХ ДЕТЕЙ (GraphPhantom tearDown "Разрушен вложенный спутник"): clonePojo падал на сгенерированных обертках, null молча писался в поле — FIXED (2026-10-18)
+- **Детерминированный repro** (standalone MiniSatRepro2: writer save+update(system), 4 cascade-читателя): 145/150 планет читались БЕЗ спутника; диск при этом КОРРЕКТЕН (все спутники в XML) — резался только путь ЧТЕНИЯ.
+- **Цепочка:** save до выдачи DB-id ребенка пакует в делегат `getObservableWrapper(satellite)` (XdSatelliteIdObservableWrapper). Чтение: cloneAndWrap(record.object) → packFields → ветка satellite → `internalCloneAsReferenceAndWrapObject` → `cloneObject(wrapper)` → `clonePojo` → `cl.newInstance()` на классе обертки → **InstantiationException** (нет no-arg конструктора) → `cloneObject` ГЛОТАЛ и возвращал null → **null записывался в поле satellite** → все последующие читатели видели планету без спутника.
+- **Fix:** `XdStoragePojoCloner.clonePojo` разворачивает IXdStorageSimpleWrapper / IXdStorageIdObservableWrapper / IXdStorageUnmodifiableWrapper через `getWrappedObjectOrSameObject` ДО `newInstance`; `cloneObject` больше не молчит — ERROR-лог при отказе (раньше молчаливый null = тихая потеря данных). Плюс починен битый log-выражение в `XdStorageObjectField.set/get` (прецеденс `+ obj != null ?`).
+- **Verified:** repro 2/2 lostAtEnd=0 nullSatAfterCommit=0 (было 145/150); tearDown GraphPhantom проходит (граф цел).
+
+### R-45. ДЫРЫ SNAPSHOT ISOLATION на чтении record-ов: чужой читатель видел НЕЗАКОММИЧЕННОЕ состояние; коммит не атомарен между ресурсами — FIXED (2026-10-18)
+- **Дыра 1:** `readInternal`, ветка update: чужой читатель при locked-обновлении получал `record.getObject()` — ЖИВОЕ незакоммиченное состояние писателя (ссылки на еще не существующие планеты) → "cannot load by reference" → reader-скан падал. Fix: `canBeChangedByTransaction` false → **prevObject** (последняя закоммиченная), как в `getObjectForTransaction`.
+- **Дыра 2 (атомарность коммита):** каждая запись штамповала СВОЙ `nextCommitSerial()` в фазе-2 — читатель между фазами разных ресурсов видел смесь (новую систему + еще locked планеты → null). Fix: **один commit-serial на всю транзакцию** (`assignCommitSerial()` в `commitTransaction` ДО фаз; `record.commit` берет его же); читатель со снапшотом >= serial видит НОВОЕ состояние записи даже до ее фазы-2 (`committingSerialVisibleTo` gate: owner в коммите + firstPhaseCommit + снапшот >= serial).
+- **Verified:** GraphPhantom изолированно 10/11 green (исторически ~2/3, местами 1/3); полный суит: fullsuite7 471/2 (обе редкие флаки), fullsuite8 **471/0 GREEN**.
+- **Остаточное (open):** редкий (≈1/11 изолированно) residual того же семейства в GraphPhantom + единичный `рассинхрон структуры` в facade-штурме (валидатор R-32 увидел лист в цепочке, недостижимый из корня, под 25-воркерами — подозрение на транзитивное состояние между двумя обходами валидатора под конкуренцией). Требуют отдельной сессии с сохранением дампов.
 
 ### R-29b. The two separable failure modes of testMultithreads + the diagnostic watchdog — TOOLS IN PLACE (2026-10-17)
 - **The test now self-diagnoses**: an in-JVM watchdog thread dumps **all** thread stacks

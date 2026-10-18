@@ -68,6 +68,28 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
     private final AtomicLong critical = new AtomicLong(0);
 
+    /** R-40: запас сверх таймаута внутренней tx, после которого родитель принудительно ее sweeping-откатывает. */
+    private static final long INTERNAL_SWEEP_GRACE_MILLIS = 500;
+
+    /**
+     * R-45: serial коммита ЭТОЙ транзакции (0 = не коммитится). Резервируется ОДИН на всю
+     * транзакцию ДО начала фаз коммита: все ее записи получают один и тот же номер, поэтому
+     * читатель со снапшотом >= serial видит ЛИБО все эффекты транзакции, ЛИБО ни одного —
+     * атомарность видимости между ресурсами (раньше у каждой записи был свой serial, и
+     * читатель между фазами разных ресурсов видел смесь: новую систему со ссылками на
+     * еще невидимые планеты — "cannot load by reference" в GraphPhantom).
+     */
+    private final AtomicLong commitSerial = new AtomicLong(0);
+
+    public void assignCommitSerial() {
+        commitSerial.compareAndSet(0, XdStorageTransaction.nextCommitSerial());
+    }
+
+    /** R-45: serial коммита; 0 — транзакция не в фазе коммита. */
+    public long getCommitSerial() {
+        return commitSerial.get();
+    }
+
     protected XdStorageTransaction(final IXdStorageTransactionManager manager, final String transactionThreadId,
                                    final XdStorageTransaction globalTransaction, final long timeout, final String transactionId) {
         this.manager = manager;
@@ -136,10 +158,54 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         if (hasInternalTransactions.get()) {
             synchronized (hasInternalTransactions) {
                 while (hasInternalTransactions.get()) {
-                    try {
-                        hasInternalTransactions.wait();
-                    } catch (final InterruptedException e) {
-                        throw new XdStorageRuntimeException(e);
+                    // R-40: ЗАЧИСТКА БРОШЕННЫХ ВНУТРЕННИХ ТРАНЗАКЦИЙ. Если вложенная tx умерла
+                    // по исключению, не дойдя до commit/rollback, ее suspend() на родителе
+                    // никогда не снимется штатно: родитель навеки зависает здесь, оставаясь
+                    // "живым" держателем своих record-локов — все чужие обновления его узлов
+                    // отказывают вечно (детерминированный ноль прогрессов nested-стресса R-37).
+                    // Истекшая по таймауту внутренняя tx отправляется в штатный откат
+                    // (registerRollbackOnlyTransaction — асинхронный уборщик с барьером
+                    // активных потоков), который и снимет suspend через resume().
+                    boolean swept = false;
+                    for (final String internalId : internalTransactions.toArray(new String[0])) {
+                        final XdStorageTransaction internal = (XdStorageTransaction) manager.getTransaction(internalId);
+                        if (internal == null) {
+                            // Запись-мусор: tx уже завершена, но resume не дошел — снимаем сами
+                            resume(internalId);
+                            swept = true;
+                            continue;
+                        }
+                        // R-41: внутренняя tx, привязанная к ТЕКУЩЕМУ потоку, брошена этим же
+                        // потоком (исключение из nested-области до commit/rollback) — завершить
+                        // ее некому; ждем только 3.5с зомби-окна, отравляющего чужие спуски.
+                        if (!internal.isRollbackOnly() && ((XdStorageTransactionManager) manager).isTransactionBoundToCurrentThread(internalId)) {
+                            log.warn("Parent transaction {} force-sweeps internal transaction {} abandoned on the same thread (exception escaped its scope)",
+                                    transactionId, internalId);
+                            internal.markSelfAndChildrenRollbackOnly();
+                            swept = true;
+                            continue;
+                        }
+                        final long ageMillis = (System.nanoTime() - internal.getTimestart()) / 1_000_000;
+                        if (ageMillis > internal.getTimeout() + INTERNAL_SWEEP_GRACE_MILLIS && !internal.isRollbackOnly()) {
+                            log.warn("Parent transaction {} force-sweeps expired internal transaction {} (age {} ms > timeout {} ms) — it was abandoned without commit/rollback",
+                                    transactionId, internalId, ageMillis, internal.getTimeout());
+                            // Отравление цепочки: первый вызов каскадно помечает parent (ACID:
+                            // упавшая вложенная tx обязана откатить родителя), второй — саму
+                            // внутреннюю tx (ее globalTransaction уже rollback-only).
+                            internal.markRollbackOnly();
+                            if (!internal.isRollbackOnly()) {
+                                internal.markRollbackOnly();
+                            }
+                            manager.registerRollbackOnlyTransaction(internal);
+                            swept = true;
+                        }
+                    }
+                    if (!swept) {
+                        try {
+                            hasInternalTransactions.wait(100);
+                        } catch (final InterruptedException e) {
+                            throw new XdStorageRuntimeException(e);
+                        }
                     }
                 }
             }
@@ -379,24 +445,30 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
     @Override
     public void markRollbackOnly() {
-        if (globalTransaction == null || globalTransaction.isRollbackOnly()) {
-            setRollbackOnly();
-            internalTransactions.stream().collect(Collectors.toList()).stream().forEach(transactionId -> {
-                final XdStorageTransaction transaction = (XdStorageTransaction) manager.getTransaction(transactionId);
-                transaction.setRollbackOnly();
-                transaction.markRollbackOnly();
-            });
-            manager.registerRollbackOnlyTransaction(this);
-        } else if (isRollbackOnly()) {
-            internalTransactions.stream().collect(Collectors.toList()).stream().forEach(transactionId -> {
-                final XdStorageTransaction transaction = (XdStorageTransaction) manager.getTransaction(transactionId);
-                transaction.setRollbackOnly();
-                transaction.markRollbackOnly();
-            });
-            manager.registerRollbackOnlyTransaction(this);
+        if (globalTransaction == null || globalTransaction.isRollbackOnly() || isRollbackOnly()) {
+            markSelfAndChildrenRollbackOnly();
         } else {
             globalTransaction.markRollbackOnly();
         }
+    }
+
+    /**
+     * R-41: ИЗОЛИРОВАННЫЙ откат области транзакции — своя отметка rollback-only плюс
+     * каскад ВНИЗ по внутренним транзакциям, БЕЗ отравления родителя. Контракт вложенного
+     * отката: "аварийный ОТКАТ вложенной транзакции — родитель должен выжить". Делегирование
+     * вверх (markRollbackOnly) здесь ломало сценарий 2 nested-стресса: каждый второй шаг
+     * (nested rollback) ронял commit родителя "marked as rollback only" — детерминированно,
+     * даже в один поток.
+     */
+    public void markSelfAndChildrenRollbackOnly() {
+        setRollbackOnly();
+        for (final String internalId : internalTransactions.toArray(new String[0])) {
+            final XdStorageTransaction internal = (XdStorageTransaction) manager.getTransaction(internalId);
+            if (internal != null && !internal.isRollbackOnly()) {
+                internal.markSelfAndChildrenRollbackOnly();
+            }
+        }
+        manager.registerRollbackOnlyTransaction(this);
     }
 
     public boolean isTransaction(final XdStorageTransaction transaction) {

@@ -148,6 +148,9 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         transaction.skipOrWaitForInternalTransactions();
 
         try {
+            // R-45: резервируем ЕДИНЫЙ commit-serial всей транзакции ДО фаз коммита —
+            // атомарная граница видимости для всех ее записей.
+            transaction.assignCommitSerial();
             transaction.startCriticalSection();
             transaction.commitInternal(state, firstPhaseCommittedResources);
             if (state.getState() == XdStorageCommitTransactionState.FINISHED) {
@@ -212,7 +215,10 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
 
         final String globalTransactionId = transaction.getGlobalTransactionId();
         if (globalTransactionId != null) {
-            transaction.markRollbackOnly();
+            // R-41: ИЗОЛИРОВАННЫЙ откат вложенной транзакции — родитель выживает.
+            // Прежний transaction.markRollbackOnly() делегировал наверх и ядовил parent:
+            // сценарий "nested rollback" ронял следующий commit родителя даже в один поток.
+            transaction.markSelfAndChildrenRollbackOnly();
             return;
         }
 
@@ -247,6 +253,17 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
     @Override
     public XdStorageTransaction getCurrentTransaction() {
         return transactionsByThreadId.get(getCurrentThreadId());
+    }
+
+    /**
+     * R-41: true, если транзакция зарегистрирована на ТЕКУЩЕМ потоке. Такой внутренней tx,
+     * ждущей в skipOrWaitForInternalTransactions своего родителя, никто никогда не завершит:
+     * ее поток — сам родительский, он поймал исключение из nested-области и пытается
+     * завершить родителя. Брошенная tx подлежит немедленному откату.
+     */
+    public boolean isTransactionBoundToCurrentThread(final String transactionId) {
+        final String threadId = threadsByTransactionId.get(transactionId);
+        return threadId != null && threadId.equals(getCurrentThreadId());
     }
 
     @Override

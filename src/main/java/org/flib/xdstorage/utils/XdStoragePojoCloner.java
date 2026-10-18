@@ -1,6 +1,9 @@
 package org.flib.xdstorage.utils;
 
 import org.flib.xdstorage.XdStoragePolicy;
+import org.flib.xdstorage.code.IXdStorageSimpleWrapper;
+import org.flib.xdstorage.code.IXdStorageUnmodifiableWrapper;
+import org.flib.xdstorage.observing.IXdStorageIdObservableWrapper;
 import org.flib.xdstorage.observing.XdStorageObserverService;
 import java.util.Collection;
 import java.util.Date;
@@ -16,6 +19,19 @@ public final class XdStoragePojoCloner {
     public static Object clonePojo(final Object parent, final Object src, final Map<Object, Object> visited, boolean isRootClone) throws Exception {
         if (src == null || src instanceof Class<?>) {
             return src;
+        }
+
+        // =========================================================================
+        // R-44: РАСПАКОВКА ОБЕРТОК НА ВХОДЕ. Сгенерированные обертки (Observable после
+        // save до выдачи DB-id, Simple/Unmodifiable) не имеют no-arg конструктора:
+        // cl.newInstance() ниже падал InstantiationException, cloneObject молча возвращал
+        // null, и null ЗАПИСЫВАЛСЯ в поле-детей (исчезали вложенные спутники планет
+        // под нагрузкой — GraphPhantom flake). Распаковываем до реального POJO.
+        // =========================================================================
+        if (src instanceof IXdStorageSimpleWrapper
+                || src instanceof IXdStorageIdObservableWrapper
+                || src instanceof IXdStorageUnmodifiableWrapper) {
+            return clonePojo(parent, XdStorageObjectUtils.getWrappedObjectOrSameObject(src), visited, isRootClone);
         }
 
         final Class<?> cl = src.getClass();

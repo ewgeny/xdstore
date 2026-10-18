@@ -20,9 +20,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
-public class XdStorageBTree implements IXdStorageBTreeNode {
+public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.serialization.IXdStorageSerializationGuard {
 
     private static final Logger log = LogManager.getLogger(XdStorageBTree.class);
+
+    /** R-36: бюджет ретраев спуска поиска — как REBALANCE_RETRY_BUDGET для мутаций. */
+    private static final int MAX_FIND_RETRY_BUDGET = 200;
+
+    /** R-42: пауза на каждом N-м ретрае поиска — окно для мутаций + safepoint. */
+    private static final int FIND_RETRY_BACKOFF_INTERVAL = 10;
+    private static final long FIND_RETRY_BACKOFF_MILLIS = 1;
+
+    /** R-38: страховка предпрогрева цепи листьев от зацикливания (штатная цепь конечна). */
+    private static final int PREWARM_STEP_BUDGET = 1_000_000;
 
     @XdStorageObjectId
     private XdStorageBTreeId id;
@@ -66,6 +76,19 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
     @Override
     public boolean isWriteLocked() {
         return lock.isWriteLocked();
+    }
+
+    // R-43: сериализация дерева (root/firstLeaf) — tryLock-версия, см. ноду.
+    @Override
+    public void beginConsistentSerialization() {
+        tryLockWrite(null);
+    }
+
+    @Override
+    public void endConsistentSerialization() {
+        if (isWriteLocked()) {
+            unlockWrite();
+        }
     }
 
     @Override
@@ -442,57 +465,77 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
         }
 
         if (root != null && XdStorageObjectUtils.isReference(root)) {
-            lockWrite(transaction);
+            // R-38: СТАБ-УЗЕЛ корня грузится ТОЛЬКО под write-локом самого узла.
+            // Раньше дисковый IO выполнялся под write-локом ВСЕГО ДЕРЕВА — все читатели и
+            // писатели дерева простаивали весь XML-парс, и на холодном кэше первый поиск
+            // вымораживал дерево на секунды (таймауты "монопольно занят на запись" у всех воркеров).
+            root.lockWrite(transaction);
             try {
                 if (XdStorageObjectUtils.isReference(root)) {
-                    root.lockWrite(transaction);
-                    try {
-                        if (XdStorageObjectUtils.isReference(root)) {
-                            storage.load(root, transaction);
-                        }
-                    } finally {
-                        root.unlockWrite();
-                    }
+                    storage.load(root, transaction);
                 }
             } finally {
-                unlockWrite();
+                root.unlockWrite();
             }
         }
 
         List<Object> result;
         final AtomicBoolean retryFind = new AtomicBoolean();
+        int findAttempts = 0;
         do {
             retryFind.set(true); // Сбрасываем флаг итерации do-while
             retryFind.set(false);
             lockRead(transaction);
+            // ВНИМАНИЕ (R-35): read-лок релизится самим node-спуском (lock-coupling —
+            // XdStorageBTreeNode.find вызывает tree.unlockRead на точке сцепления).
+            // Внешний try/finally здесь дал бы ДВОЙНОЙ unlockRead. Известная дыра:
+            // если спуски бросают ДО точки сцепления — read-лок течет (R-35 open).
             if (root == null) {
                 unlockRead();
                 return Collections.emptyList();
             }
             result = root.find(this, key, storage, transaction, retryFind);
+
+            // R-36: БЮДЖЕТ ПОИСКОВЫХ РЕТРАЕВ. Цикл был НЕОГРАНИЧЕННЫМ: под непрерывным
+            // давлением мутаций node-level tryLockRead может не пробиваться бесконечно —
+            // воркеры уходили в шторм аллокаций (snapshot-копии на каждом ретрае,
+            // ~2ГБ/мин) и висели намертво. Громкий отказ лучше бесконечного клина.
+            if (++findAttempts > MAX_FIND_RETRY_BUDGET) {
+                log.warn("B+Tree find retry budget exhausted for key {} in tree {} — sustained write pressure (operation failed loudly)", key, id);
+                throw new XdStorageException("find retry budget exhausted by search of idgeneration " + key
+                        + " in " + id + ": устойчивая конкуренция за блокировки ребалансировки");
+            }
+
+            // R-42: спинка на ретрае — без паузы читатель молотит tryLockRead в цикле,
+            // мешая сплитам/джойнам завершиться (шторм аллокаций + голодание мутаций);
+            // пауза дает мутаторам окно и создает safepoint для диагностики.
+            if (findAttempts % FIND_RETRY_BACKOFF_INTERVAL == 0) {
+                try {
+                    Thread.sleep(FIND_RETRY_BACKOFF_MILLIS);
+                } catch (final InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new XdStorageException("interrupted during find retry backoff", e);
+                }
+            }
         } while (retryFind.get());
         return result == null ? Collections.emptyList() : result;
     }
 
     public void read(final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
+        // R-38: ПРЕДПРОГРЕВ ЦЕПИ ЛИСТЬЕВ. На холодном кэше связный обход под read-локами
+        // делал синхронный storage.load каждого стаба-узла (XML-парс с диска) ВНУТРИ
+        // удерживаемых блокировок — писатели вымораживались на таймаутах (R-37: детерминированный
+        // ноль прогрессов в nested-стрессе). Поэтому сначала разрешаем все стабы цепи,
+        // держа на время дискового IO только write-лок самого загружаемого узла.
         lockWrite(transaction);
+        XdStorageBTreeNode chainStart;
         try {
-            if (firstLeaf == null) {
-                return;
-            }
-
-            if (XdStorageObjectUtils.isReference(firstLeaf)) {
-                firstLeaf.lockWrite(transaction);
-                try {
-                    if (XdStorageObjectUtils.isReference(firstLeaf)) {
-                        storage.load(firstLeaf, transaction);
-                    }
-                } finally {
-                    firstLeaf.unlockWrite();
-                }
-            }
+            chainStart = firstLeaf;
         } finally {
             unlockWrite();
+        }
+        if (chainStart != null) {
+            prewarmLeafChain(chainStart, storage, transaction);
         }
 
         lockRead(transaction);
@@ -501,5 +544,34 @@ public class XdStorageBTree implements IXdStorageBTreeNode {
             return;
         }
         firstLeaf.read(this, storage, transaction, viewer);
+    }
+
+    /**
+     * R-38: разрешает (догружает с диска) стабы-узлы вдоль цепи листьев ДО захвата read-локов
+     * обхода. Идемпотентно: загруженный канонический инстанс больше не является стабом.
+     * НЕБЛОКИРУЮЩЕЕ (R-42): стаб, чей write-лок занят чужим читателем/писателем, ПРОПУСКАЕТСЯ —
+     * его догрузит штатный locked-обход. Блокирующий lockWrite здесь скрещивался с coupled
+     * читателями встречным порядком и давал взаимные 3-секундные зависания (PhantomRead).
+     */
+    private void prewarmLeafChain(final XdStorageBTreeNode startLeaf, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        XdStorageBTreeNode current = startLeaf;
+        int steps = 0;
+        while (current != null && steps++ < PREWARM_STEP_BUDGET) {
+            if (XdStorageObjectUtils.isReference(current) && current.tryLockWrite(transaction)) {
+                try {
+                    if (XdStorageObjectUtils.isReference(current)) {
+                        storage.load(current, transaction);
+                    }
+                } finally {
+                    current.unlockWrite();
+                }
+            }
+            // Указатель читаем без нодового лока сознательно: гонка со сплитом здесь неопасна —
+            // пропущенный стаб догрузит locked-обход; Reference читается атомарно (volatile).
+            current = current.getNextTreeNodeOnThisLevel();
+        }
+        if (steps >= PREWARM_STEP_BUDGET) {
+            log.warn("B+Tree leaf chain prewarm hit the step budget {} in tree {} — possible chain cycle", PREWARM_STEP_BUDGET, id);
+        }
     }
 }

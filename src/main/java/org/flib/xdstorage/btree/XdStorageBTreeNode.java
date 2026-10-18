@@ -17,7 +17,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
-public class XdStorageBTreeNode implements IXdStorageBTreeNode {
+public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstorage.serialization.IXdStorageSerializationGuard {
 
     private static final Logger log = LogManager.getLogger(XdStorageBTreeNode.class);
 
@@ -35,7 +35,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
 
     private List<XdStorageBTreeNode> children;
 
-    private XdStorageBTreeNode nextTreeNodeOnThisLevel;
+    // R-38: volatile — указатель цепи читается предпрогревом без нодового лока;
+    // писатели (split/join) меняют его под нодовым write-локом, читатели видят свежее значение.
+    private volatile XdStorageBTreeNode nextTreeNodeOnThisLevel;
 
     /** Диагностика цепочки листьев (включается -Dxdstorage.chain.debug=true). */
     public static final boolean CHAIN_DEBUG = Boolean.getBoolean("xdstorage.chain.debug");
@@ -84,7 +86,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     }
 
     public void setKeys(final List<Comparable> keys) {
-        this.keys = keys;
+        this.keys = keys != null ? java.util.Collections.synchronizedList(keys) : keys;
     }
 
     public List<Object> getObjects() {
@@ -92,7 +94,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     }
 
     public void setObjects(final List<Object> objects) {
-        this.objects = objects;
+        this.objects = objects != null ? java.util.Collections.synchronizedList(objects) : objects;
     }
 
     public List<XdStorageBTreeNode> getChildren() {
@@ -100,7 +102,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     }
 
     public void setChildren(final List<XdStorageBTreeNode> children) {
-        this.children = children;
+        this.children = children != null ? java.util.Collections.synchronizedList(children) : children;
     }
 
     public XdStorageBTreeNode getNextTreeNodeOnThisLevel() {
@@ -112,17 +114,27 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     }
 
     public XdStorageBTreeNode() {
-        this.keys = new LinkedList<>();
-        this.objects = new LinkedList<>();
-        this.children = new LinkedList<>();
+        this.keys = newSyncList();
+        this.objects = newSyncList();
+        this.children = newSyncList();
     }
 
     public XdStorageBTreeNode(final XdStorageBTree tree, final XdStorageBTreeNode parent) {
         this.tree = tree;
         this.parent = parent;
-        this.keys = new LinkedList<>();
-        this.objects = new LinkedList<>();
-        this.children = new LinkedList<>();
+        this.keys = newSyncList();
+        this.objects = newSyncList();
+        this.children = newSyncList();
+    }
+
+    /**
+     * R-43: списки ноды создаются synchronized-обертками: монитором списка пользуется
+     * и сериализатор (снимок writeCollection/writeMap) — мутации под нодовым write-локом
+     * и снимок писателя взаимно исключаются, CME при выгрузке живой ноды невозможна.
+     * Накладных расходов нет: мутаторы и так сериализованы нодовым write-локом.
+     */
+    private static <T> List<T> newSyncList() {
+        return java.util.Collections.synchronizedList(new LinkedList<>());
     }
 
     private final XdStorageReadWriteLock lock = new XdStorageReadWriteLock();
@@ -175,6 +187,29 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
     @Override
     public void unlockRead() {
         lock.unlockRead();
+    }
+
+    // =========================================================================
+    // R-43: СГРАНИРОВАНИЕ СЕРИАЛИЗАЦИИ. Выгрузка ноды на диск пишет ЖИВОЙ инстанс,
+    // пока чужие сплиты/джойны мутируют его LinkedList-поля (CME в writeCollection).
+    // Все структурные мутации ноды выполняются под ее write-локом, поэтому писатель
+    // сериализует под ТЕМ ЖЕ локом — но ТОЛЬКО tryLock: БЛОКИРУЮЩАЯ версия (lockWrite
+    // на время файлового IO) создавала hold-and-wait голодание под 25 воркерами
+    // (держатель X ждал Y, держатель Y ждал X — таймауты 15с). Если лок занят — нода
+    // сейчас мутируется: пишем без замка, CME гасится мониторными снимками коллекций
+    // в писателе, а окна разрыва keys/children на середине сплита остаются редким
+    // остаточным риском (микросекунды против секунд файлового IO).
+    // =========================================================================
+    @Override
+    public void beginConsistentSerialization() {
+        tryLockWrite(null);
+    }
+
+    @Override
+    public void endConsistentSerialization() {
+        if (isWriteLocked()) {
+            unlockWrite();
+        }
     }
 
     private boolean tryDeepLockForInsert(final IXdStorageTransaction transaction) {
@@ -437,13 +472,31 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     retryInsert.set(true);
                     return; // unlockWrite текущей ноды выполняет finally ниже
                 }
+                // R-40: child уже держит write-лок — ЛЮБОЙ throw до передачи лока в current
+                // (конфликт MVCC-кэша в storage.update, IO-ошибка) обязан отпустить его,
+                // иначе нода остается заблокированной навсегда: следующий писатель встанет
+                // на child.lockWrite на полный таймаут, ДЕРЖА write-лок родителя, а третий —
+                // на tree.lockWrite, держа лок родителя-на-спуске: каскад из одних таймаутов
+                // (детерминированный ноль прогрессов в nested-стрессе R-37).
+                // In-memory указатель parent чиним ВСЕГДА (граф дерева обязан быть связным),
+                // но storage.update — только при реальной смене ЗНАЧЕНИЯ (id родителя):
+                // безусловная фиксация через фасад на каждом спуске держала record горячего
+                // внутреннего узла заблокированной до конца транзакции и отказывала всем
+                // параллельным спускам (лавина "can not be updated" на hot path).
                 child.lockWrite(transaction);
-                // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
-                // устаревшей инстанции родителя (остаточная двойственность инстанций после
-                // подгрузки ссылок). Контейнер ребенка известен точно — это current.
-                child.setParent(current);
-                // Фиксация через фасад обязательна: parent — персистентное поле ноды
-                storage.update(child, transaction);
+                try {
+                    final boolean parentChanged = !isSameParentId(child.getParent(), current);
+                    // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле могло остаться на устаревшей
+                    // инстанции родителя; контейнер ребенка известен точно — это current.
+                    child.setParent(current);
+                    if (parentChanged) {
+                        // Фиксация через фасад обязательна: parent — персистентное поле ноды
+                        storage.update(child, transaction);
+                    }
+                } catch (final Throwable t) {
+                    child.unlockWrite();
+                    throw t;
+                }
             } finally {
                 current.unlockWrite();
             }
@@ -455,6 +508,22 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
         } finally {
             current.unlockWrite();
         }
+    }
+
+    /**
+     * R-40: семантическое равенство родителя — по id (инстанции одного узла дуальны
+     * после подгрузок ссылок, сравнение по ссылке всегда давало "изменился").
+     */
+    private static boolean isSameParentId(final XdStorageBTreeNode parentField, final XdStorageBTreeNode current) {
+        if (parentField == current) {
+            return true;
+        }
+        if (parentField == null || current == null) {
+            return false;
+        }
+        final Long parentId = parentField.getId();
+        final Long currentId = current.getId();
+        return parentId != null && currentId != null && parentId.equals(currentId);
     }
 
     private void splitAndInsertIntoParent(final XdStorageBTreeNode deepLockedNode, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
@@ -762,12 +831,21 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode {
                     retryDelete.set(true);
                     return; // unlockWrite текущей ноды выполняет finally ниже
                 }
+                // R-40: зеркальная страховка спуска удаления — child под write-локом не должен
+                // утекать при throw из storage.update; фиксация parent — только при реальной
+                // смене значения (см. зеркальный комментарий в findChildAndInsert).
                 child.lockWrite(transaction);
-                // СИНХРОНИЗАЦИЯ УКАЗАТЕЛЯ PARENT: поле parent ребенка могло остаться на
-                // устаревшей инстанции родителя; фактический контейнер — current.
-                child.setParent(current);
-                // Фиксация через фасад обязательна: parent — персистентное поле ноды
-                storage.update(child, transaction);
+                try {
+                    final boolean parentChanged = !isSameParentId(child.getParent(), current);
+                    child.setParent(current);
+                    if (parentChanged) {
+                        // Фиксация через фасад обязательна: parent — персистентное поле ноды
+                        storage.update(child, transaction);
+                    }
+                } catch (final Throwable t) {
+                    child.unlockWrite();
+                    throw t;
+                }
             } finally {
                 current.unlockWrite();
             }

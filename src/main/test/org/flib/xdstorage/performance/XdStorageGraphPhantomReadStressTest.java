@@ -33,11 +33,20 @@ public class XdStorageGraphPhantomReadStressTest {
      * протокола блокировок СУБД, а не нарушение изоляции. Ретрай следующей итерацией.
      */
     private static boolean isLockBackpressure(final Throwable t) {
+        final String message = t.getMessage();
+        if (message == null) {
+            return false;
+        }
+        // R-36/R-42: исчерпание бюджета ретраев поиска — тот же класс штатного противодавления,
+        // что и таймауты локов: операция ДО мутаций, откатывается чисто, ретраится следующей
+        // итерацией. (Бюджет введен вместо вечного клина — R-36.)
+        if (message.contains("retry budget exhausted")) {
+            return true;
+        }
         if (!(t instanceof org.flib.xdstorage.exceptions.XdStorageRuntimeException)) {
             return false;
         }
-        final String message = t.getMessage();
-        return message != null && (message.contains("Превышен таймаут") || message.contains("cannot be locked for commit"));
+        return message.contains("Превышен таймаут") || message.contains("cannot be locked for commit");
     }
 
     private static String targetUniverseId;

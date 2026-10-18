@@ -269,7 +269,13 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
     private void writeCollection(final String name, final Class<?> cl, final Collection<?> collection, final Writer writer, int level) throws IOException {
         writeNewLevelAndTabulations(writer, level);
         writer.append("<collection name=\"").append(name).append("\" class=\"").append(cl.getName()).append("\">");
-        for (final Object object : collection) {
+        // R-43: снимок под монитором коллекции — итерация по живой LinkedList/ArrayList
+        // рвалась ConcurrentModificationException, пока другой поток мутирует коллекцию.
+        final Object[] snapshotItems;
+        synchronized (collection) {
+            snapshotItems = collection.toArray();
+        }
+        for (final Object object : snapshotItems) {
             final Class<?> c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 1);
@@ -297,7 +303,12 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
     private void writeCollection(final Class<?> cl, final Collection<?> collection, final Writer writer, int level) throws IOException {
         writeNewLevelAndTabulations(writer, level);
         writer.append("<collection class=\"").append(cl.getName()).append("\">");
-        for (final Object object : collection) {
+        // R-43: снимок под монитором коллекции (см. writeCollection с именем).
+        final Object[] snapshotItems;
+        synchronized (collection) {
+            snapshotItems = collection.toArray();
+        }
+        for (final Object object : snapshotItems) {
             final Class<?> c = object != null ? entityClassOf(object) : null;
             if (object == null) {
                 writeNull(writer, level + 1);
@@ -325,7 +336,13 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
     private void writeMap(final String name, final Class<?> cl, final Map<?, ?> map, final Writer writer, int level) throws IOException {
         writeNewLevelAndTabulations(writer, level);
         writer.append("<map name=\"").append(name).append("\" class=\"").append(cl.getName()).append("\">");
-        for (final Map.Entry<?, ?> pair : map.entrySet()) {
+        // R-43: снимок под монитором карты — защита от ConcurrentModificationException
+        // при параллельной мутации (см. зеркальный комментарий в writeCollection).
+        final Map.Entry<?, ?>[] snapshotEntries;
+        synchronized (map) {
+            snapshotEntries = map.entrySet().toArray(new Map.Entry<?, ?>[0]);
+        }
+        for (final Map.Entry<?, ?> pair : snapshotEntries) {
             writeNewLevelAndTabulations(writer, level + 1);
             writer.append("<entry>");
             final Object key = pair.getKey();
@@ -378,7 +395,12 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
     private void writeMap(final Class<?> cl, final Map<?, ?> map, final Writer writer, int level) throws IOException {
         writeNewLevelAndTabulations(writer, level);
         writer.append("<map class=\"").append(cl.getName()).append("\">");
-        for (final Map.Entry<?, ?> pair : map.entrySet()) {
+        // R-43: снимок под монитором карты (см. writeCollection).
+        final Map.Entry<?, ?>[] snapshotEntries;
+        synchronized (map) {
+            snapshotEntries = map.entrySet().toArray(new Map.Entry<?, ?>[0]);
+        }
+        for (final Map.Entry<?, ?> pair : snapshotEntries) {
             writeNewLevelAndTabulations(writer, level + 1);
             writer.append("<entry>");
             final Object key = pair.getKey();

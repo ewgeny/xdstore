@@ -39,8 +39,11 @@ public class XdStorageFacadeStressTest extends AbstractXdStorageTest {
     @Order(1)
     @DisplayName("Штурм СУБД: 20 параллельных потоков, лавина Б+Дерево сплитов и тотальный пурдж базы")
     public void testFacade_MassParallelMutationsAndTotalPurge() throws Exception {
-        final int threadCount = 100;
-        final int itemsPerThread = 2000;
+        // R-41: штурм реально выполняется (раньше latch-баг оставлял воркеры спать вечно,
+        // а пурдж гонялся по пустой базе 100 раз). Полный масштаб 100×2000 = 200k транзакций
+        // не помещается в бюджет тест-сьюты — выбираем репрезентативный штурм ~10k транзакций.
+        final int threadCount = 25;
+        final int itemsPerThread = 400;
         final int totalItems = threadCount * itemsPerThread;
 
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
@@ -94,47 +97,59 @@ public class XdStorageFacadeStressTest extends AbstractXdStorageTest {
                     finishLatch.countDown();
                 }
             });
+        }
 
+        // Шаг 2: снимаем барьер старта и ждем завершения ВСЕХ воркеров до пурджа
+        startLatch.countDown();
+        finishLatch.await();
 
-            // =========================================================================
-            // ФАЗА 3: ТОТАЛЬНАЯ АТОМАРНАЯ АННИГИЛЯЦИЯ БАЗЫ ДАННЫХ (ПУРДЖ)
-            // =========================================================================
-            log.info("=== ФАЗА 3: ЗАПУСК МОНОЛИТНОЙ ОЧИСТКИ ВСЕЙ БАЗЫ ДАННЫХ (ЛАВИНА СЖАТИЙ) ===");
-            IXdStorageTransaction txPurge = realStorage.beginTransaction(20000L);
-            try {
-                Collection<ClassPolicyEntity> entitiesToPurge = realStorage.load(ClassPolicyEntity.class, txPurge);
-                log.info("Выкашиваем ярусы Б+Дерева до самого корня. Элементов к удалению: " + entitiesToPurge.size());
+        // Все ошибки воркеров (таймауты блокировок, дедлоки) валидны только здесь
+        if (!exceptions.isEmpty()) {
+            fail("🚨 Воркеры штурма упали с исключениями!", exceptions.get(0));
+        }
+        assertEquals(totalItems, successfulInserts.get(), "Не все вставки штурма закоммичены!");
 
-                for (ClassPolicyEntity entity : entitiesToPurge) {
-                    // Лавинообразно стираем ключи, заставляя ноды рекурсивно объединяться (join)
-                    realStorage.delete(entity, txPurge);
-                }
+        // Пул не должен держать JVM после теста
+        executor.shutdownNow();
 
-                // Финальный монолитный коммит пурджа: вся база атомарно схлопывается в один пустой корень!
-                txPurge.commit();
-                log.info("=== МOНOЛИТНАЯ ОЧИСТКА БАЗЫ ЗАВЕРШЕНА УСПЕШНО ===");
-            } catch (Throwable t) {
-                txPurge.rollback();
-                fail("🚨 Аварийный крах монолитного коммита очистки хранилища СУБД!", t);
+        // =========================================================================
+        // ФАЗА 3: ТОТАЛЬНАЯ АТОМАРНАЯ АННИГИЛЯЦИЯ БАЗЫ ДАННЫХ (ПУРДЖ)
+        // =========================================================================
+        log.info("=== ФАЗА 3: ЗАПУСК МОНОЛИТНОЙ ОЧИСТКИ ВСЕЙ БАЗЫ ДАННЫХ (ЛАВИНА СЖАТИЙ) ===");
+        IXdStorageTransaction txPurge = realStorage.beginTransaction(20000L);
+        try {
+            Collection<ClassPolicyEntity> entitiesToPurge = realStorage.load(ClassPolicyEntity.class, txPurge);
+            log.info("Выкашиваем ярусы Б+Дерева до самого корня. Элементов к удалению: " + entitiesToPurge.size());
+
+            for (ClassPolicyEntity entity : entitiesToPurge) {
+                // Лавинообразно стираем ключи, заставляя ноды рекурсивно объединяться (join)
+                realStorage.delete(entity, txPurge);
             }
 
-            // =========================================================================
-            // ФАЗА 4: КОНТРОЛЬНЫЙ ВЫСТРЕЛ — ПРОВЕРКА ПОЛНОЙ ПУСТОТЫ
-            // =========================================================================
-            log.info("=== ФАЗА 4: КОНТРОЛЬНАЯ ПРОВЕРКА ПОЛНОЙ АННИГИЛЯЦИИ СТРУКТУРЫ ===");
-            IXdStorageTransaction txCheckEmpty = realStorage.beginTransaction(5000L);
-            try {
-                Collection<ClassPolicyEntity> emptyCheck = realStorage.load(ClassPolicyEntity.class, txCheckEmpty);
+            // Финальный монолитный коммит пурджа: вся база атомарно схлопывается в один пустой корень!
+            txPurge.commit();
+            log.info("=== МOНOЛИТНАЯ ОЧИСТКА БАЗЫ ЗАВЕРШЕНА УСПЕШНО ===");
+        } catch (Throwable t) {
+            txPurge.rollback();
+            fail("🚨 Аварийный крах монолитного коммита очистки хранилища СУБД!", t);
+        }
 
-                // Жесткий ACID ассерт: в базе не должно остаться ни одной фантомной записи
-                assertTrue(emptyCheck.isEmpty(), "Критический дефект ACID! База данных содержит фантомные индексы после пурджа!");
+        // =========================================================================
+        // ФАЗА 4: КОНТРОЛЬНЫЙ ВЫСТРЕЛ — ПРОВЕРКА ПОЛНОЙ ПУСТОТЫ
+        // =========================================================================
+        log.info("=== ФАЗА 4: КОНТРОЛЬНАЯ ПРОВЕРКА ПОЛНОЙ АННИГИЛЯЦИИ СТРУКТУРЫ ===");
+        IXdStorageTransaction txCheckEmpty = realStorage.beginTransaction(5000L);
+        try {
+            Collection<ClassPolicyEntity> emptyCheck = realStorage.load(ClassPolicyEntity.class, txCheckEmpty);
 
-                txCheckEmpty.commit();
-                log.info("СУБД абсолютно чиста. Инвариант Б+Дерева и теневых буферов подтвержден на 100%.");
-            } catch (Throwable t) {
-                txCheckEmpty.rollback();
-                throw t;
-            }
+            // Жесткий ACID ассерт: в базе не должно остаться ни одной фантомной записи
+            assertTrue(emptyCheck.isEmpty(), "Критический дефект ACID! База данных содержит фантомные индексы после пурджа!");
+
+            txCheckEmpty.commit();
+            log.info("СУБД абсолютно чиста. Инвариант Б+Дерева и теневых буферов подтвержден на 100%.");
+        } catch (Throwable t) {
+            txCheckEmpty.rollback();
+            throw t;
         }
     }
 

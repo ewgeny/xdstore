@@ -10,6 +10,9 @@ import java.util.Date;
 import java.util.Map;
 
 public final class XdStorageMvccGraphCloner {
+    private static final org.apache.logging.log4j.Logger log =
+            org.apache.logging.log4j.LogManager.getLogger(XdStorageMvccGraphCloner.class);
+
     private XdStorageMvccGraphCloner() {}
 
     @SuppressWarnings("unchecked")
@@ -46,7 +49,12 @@ public final class XdStorageMvccGraphCloner {
             } finally {
                 if (isRootCall) XdStorageCloningContext.clear();
             }
-        } catch (final Exception e) { return null; }
+        } catch (final Exception e) {
+            // R-44: отказ клонирования ОБЯЗАН быть виден: молчаливый null раньше
+            // записывался в поле-детей и терял данные (исчезновение вложенных объектов).
+            log.error("cloneObject({}) failed — returning null (data-loss risk!)", object.getClass().getName(), e);
+            return null;
+        }
     }
 
     public static void fillFromSameTypeObject(final Object reference, final Object object) {

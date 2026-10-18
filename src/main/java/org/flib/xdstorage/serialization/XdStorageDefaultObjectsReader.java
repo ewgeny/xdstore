@@ -369,7 +369,15 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
         }
 
         Class<?> cl = Class.forName(className);
-        Collection<Object> collection = (Collection<Object>) cl.newInstance();
+        Collection<Object> collection;
+        try {
+            collection = (Collection<Object>) cl.newInstance();
+        } catch (final Exception e) {
+            // R-43: неинстанцируемый класс коллекции (обертка java.util.Collections$SynchronizedList
+            // и т.п.) — канонический фолбэк LinkedList; владелец-нода сама оборачивает списки
+            // в synchronized-обертки в setKeys/setObjects/setChildren.
+            collection = new java.util.LinkedList<>();
+        }
         final String[] fn = new String[]{null};
         while (xmlReader.hasNext()) {
             final int type = xmlReader.nextTag();
@@ -414,7 +422,13 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
         }
 
         Class<?> cl = Class.forName(className);
-        Map<Object, Object> map = (Map<Object, Object>) cl.newInstance();
+        Map<Object, Object> map;
+        try {
+            map = (Map<Object, Object>) cl.newInstance();
+        } catch (final Exception e) {
+            // R-43: неинстанцируемый класс карты (обертка Collections$SynchronizedMap и т.п.)
+            map = new java.util.HashMap<>();
+        }
         final String[] fn = new String[]{null};
         while (xmlReader.hasNext()) {
             final int type = xmlReader.nextTag();
@@ -727,7 +741,15 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
         }
 
         Class<?> cl = Class.forName(className);
-        Collection<Object> collection = (Collection<Object>) cl.newInstance();
+        Collection<Object> collection;
+        try {
+            collection = (Collection<Object>) cl.newInstance();
+        } catch (final Exception e) {
+            // R-43: неинстанцируемый класс коллекции (обертка java.util.Collections$SynchronizedList
+            // и т.п.) — канонический фолбэк LinkedList; владелец-нода сама оборачивает списки
+            // в synchronized-обертки в setKeys/setObjects/setChildren.
+            collection = new java.util.LinkedList<>();
+        }
         final String[] fn = new String[]{null};
         while (xmlReader.hasNext()) {
             final int type = xmlReader.nextTag();
@@ -771,7 +793,13 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
         }
 
         Class<?> cl = Class.forName(className);
-        Map<Object, Object> map = (Map<Object, Object>) cl.newInstance();
+        Map<Object, Object> map;
+        try {
+            map = (Map<Object, Object>) cl.newInstance();
+        } catch (final Exception e) {
+            // R-43: неинстанцируемый класс карты (обертка Collections$SynchronizedMap и т.п.)
+            map = new java.util.HashMap<>();
+        }
         final String[] fn = new String[]{null};
         while (xmlReader.hasNext()) {
             final int type = xmlReader.nextTag();

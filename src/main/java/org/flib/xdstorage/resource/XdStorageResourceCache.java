@@ -64,6 +64,8 @@ public class XdStorageResourceCache {
      * пос-транзакционных копий), record-level MVCC к структуре не применяется.
      */
     private final boolean infrastructureCache;
+    /** R-42: ноды дерева — внутренняя структура с живым инстансом-истиной (полная инфра-релаксация). */
+    private final boolean structuralNodeCache;
 
     public XdStorageIsolationLevel getIsolationLevel() {
         return isolationLevel;
@@ -93,6 +95,10 @@ public class XdStorageResourceCache {
         this.services = services;
         this.field = field;
         this.infrastructureCache = clazz != null && clazz.getName().contains("org.flib.xdstorage.btree");
+        // R-42: НОДЫ — внутренняя структура (истина = живой инстанс, сериализация нодовыми
+        // write-локами) — полная инфра-релаксация. Само ДЕРЕВО — логическая сущность БД:
+        // контракты фантомов (BTreeEntityTest) действуют на его удаление.
+        this.structuralNodeCache = clazz != null && clazz.getName().equals("org.flib.xdstorage.btree.XdStorageBTreeNode");
         this.clazz = clazz;
         this.cloner = this.services.getCloner();
 //        setIsolationLevel(IsolationLevel.READ_COMMITTED);
@@ -563,7 +569,6 @@ public class XdStorageResourceCache {
     }
 
     private <T> Collection<T> readUnsafeInternal(final XdStorageTransaction transaction) {
-        final String transactionId = transaction.getTransactionId();
         Map<Object, ObjectChange> readObjects = readObjectsOfTransaction(transaction);
 
         final List<T> result = Collections.synchronizedList(new ArrayList<>());
@@ -627,6 +632,25 @@ public class XdStorageResourceCache {
             }
         }
         return result;
+    }
+
+    /**
+     * R-45: если запись захвачена чужой транзакцией, УЖЕ ВСТУПИВШЕЙ в фазу коммита, и
+     * снапшот читателя включает ее единый commit-serial — возвращает этот serial
+     * (новое состояние записи обязано быть видно читателю атомарно). Иначе 0.
+     */
+    private long committingSerialVisibleTo(final XdStorageTransaction reader, final CacheRecord record) {
+        final XdStorageTransaction owner = record.transaction;
+        if (owner == null || owner == reader || !record.firstPhaseCommit) {
+            return 0;
+        }
+        final long ownerSerial = owner instanceof XdStorageTransaction
+                ? ((XdStorageTransaction) owner).getCommitSerial() : 0;
+        if (ownerSerial == 0) {
+            return 0;
+        }
+        final Long readerSnapshot = reader.getSnapshotSerial();
+        return readerSnapshot != null && readerSnapshot >= ownerSerial ? ownerSerial : 0;
     }
 
     public Object read(final Object id, final XdStorageTransaction transaction) throws XdStorageException {
@@ -705,18 +729,36 @@ public class XdStorageResourceCache {
 
             // Канонический MVCC-барьер вычисления видимости в оперативной памяти
             synchronized (record) {
+                // R-45: если запись удерживает ЧУЖАЯ транзакция, находящаяся В ФАЗЕ КОММИТА,
+                // и снапшот читателя уже включает ее единый commit-serial — читатель обязан
+                // видеть НОВОЕ состояние (все эффекты коммита атомарно), несмотря на то что
+                // фаза-2 этой конкретной записи еще не дошла до нее. Без этого читатель между
+                // фазами разных ресурсов видел новую систему со ссылками на еще "невидимые"
+                // планеты ("cannot load by reference") — дыра атомарности коммита GraphPhantom.
+                final long committingSerial = committingSerialVisibleTo(transaction, record);
                 if (record.isUpdateChange()) {
                     if (record.isCommitedState()) {
                         object = record.getObject();
                     } else if (record.isChangedByTransaction(transaction)) {
                         object = record.getNewObject();
-                    } else {
+                    } else if (committingSerial != 0) {
+                        object = record.getNewObject() != null ? record.getNewObject() : record.getObject();
+                    } else if (record.canBeChangedByTransaction(transaction)) {
                         object = record.getObject();
+                    } else {
+                        // R-45: чужой читатель при незакоммиченном обновлении видит последнюю
+                        // ЗАКОММИЧЕННУЮ версию (prevObject). Раньше здесь отдавался живой
+                        // record.object — состояние чужой НЕЗАКОММИЧЕННОЙ транзакции: читатель
+                        // видел ссылки на еще не существующие объекты ("cannot load by reference")
+                        // и ронял весь свой скан — дыра Snapshot Isolation в GraphPhantom.
+                        object = record.prevObject != null ? record.prevObject : record.getObject();
                     }
                 } else if (record.isInsertChange()) {
                     if (record.isCommitedState()) {
                         object = record.getObject();
                     } else if (record.isChangedByTransaction(transaction)) {
+                        object = record.getNewObject();
+                    } else if (committingSerial != 0) {
                         object = record.getNewObject();
                     }
                 } else if (record.isDeleteChange()) {
@@ -1090,6 +1132,18 @@ public class XdStorageResourceCache {
         CacheRecord record = cache.get(objectId);
 
         if (record == null) {
+            // R-40: САМОЗАРПАВКА ИНФРАСТРУКТУРНЫХ ОБЪЕКТОВ. Для B+Tree (деревья/узлы)
+            // истина — живой инстанс в памяти дерева: вызывающий держит канонический узел
+            // из структуры. Если его record потеряна (откат сплита + выселение cold-ресурса,
+            // который ни разу не коммитился на диск), отказ "does not exists" ронял КАЖДЫЙ
+            // спуск через такой узел навсегда. Материализуем запись заново (как insert):
+            // коммит узла запишет его на диск в согласии со структурой дерева.
+            if (infrastructureCache && objectId != null) {
+                log.warn("UPDATE of infrastructure object {} id {} without cache record — re-materializing (structural ghost self-heal)",
+                        newObject.getClass().getSimpleName(), objectId);
+                insert(newObject, transaction);
+                return;
+            }
             throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " does not exists");
         }
 
@@ -1149,11 +1203,32 @@ public class XdStorageResourceCache {
 
         final ObjectChange change = readObjects.get(objectId);
         synchronized (record) {
+            // R-42: ИНФРАСТРУКТУРНЫЕ ЗАПИСИ (B+Tree узлы/деревья) НЕ участвуют в политике
+            // отказа-до-коммита. Корректность структуры уже обеспечивает write-лок самого узла
+            // (hand-over-hand спуски, deep-локи ребалансировки — см. R-27 про latch): record
+            // здесь — просто буфер записи на диск, а не объектно-версионная блокировка.
+            // Отказы "can not be updated" на горячих внутренних узлах отказывали КАЖДОМУ
+            // параллельному спуску до конца транзакции-держателя (лавина R-37) — для
+            // пользовательских объектов семантика остается строгой.
+            // R-42: ноды — полная релаксация (структура); у дерева релаксировано обновление,
+            // но незакоммиченная ЧУЖАЯ вставка неприкосновенна (контракты фантомов
+            // BTreeEntityTest: дерево, видимо не существующее в БД, чужая tx не трогает).
+            final boolean infraRelax = structuralNodeCache
+                    || (infrastructureCache
+                        && !(record.isInsertChange() && !record.isCommitedState() && !record.isChangedByTransaction(transaction)));
             if (change != null) {
-                if (!record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
+                if (!infraRelax && !record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
+                    // R-40: отказ обновления обязан оставлять в логе СОСТОЯНИЕ записи — без него
+                    // отказ выглядит необъяснимым (владелец == сам апдейтер, но отказ).
+                    log.error("UPDATE refused (read-version check) object {} id {}: record[state={}, ownerTx={}, recordTs={}, txTs={}, readTs={}]",
+                            newObject.getClass().getSimpleName(), objectId, record.getState(), record.getOwnerTransactionId(),
+                            record.getRecordTimestamp(), transaction.getTimestart(), change.readTimestamp);
                     throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
                 }
-            } else if (!record.canBeChangedByTransaction(transaction)) {
+            } else if (!infraRelax && !record.canBeChangedByTransaction(transaction)) {
+                log.error("UPDATE refused (record check) object {} id {}: record[state={}, ownerTx={}, recordTs={}, txTs={}]",
+                        newObject.getClass().getSimpleName(), objectId, record.getState(), record.getOwnerTransactionId(),
+                        record.getRecordTimestamp(), transaction.getTimestart());
                 throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
             }
 
@@ -1168,7 +1243,7 @@ public class XdStorageResourceCache {
                 } else {
                     throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " was deleted this transaction");
                 }
-            } else if (record.canBeChangedByTransaction(transaction)) {
+            } else if (infraRelax || record.canBeChangedByTransaction(transaction)) {
                 record.setNewObject(materializeForCache(newObject));
                 record.markUpdate(transaction);
                 readObjects.put(objectId, new ObjectChange(newObject, Change.update, change != null ? change.readTimestamp : transaction.getTimestart()));
@@ -1193,6 +1268,15 @@ public class XdStorageResourceCache {
     public void delete(final Object objectId, final XdStorageTransaction transaction) throws XdStorageException {
         CacheRecord record = cache.get(objectId);
         if (record == null) {
+            // R-42: инфраструктурный (B+Tree) объект, чья record потеряна, при удалении
+            // считается УЖЕ ОТСУТСТВУЮЩИМ: цель удаления достигнута, отказ ронял монолитный
+            // пурдж на узлах-сиротах откатанных сплитов. Пользовательские объекты по-прежнему
+            // строгие — потеря их записи есть нарушение и требует исключения.
+            if (infrastructureCache) {
+                log.warn("DELETE of infrastructure object {} id {} without cache record — treating as already deleted",
+                        clazz.getSimpleName(), objectId);
+                return;
+            }
             throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " does not exists");
         }
 
@@ -1223,11 +1307,18 @@ public class XdStorageResourceCache {
 
         synchronized (record) {
             final ObjectChange change = readObjects.get(objectId);
+            // R-42: инфраструктурные записи не отказывают по версии (см. комментарий в update) —
+            // структурная конкуренция сериализована нодовыми write-локами. Релаксация действует
+            // КРОМЕ незакоммиченной ЧУЖОЙ вставки (контракт фантомного удаления дерева,
+            // BTreeEntityTest). Ноды удалению не подлежат контрактам — полная релаксация.
+            final boolean infraRelax = structuralNodeCache
+                    || (infrastructureCache
+                        && !(record.isInsertChange() && !record.isCommitedState() && !record.isChangedByTransaction(transaction)));
             if (change != null) {
-                if (!record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
+                if (!infraRelax && !record.canBeChangedByTransaction(transaction, change.readTimestamp)) {
                     throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " can not be updated by transaction " + transactionId);
                 }
-            } else if (!record.canBeChangedByTransaction(transaction)) {
+            } else if (!infraRelax && !record.canBeChangedByTransaction(transaction)) {
                 throw new XdStorageException("object of " + clazz + " with idgeneration " + objectId + " can not be deleted by transaction " + transactionId);
             }
 
@@ -1237,7 +1328,14 @@ public class XdStorageResourceCache {
                 readObjects.remove(objectId);
             } else if (!record.isCommitedState() && record.isChangedByTransaction(transaction)) {
                 if (record.isInsertChange()) {
-                    cache.remove(objectId);
+                    if (!infrastructureCache) {
+                        cache.remove(objectId);
+                    } else {
+                        // R-40: инфра-вставка, удаленная в той же tx, остается обслуживаемой —
+                        // живой инстанс может оставаться в структуре дерева.
+                        record.setNewObject(null);
+                        record.markDelete(transaction);
+                    }
                     readObjects.remove(objectId);
                 } else if (record.isUpdateChange()) {
                     record.setNewObject(null);
@@ -1246,7 +1344,7 @@ public class XdStorageResourceCache {
                 } else {
                     throw new XdStorageException("trying to double delete one object of " + clazz + " with idgeneration " + objectId);
                 }
-            } else if (record.canBeChangedByTransaction(transaction)) {
+            } else if (infraRelax || record.canBeChangedByTransaction(transaction)) {
                 record.setNewObject(null);
                 record.markDelete(transaction);
                 readObjects.remove(objectId);
@@ -1459,10 +1557,14 @@ public class XdStorageResourceCache {
 
                 try {
                     synchronized (record) {
-                        record.rollback();
+                        if (isInsertOp && infrastructureCache) {
+                            record.rollbackInsertKeepServing();
+                        } else {
+                            record.rollback();
+                        }
                     }
 
-                    if (isInsertOp && recordId != null) {
+                    if (isInsertOp && !infrastructureCache && recordId != null) {
                         cache.remove(recordId);
                     }
                     record.unlock(transaction);
@@ -1482,9 +1584,13 @@ public class XdStorageResourceCache {
                 boolean isInsertOp = record.isInsertChange() && record.isChangedByTransaction(transaction);
                 Object recordId = record.getId();
                 synchronized (record) {
-                    record.rollback();
+                    if (isInsertOp && infrastructureCache) {
+                        record.rollbackInsertKeepServing();
+                    } else {
+                        record.rollback();
+                    }
                 }
-                if (isInsertOp && recordId != null) {
+                if (isInsertOp && !infrastructureCache && recordId != null) {
                     cache.remove(recordId);
                 }
                 record.unlock(transaction);
@@ -1515,6 +1621,9 @@ public class XdStorageResourceCache {
         final Map<Object, CacheRecord> map = changes.remove(transactionId);
         if (map != null) {
             for (final XdStorageObjectChange change : committed) {
+                if (change.oldObject == null && change.newObject == null) {
+                    continue;
+                }
                 final Object object = change.oldObject;
                 final Object id = field.get(object != null ? object : change.newObject);
                 CacheRecord record = cache.get(id), oldRecord = map.get(id);
@@ -1642,17 +1751,38 @@ public class XdStorageResourceCache {
             return version;
         }
 
+        /** R-40 диагностика отказов: состояние записи на момент отказа обновления. */
+        private String getState() {
+            return String.valueOf(state);
+        }
+
+        /** R-40 диагностика отказов: id транзакции-владельца записи (или null). */
+        private String getOwnerTransactionId() {
+            return transaction != null ? transaction.getTransactionId() : null;
+        }
+
+        /** R-40 диагностика отказов: timestamp записи на момент отказа обновления. */
+        private long getRecordTimestamp() {
+            return timestamp;
+        }
+
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction) {
             boolean isOwnerTxAlive = this.transaction != null &&
                     services.getTransactionsManager().isTransactionAlive(this.transaction);
 
             // =========================================================================
-            // ИСПРАВЛЕНИЕ: Если транзакция, удерживающая блокировку, мертва (!isOwnerTxAlive),
-            // мы аннулируем замок, позволяя транзакции очистки беспрепятственно выполнить пурдж!
+            // R-40: РЕЛАКСАЦИЯ ЦЕПОЧКИ ВЛОЖЕННОСТИ. Nested-транзакция — тот же логический
+            // писатель, что и ее родитель: спуск parent-tx по индексу обновляет родительские
+            // указатели узлов (record уходит в locked до коммита parent), после чего спуск
+            // nested-tx по ТОМУ ЖЕ дереву получал отказ "can not be updated" на СВОЮ ЖЕ
+            // блокировку — детерминированный ноль прогрессов под nested-стрессом (R-37).
+            // Идентичность цепочки строгая (по ссылкам транзакций), чужие воркеры не
+            // пересекаются никогда.
             // =========================================================================
             boolean result = this.state == State.undefined
                     || !isOwnerTxAlive
                     || (this.state == State.locked && this.transaction == transaction && transaction.getTimestart() == timestamp)
+                    || (this.state == State.locked && isOwnedByTransactionChain(transaction))
                     || (this.state == State.committed && transaction.getTimestart() > timestamp);
 
             if (log.isDebugEnabled()) {
@@ -1665,6 +1795,22 @@ public class XdStorageResourceCache {
             return result;
         }
 
+        /**
+         * R-40: true, если владелец записи — звено цепочки вложенности вызывающей
+         * транзакции (сам вызывающий, его parent, grandparent, ...).
+         */
+        private boolean isOwnedByTransactionChain(final XdStorageTransaction caller) {
+            if (this.transaction == null) {
+                return false;
+            }
+            for (XdStorageTransaction t = caller; t != null; t = t.getGlobalTransaction()) {
+                if (t == this.transaction) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public boolean canBeChangedByTransaction(final XdStorageTransaction transaction, final long readObjectByTransactionTimestamp) {
             boolean isOwnerTxAlive = this.transaction != null &&
                     services.getTransactionsManager().isTransactionAlive(this.transaction);
@@ -1672,6 +1818,7 @@ public class XdStorageResourceCache {
             boolean result = this.state == State.undefined
                     || !isOwnerTxAlive
                     || (this.state == State.locked && this.transaction == transaction && transaction.getTimestart() == timestamp)
+                    || (this.state == State.locked && isOwnedByTransactionChain(transaction))
                     || (this.state == State.committed && readObjectByTransactionTimestamp > timestamp);
 
             if (log.isDebugEnabled()) {
@@ -1870,8 +2017,11 @@ public class XdStorageResourceCache {
             // НОМЕР ФАКТИЧЕСКОГО КОММИТА: граница видимости снапшотных читателей.
             // timestart владельца (метится при НАЧАЛЕ его транзакции) лжет читателям,
             // начавшим в окне [начало владельца, коммит]: версия еще не была видна,
-            // когда они стартовали. Порядок по счетчику коммитов устраняет окно.
-            this.commitSerial = XdStorageTransaction.nextCommitSerial();
+            // когда они стартовали. R-45: ВСЕ записи транзакции получают ОДИН serial,
+            // зарезервированный в начале коммита — атомарная видимость между ресурсами.
+            final long txCommitSerial = tx instanceof XdStorageTransaction
+                    ? ((XdStorageTransaction) tx).getCommitSerial() : 0;
+            this.commitSerial = txCommitSerial != 0 ? txCommitSerial : XdStorageTransaction.nextCommitSerial();
 
             // =========================================================================
             // ФИНАЛЬНЫЙ АРХИТЕКТУРНЫЙ ШТРИХ: Свобождаем тип изменения ноды!
@@ -1896,6 +2046,26 @@ public class XdStorageResourceCache {
             secondPhaseCommit = false;
 
             this.timestamp = this.prevTimestamp;
+            this.prevTimestamp = Long.MIN_VALUE;
+        }
+
+        /**
+         * R-40: откат INSERT-записи инфраструктурного (B+Tree) объекта. Мутации дерева
+         * выполняются НА МЕСТЕ на живом каноническом инстансе: откаченный сплит физически
+         * остается в структуре (parent.children), поэтому удалять запись из кэша нельзя —
+         * каждый спуск через узел-сироту падал "does not exists". Запись возвращается в
+         * состояние чистого чтения текущего живого инстанса: узел разрешим и обновляем
+         * любой транзакцией (state=undefined), его содержание совпадает с той версией
+         * структуры, на которую и ссылается память дерева.
+         */
+        public void rollbackInsertKeepServing() {
+            final Object liveInstance = this.newObject;
+            rollback();
+            this.object = liveInstance;
+            this.state = State.undefined;
+            this.change = Change.read;
+            this.transaction = null;
+            this.timestamp = Long.MIN_VALUE;
             this.prevTimestamp = Long.MIN_VALUE;
         }
 

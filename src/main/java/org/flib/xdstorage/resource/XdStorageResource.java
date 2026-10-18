@@ -17,8 +17,10 @@ import org.flib.xdstorage.utils.XdStorageAtomicFile;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
@@ -127,18 +129,34 @@ public class XdStorageResource extends XdStorageAbstractResource {
             return;
         }
 
+
+        // R-43: guard-ы берутся ДО атомарной записи и отпускаются гарантированно в finally
+        final List<Object> guarded = new ArrayList<>();
         try {
+            for (final Object object : objects) {
+                if (object instanceof org.flib.xdstorage.serialization.IXdStorageSerializationGuard) {
+                    ((org.flib.xdstorage.serialization.IXdStorageSerializationGuard) object).beginConsistentSerialization();
+                    guarded.add(object);
+                }
+            }
             // crash-safe: пишем во временный файл-соседа и атомарно подменяем ресурс,
             // чтобы сбой посреди коммита не мог обрезать существующий файл ресурса
             XdStorageAtomicFile.writeReplacing(getFileName(), out -> {
                 if (isReferences) {
                     writer.writeReferences(out, idField, objects);
                 } else {
+                    // R-43: живые инстансы (канонический реестр B+Tree) сериализуются под
+                    // guard-ом самого объекта — параллельный сплит/джойн больше не рвет
+                    // LinkedList под итератором писателя (CME) и не оставляет рваный XML.
                     writer.writeObjects(out, objects);
                 }
             });
         } catch (final Throwable e) {
             throw new XdStorageRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
+        } finally {
+            for (final Object object : guarded) {
+                ((org.flib.xdstorage.serialization.IXdStorageSerializationGuard) object).endConsistentSerialization();
+            }
         }
     }
 

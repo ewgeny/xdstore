@@ -123,8 +123,9 @@ public class XdStorageReadWriteLock {
         while (!tryLockWrite()) {
             long elapsed = System.nanoTime() - startTime;
             if (elapsed >= timeout) {
-                log.error("Write-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
-                        elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null);
+                log.error("Write-lock acquisition failed after {} ms (holder thread: {}, tx: {}){} — timeout or leaked write-lock",
+                        elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null,
+                        describeLockState());
                 throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс монопольно занят на запись другим потоком. Превышен таймаут ожидания: " + timeout / 1_000_000 + " мс");
             }
             Thread.sleep(Math.min(sleepStep, timeout - elapsed));
@@ -141,13 +142,34 @@ public class XdStorageReadWriteLock {
         while (!tryLockRead()) {
             long elapsed = System.nanoTime() - startTime;
             if (elapsed >= timeout) {
-                log.error("Read-lock acquisition failed after {} ms (holder thread: {}, tx: {}) — timeout or leaked write-lock",
-                        elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null);
+                log.error("Read-lock acquisition failed after {} ms (holder thread: {}, tx: {}){} — timeout or leaked write-lock",
+                        elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null,
+                        describeLockState());
                 throw new XdStorageRuntimeException("Конфликт блокировок MVCC: Ресурс занят на чтение другим потоком. Превышен таймаут ожидания: " + timeout / 1_000_000 + " мс");
             }
             Thread.sleep(Math.min(sleepStep, timeout - elapsed));
         }
         logLockContention(startTime, "read", transaction);
+    }
+
+    /**
+     * R-37 диагностика: полный снимок состояния лока в момент таймаута — держатель write-лока
+     * и ВСЕ счетчики читателей. Утечка читательского счетчика так же смертельна, как утечка
+     * write-лока (tryLockWrite требует пустую карту читателей), но раньше была невидима в логе.
+     */
+    private String describeLockState() {
+        final StringBuilder sb = new StringBuilder(" state=[writeHolder=");
+        sb.append(writeLockThread == null ? "null" : writeLockThread.getName());
+        sb.append(", writeCount=").append(writeLocksCounter.get());
+        sb.append(", readers={");
+        boolean first = true;
+        for (final Map.Entry<Thread, AtomicLong> e : readLocksCounters.entrySet()) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(e.getKey().getName()).append('=').append(e.getValue().get());
+        }
+        sb.append("}]");
+        return sb.toString();
     }
 
     /**
