@@ -275,6 +275,10 @@ public final class XdStorageCacheCommitProtocol {
             }
         }
 
+        if (map != null) {
+            log.info("rollback-failed-commit of tx {}: {} record(s) restored from the collector's committed changes", transactionId, map.size());
+        }
+
         cache.workspace().finishTransaction(transactionId);
     }
 

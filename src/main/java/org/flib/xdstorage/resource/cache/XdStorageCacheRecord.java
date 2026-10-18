@@ -347,6 +347,8 @@ public final class XdStorageCacheRecord {
                 cache.isTransactionAlive(this.transaction);
 
         if (this.transaction != null && !isOwnerAlive && this.transaction != transaction) {
+            log.debug("record {} adopted from dead transaction {} by {}",
+                    id, this.transaction.getTransactionId(), transaction.getTransactionId());
             this.transaction = null;
             synchronized (locked) {
                 locked.set(false);
@@ -363,6 +365,8 @@ public final class XdStorageCacheRecord {
                         boolean currentOwnerAlive = this.transaction != null &&
                                 cache.isTransactionAlive(this.transaction);
                         if (this.transaction != null && !currentOwnerAlive) {
+                            log.debug("record {} owner {} died while waiting — adopted by {}",
+                                    id, this.transaction.getTransactionId(), transactionId);
                             this.transaction = null;
                             locked.set(false);
                             break;
@@ -373,6 +377,9 @@ public final class XdStorageCacheRecord {
                         if (startTime == null) {
                             blockingTime.put(transactionId, currentTime);
                         } else if ((currentTime - startTime) >= transaction.getTimeout() * 1_000_000) {
+                            log.warn("record {} locked by transaction {} (change={}) — waiter {} timed out after {} ms",
+                                    id, this.transaction != null ? this.transaction.getTransactionId() : null,
+                                    change, transactionId, transaction.getTimeout());
                             throw new XdStorageException("transaction " + transactionId + " should be rolled back by timeout. Object with id " + id + " is locked for " + change);
                         } else {
                             blockingTime.put(transactionId, startTime);
@@ -407,6 +414,8 @@ public final class XdStorageCacheRecord {
                 locked.notify();
             }
         } else {
+            log.warn("unlock of record {} rejected: caller {} does not own it (owner={})",
+                    id, transaction.getTransactionId(), this.transaction != null ? this.transaction.getTransactionId() : null);
             throw new XdStorageException("trying to release locking object by the transaction is not locked this object");
         }
     }
@@ -421,8 +430,12 @@ public final class XdStorageCacheRecord {
 
     public void commit(IXdStorageTransaction tx) {
         ++version;
-        if (!firstPhaseCommit || !secondPhaseCommit)
+        if (!firstPhaseCommit || !secondPhaseCommit) {
+            log.error("commit of record {} rejected: firstPhaseCommit={}, secondPhaseCommit={}, state={}, change={}, owner={}",
+                    id, firstPhaseCommit, secondPhaseCommit, state, change,
+                    transaction != null ? transaction.getTransactionId() : null);
             throw new XdStorageRuntimeException("Illegal state of record to commit");
+        }
 
         this.prevObject = this.object;
         this.object = this.newObject;
@@ -489,6 +502,7 @@ public final class XdStorageCacheRecord {
         this.transaction = null;
         this.timestamp = Long.MIN_VALUE;
         this.prevTimestamp = Long.MIN_VALUE;
+        log.debug("infra insert rollback: record {} stays serving the live instance (R-40)", id);
     }
 
     /**

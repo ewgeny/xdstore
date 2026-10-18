@@ -835,6 +835,26 @@ listed here because ResourceCache transit interacts with it)
   505/1 (единственный сбой — тот же исторический facade-флак "рассинхрон структуры",
   идентичная сигнатура R-45-остатка, к расщеплению отношения не имеет — BTree-внутреннее);
   полный суит — финальный прогон итерации 2.
+- **Итерация 3 (логическое покрытие классов кэша, дисциплина R-24):** закрыты остававшиеся
+  НЕМОЛЕ последовательности (INFO-объем не растет: новые линии — WARN/ERROR на редких
+  аномалиях + DEBUG, невидимый на INFO-конфиге):
+  - `XdStorageCacheRecord` (4→10): WARN перед таймаутом latch (с держателем/change/waiter),
+    DEBUG удочерения latch у мертвого владельца (оба сайта), WARN отклоненного unlock
+    (с владельцем), **ERROR отказа commit по фазам** (с first/secondPhaseCommit, state,
+    change, owner — та самая диагностика "Illegal state of record to commit", ранее
+    немая тирада в nested-шторме), DEBUG rollbackInsertKeepServing (R-40);
+  - `XdStorageCacheMutator` (7→13): ERROR на всех отказах INSERT с состоянием записи
+    (зеркало R-40 update-refused): deferred-id арбитраж, record-check после latch,
+    удален-в-этой-tx, double insert, is exists, concurrent modification (с владельцем);
+  - `XdStorageTransactionWorkspace` (0→2): DEBUG clear + DEBUG finishTransaction
+    (закрытие транзитных контуров);
+  - `XdStorageCacheCommitProtocol` (13→14): INFO-сводка rollbackFailedCommit (паритет
+    с commit/rollback);
+  - фасад (3→7): WARN восстановления инфра-записи из канонического реестра при ПОТЕРЕ
+    записи (readInternal(id) + readByReferenceInternal — зеркальные "структурные ghosts"),
+    DEBUG исчезновения записи во время ожидания развязки, DEBUG fillAndClone.
+- **Verified (итерация 3):** resource+инварианты 182/0/1; полный суит — финальный прогон
+  (объем лога на INFO-конфиге без изменений: новые линии не на INFO-путях).
 - **Revert:** `git checkout` фасада + удалить 6 новых файлов пакета resource.
 
 

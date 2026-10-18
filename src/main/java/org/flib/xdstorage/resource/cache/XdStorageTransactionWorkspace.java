@@ -1,5 +1,7 @@
 package org.flib.xdstorage.resource.cache;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.observing.IXdStorageIdObservableWrapper;
 import org.flib.xdstorage.transaction.XdStorageTransaction;
 
@@ -25,6 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * синхронизации сверх той, что была у карт в XdStorageResourceCache.
  */
 public final class XdStorageTransactionWorkspace {
+
+    private static final Logger log = LogManager.getLogger(XdStorageTransactionWorkspace.class);
 
     private final Map<String, Map<Object, XdStorageCacheRecord>> changes = new ConcurrentHashMap<>();
 
@@ -125,11 +129,13 @@ public final class XdStorageTransactionWorkspace {
         unidentified.remove(transactionId);
         changes.remove(transactionId);
         undoLogs.remove(transactionId);
+        log.debug("transaction contour of {} cleared (write-set, undo journal, unidentified wrappers, read objects)", transactionId);
     }
 
     /** Завершение коммита/отката: транзитные и неидентифицированные объекты больше не нужны. */
     public void finishTransaction(final String transactionId) {
         unidentified.remove(transactionId);
         readObjects.remove(transactionId);
+        log.debug("transient contours of {} closed (read objects, unidentified wrappers)", transactionId);
     }
 }

@@ -192,6 +192,7 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
 
     @SuppressWarnings("unchecked")
     private <T> void fillAndCloneCacheOnlyIfNotExistsInternal(final List<T> objects, final Collection<T> result, final XdStorageTransaction transaction) throws XdStorageException {
+        log.debug("fillAndClone: {} object(s) into the read contour of tx {}", objects.size(), transaction.getTransactionId());
         final Map<Object, XdStorageCacheObjectChange> tmpReadObjects = workspace.readObjectsOf(transaction);
 
         for (final T object : objects) {
@@ -632,6 +633,8 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
             final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();
             final Object canonical = registry != null ? registry.get(clazz, id) : null;
             if (canonical != null) {
+                log.warn("cache record for infra object {}#{} was lost — restored from the canonical registry",
+                        clazz.getSimpleName(), id);
                 cache.putIfAbsent(id, createReadRecord(canonical));
                 record = cache.get(id);
             }
@@ -725,6 +728,8 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
             final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();
             final Object canonical = registry != null ? registry.get(clazz, objectId) : null;
             if (canonical != null) {
+                log.warn("cache record for infra object {}#{} was lost — restored from the canonical registry",
+                        clazz.getSimpleName(), objectId);
                 cache.putIfAbsent(objectId, createReadRecord(canonical));
                 record = cache.get(objectId);
             }
@@ -809,6 +814,7 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
             }
             record = cache.get(objectId);
             if (record == null) {
+                log.debug("infra record {} disappeared while waiting — owner rolled back the invisible insert", objectId);
                 return false; // запись изъята (откат вставки) — записи больше нет
             }
         }

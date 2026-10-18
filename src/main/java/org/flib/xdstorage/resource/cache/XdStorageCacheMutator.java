@@ -62,6 +62,9 @@ public final class XdStorageCacheMutator {
                     }
 
                     if (!record.canBeChangedByTransaction(transaction)) {
+                        log.error("INSERT (deferred id) refused: object {} id {} record[state={}, ownerTx={}, recordTs={}]",
+                                newObject.getClass().getSimpleName(), id, record.getState(),
+                                record.getOwnerTransactionId(), record.getRecordTimestamp());
                         throw new XdStorageRuntimeException("object of " + newObject.getClass() + " with idgeneration " + id + " can not be changed by transaction " + transactionId);
                     }
 
@@ -98,6 +101,9 @@ public final class XdStorageCacheMutator {
                 record.lock(transaction);
                 if (!record.canBeChangedByTransaction(transaction)) {
                     record.unlock(transaction);
+                    log.error("INSERT refused (record check): object {} id {} record[state={}, ownerTx={}, recordTs={}]",
+                            newObject.getClass().getSimpleName(), objectId, record.getState(),
+                            record.getOwnerTransactionId(), record.getRecordTimestamp());
                     throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " can not be inserted by transaction " + transactionId);
                 }
                 readObjects.put(objectId, new XdStorageCacheObjectChange(newObject, XdStorageCacheChange.insert, transaction.getTimestart()));
@@ -105,13 +111,20 @@ public final class XdStorageCacheMutator {
                 synchronized (record) {
                     if (record.isChangedByTransaction(transaction)) {
                         if (record.isDeleteChange()) {
+                            log.error("INSERT refused: object {} id {} was deleted in this transaction", newObject.getClass().getSimpleName(), objectId);
                             throw new XdStorageException("trying to insert deleted object of " + newObject.getClass() + " with idgeneration " + objectId);
                         } else if (record.isInsertChange()) {
+                            log.error("INSERT refused: double insert of object {} id {} in transaction {}",
+                                    newObject.getClass().getSimpleName(), objectId, transactionId);
                             throw new XdStorageException("trying to double insert one object of " + newObject.getClass() + " with idgeneration " + objectId);
                         } else {
+                            log.error("INSERT refused: object {} id {} already exists (state={}, ownerTx={})",
+                                    newObject.getClass().getSimpleName(), objectId, record.getState(), record.getOwnerTransactionId());
                             throw new XdStorageException("object of " + newObject.getClass() + " with idgeneration " + objectId + " is exists");
                         }
                     } else {
+                        log.error("INSERT refused: concurrent modification of object {} id {} — record owner is {}",
+                                newObject.getClass().getSimpleName(), objectId, record.getOwnerTransactionId());
                         throw new XdStorageException("concurrent modification one object of " + newObject.getClass() + " with idgeneration " + objectId);
                     }
                 }
