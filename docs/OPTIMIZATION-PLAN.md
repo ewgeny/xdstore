@@ -1,5 +1,8 @@
 # XdStorage — Optimization Plan
 
+JMH baselines (search engine via facade, resource cache, facade tx flow): see [BENCHMARKS.md](BENCHMARKS.md)
+(recorded 2026-10-18, JDK 17).
+
 Baseline (2026-10-16, re-measured at HEAD `158a191`, full `mvn test` with retained surefire reports):
 **469 tests / 7 red** — the Phase-3b stress family (`DeleteIsolation`, `GraphPhantom`,
 `PhantomReadIsolation` (flaky under full-suite load), `XdStorageStressTest`,
