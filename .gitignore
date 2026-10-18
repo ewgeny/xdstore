@@ -10,3 +10,7 @@ xdstorage.log
 # IDE
 .idea/
 *.iml
+
+# benchmark/stress storage litter
+facade_stress_db/
+*_db/

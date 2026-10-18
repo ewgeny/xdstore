@@ -1,5 +1,9 @@
 # XdStorage — Optimization Plan
 
+> Whole-project SRE view (durability, lifecycle, observability, build/CI hygiene, write-path
+> design): see [SRE-OPTIMIZATION-PLAN.md](SRE-OPTIMIZATION-PLAN.md). This file remains the
+> engine-internal campaign journal (R-entries) and the phased engine plan.
+
 JMH baselines (search engine via facade, resource cache, facade tx flow): see [BENCHMARKS.md](BENCHMARKS.md)
 (recorded 2026-10-18, JDK 17).
 
