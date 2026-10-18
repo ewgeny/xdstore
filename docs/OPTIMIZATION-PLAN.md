@@ -769,7 +769,75 @@ listed here because ResourceCache transit interacts with it)
 - **Verified:** GraphPhantom изолированно 10/11 green (исторически ~2/3, местами 1/3); полный суит: fullsuite7 471/2 (обе редкие флаки), fullsuite8 **471/0 GREEN**.
 - **Остаточное (open):** редкий (≈1/11 изолированно) residual того же семейства в GraphPhantom + единичный `рассинхрон структуры` в facade-штурме (валидатор R-32 увидел лист в цепочке, недостижимый из корня, под 25-воркерами — подозрение на транзитивное состояние между двумя обходами валидатора под конкуренцией). Требуют отдельной сессии с сохранением дампов.
 
-### R-29b. The two separable failure modes of testMultithreads + the diagnostic watchdog — TOOLS IN PLACE (2026-10-17)
+### R-46. РАЗДЕЛЕНИЕ XdStorageResourceCache (god class 2119 строк → фасад + 5 коллабораторов) — KEEP (2026-10-18)
+- **Что:** класс разделен по обязанностям без изменения публичного API (фасад сохраняет все
+  публичные методы и порядок "лок записи ДО критической секции"; поведенческий контракт не тронут):
+  - `XdStorageCacheRecord` — MVCC-запись: государственная машина read/insert/update/delete ×
+    undefined/locked/committed, record-latch (R-27), 2PC-состояние, commit/rollback/
+    rollbackInsertKeepServing (R-40), serial-логика (R-45) и **консолидированный вычислитель
+    видимости** `resolveVisible(tx, View, committingSerial)` — шесть дублированных MVCC-переключателей
+    (скан-предикат / watch / полный скан / unsafe-выписка / по id / по ссылке) сведены к одному
+    методу с `View { SCAN, BY_ID, WRITE_OUT }`; различия сайтов сохранены ТОЧНО (BY_ID = барьер
+    committing-serial + prevObject-фолбэк R-45; WRITE_OUT = последнее закоммиченное для чужих);
+  - `XdStorageTransactionWorkspace` — 4 транзакционные карты (write-set `changes`, журнал отката
+    `undoLogs`, неидентифицированные обертки, материализованное `readObjects`) + повторенный 4 раза
+    паттерн "put в write-set; первая мутация — в журнал" сведен к `registerMutation`;
+  - `XdStorageCacheMutator` — контур insert/update/delete (наблюдатель отложенного id, быстрый
+    путь повторного апдейта, infra-релаксация R-42, самозарвка R-40);
+  - `XdStorageCacheCommitProtocol` — prepareCommit/performCommit/commit/rollback (обратный порядок
+    журнала + mid-journal диагностика)/rollbackFailedCommit;
+  - `XdStorageCacheChange`, `XdStorageCacheObjectChange` — вынесенные enum/транзитный объект.
+  - `XdStorageResourceCache` остался фасадом читающих операций + поддержки инфраструктуры
+    (канонический реестр, materializeForCache, барьер waitForRecordResolution).
+- **Почему:** план (раздел "PROJECT ANALYSIS") называл ResourceCache главным god class;
+  6 копий MVCC-переключателя расходились при каждом семантическом фиксе (R-13/R-44/R-45 правили
+  их по отдельности) — единый `resolveVisible` делает различия сайтов явными и проверяемыми.
+- **Безопасность поведения:** все тела перенесены дословно; мониторы не тронуты (synchronized(record)
+  остался на стороне вызывающих, record-монитор — тот же объект); CHM-карты те же инстансы;
+  volatile isolationLevel читается в тех же точках. Публичный API и исключения — без изменений.
+- **Verified:** resource-пакет 125/125 (1 skipped — штатно); все суиты кроме performance
+  448/0/3; полный суит ×2: прогон 1 — 471/2 (facade-штурм: исторический флак "рассинхрон
+  структуры" R-45-остатка — изолированно 2/2 green, в прогоне 2 green; GraphPhantom —
+  разрешенный флак), **прогон 2 — 471/1: только разрешенный
+  testMVCC_GraphRangeScans_UnderHeavyPhantomInsertions**. Критерий приема выполнен.
+- **Итерация 2 (перенос в подпакет + инвариантные тесты):** коллабораторы переехали в
+  `org.flib.xdstorage.resource.cache` (public, подпакет помечен internal в package-info);
+  зависимость от фасада инвертирована через SPI-интерфейс `XdStorageCacheContext`
+  (idField/records/workspace/флаги инфраструктуры/entityClass/isTransactionAlive/
+  isolation/createReadRecord/createInsertRecord/materializeForCache/insert) — фасад его
+  реализует, коллабораторы зависят только от контракта. Новые инвариантные сьюты
+  (test: org.flib.xdstorage.resource.cache, стенд StubCacheContext без фасада):
+  - `XdStorageCacheRecordInvariantTest` (23): фабрики записей, переходы mark/commit/rollback
+    (включая таймстамп-барьер холодного старта и ОДНОУРОВНЕВЫЙ undo), контракт 2PC-флагов
+    ("Illegal state of record to commit"), глобальный счетчик серий, матрица видимости
+    resolveVisible SCAN/BY_ID/WRITE_OUT (барьер committing-serial R-45 и его SCAN-эксклюзивность,
+    R-15 write-out поверх снапшотного роутирования, RC-выключение serial/timestart-гейтов),
+    latch (таймаут, удочерение мертвого владельца, reentrancy, R-27 skip для инфраструктуры),
+    матрица canBeChangedByTransaction (цепочка вложенности R-40, мертвый владелец, committed-гейт).
+  - `XdStorageTransactionWorkspaceInvariantTest` (7): ровно одна точка отмены на запись,
+    FIFO-хронология журнала, ленивые изолированные контуры, hasChanges, clear/finishTransaction
+    (write-set изымает только протокол).
+  - `XdStorageCacheMutatorInvariantTest` (18): insert (барьер null-id ДО CHM, double-insert,
+    concurrent modification, живая инстанция инфраструктуры), быстрый путь апдейта (подмена
+    контента + сохранение readTimestamp), полный путь, таймаут latch'а на update-записи,
+    самозарвка R-40, контракты фантомов дерева (contract A — отказ на незакоммиченной чужой
+    вставке; полная релаксация нод; foreign-update закоммиченного дерева), удаления
+    (insert+delete изымает запись при сохранении точки отката; инфра-удаление держит запись).
+  - `XdStorageCacheCommitProtocolInvariantTest` (9): перманентность 2PC + очистка контуров,
+    коммит без фаз запрещен (и изымает write-set до итерации), обратный порядок журнала,
+    rollback insert: домен изымает / инфраструктура держит живой инстанс, rollbackFailedCommit
+    (update → восстановлен, insert → изъят, delete → воссоздан, пустые элементы пропускаются).
+  - **Задокументированные семантики, вскрытые тестами** (все — поведение исходного кода,
+    сохраненное дословно): владелец записи назначается lock()/фабрикой insert, но НЕ markUpdate;
+    latch физически держат только update-записи (insert-записи защищены арбитражем — чужой
+    lock() перехватывает владение, после чего арбитраж разрешает мутацию).
+- **Verified (итерация 2):** инвариантные сьюты 57/57; все суиты кроме performance
+  505/1 (единственный сбой — тот же исторический facade-флак "рассинхрон структуры",
+  идентичная сигнатура R-45-остатка, к расщеплению отношения не имеет — BTree-внутреннее);
+  полный суит — финальный прогон итерации 2.
+- **Revert:** `git checkout` фасада + удалить 6 новых файлов пакета resource.
+
+
 - **The test now self-diagnoses**: an in-JVM watchdog thread dumps **all** thread stacks
   (unfiltered — the first attempt's `Thread-` filter hid the holder) if the worker join loop
   exceeds 120 s. Works without external jstack (external attach fails under this workload:

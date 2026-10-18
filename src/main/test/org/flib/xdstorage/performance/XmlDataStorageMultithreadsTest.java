@@ -378,7 +378,7 @@ public class XmlDataStorageMultithreadsTest {
         // потоков (диагностика livelock без внешнего jstack) и прерываем ожидание.
         final Thread watchdog = new Thread(() -> {
             try {
-                Thread.sleep(120_000);
+                Thread.sleep(60_000);
             } catch (final InterruptedException e) {
                 return;
             }
@@ -388,6 +388,7 @@ public class XmlDataStorageMultithreadsTest {
                     System.err.println("--- " + t.getName() + " ---");
                     for (final StackTraceElement f : frames) System.err.println("    " + f);
                 });
+                throw new RuntimeException("interruption");
             }
         });
         watchdog.setDaemon(true);
