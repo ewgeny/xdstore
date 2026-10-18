@@ -46,7 +46,15 @@ public class XdStorageYamlBlockContainersReader {
         }
 
         Class<?> cl = Class.forName(classToken.value);
-        Collection<Object> collection = (Collection<Object>) cl.newInstance();
+        Collection<Object> collection;
+        try {
+            collection = (Collection<Object>) cl.newInstance();
+        } catch (final Exception e) {
+            // Неинстанцируемый класс коллекции (обертка java.util.Collections$SynchronizedList и т.п.) —
+            // канонический фолбэк LinkedList; владелец-нода сама оборачивает списки
+            // в synchronized-обертки в setKeys/setObjects/setChildren.
+            collection = new java.util.LinkedList<>();
+        }
 
         YamlLineToken token;
         while ((token = tokenizer.peekToken()) != null) {
@@ -105,7 +113,13 @@ public class XdStorageYamlBlockContainersReader {
         }
 
         Class<?> cl = Class.forName(classToken.value);
-        Map<Object, Object> map = (Map<Object, Object>) cl.newInstance();
+        Map<Object, Object> map;
+        try {
+            map = (Map<Object, Object>) cl.newInstance();
+        } catch (final Exception e) {
+            // Неинстанцируемый класс карты (обертка Collections$SynchronizedMap и т.п.)
+            map = new java.util.HashMap<>();
+        }
 
         YamlLineToken token;
         while ((token = tokenizer.peekToken()) != null) {

@@ -121,18 +121,52 @@ public class XdStorageYamlBlockObjectsWriter {
             emitter.writeScalar("'" + entityClass.getName() + "'");
             Object targetId = targetIdField.get(value);
             if (targetId != null) {
-                emitter.writeKey("objectId");
-                emitter.writeScalar("'" + targetId + "'");
+                final Class<?> idClass = XdStorageObjectUtils.getEntityClass(targetId.getClass());
+                if (idClass == Class.class) {
+                    emitter.writeKey("objectId");
+                    emitter.writeScalar("'" + ((Class<?>) targetId).getName() + "'");
+                } else if (XdStorageObjectUtils.isSimpleType(idClass, null)) {
+                    emitter.writeKey("objectId");
+                    emitter.writeScalar("'" + targetId + "'");
+                } else {
+                    // Составной идентификатор пишется вложенным объектом — симметрично readReference;
+                    // openBlock, а не writeKey: ключ блочного значения обязан занимать свою строку
+                    emitter.openBlock("objectId");
+                    emitter.openBlock("object");
+                    writeObjectData(targetId, emitter, services, simpleTypeHelper, idGenerator);
+                    emitter.closeBlock();
+                    emitter.closeBlock();
+                }
             }
             emitter.closeBlock();
         }
     }
 
-    public static void writeReferenceData(final Object reference, final XdStorageObjectIdField field, final XdStorageYamlEmitter emitter) throws IOException {
+    public static void writeReferenceData(final Object reference, final XdStorageObjectIdField field, final XdStorageYamlEmitter emitter,
+                                          final XdStorageServicesLocator services,
+                                          final IXdStorageSimpleTypeHelper simpleTypeHelper,
+                                          final IXdStorageIdGenerator idGenerator) throws IOException, XdStorageException {
+        final Object value = field.get(reference);
         emitter.writeKey("class");
         emitter.writeScalar("'" + XdStorageObjectUtils.getEntityClass(reference.getClass()).getName() + "'");
-        emitter.writeKey("objectId");
-        emitter.writeScalar("'" + field.get(reference).toString() + "'");
+        final Class<?> valueClass = XdStorageObjectUtils.getEntityClass(value.getClass());
+        if (valueClass == Class.class) {
+            // Идентификатор — java.lang.Class: как в XML-формате пишется именем класса скаляром
+            emitter.writeKey("objectId");
+            emitter.writeScalar("'" + ((Class<?>) value).getName() + "'");
+        } else if (XdStorageObjectUtils.isSimpleType(valueClass, null)) {
+            emitter.writeKey("objectId");
+            emitter.writeScalar("'" + value + "'");
+        } else {
+            // Составной идентификатор (например XdStorageBTreeId): скалярный toString() невосстановим,
+            // пишется вложенным объектом и читается симметричной веткой readReference.
+            // openBlock, а не writeKey: ключ блочного значения обязан занимать свою строку
+            emitter.openBlock("objectId");
+            emitter.openBlock("object");
+            writeObjectData(value, emitter, services, simpleTypeHelper, idGenerator);
+            emitter.closeBlock();
+            emitter.closeBlock();
+        }
     }
 
     public static String encode(final String value) {

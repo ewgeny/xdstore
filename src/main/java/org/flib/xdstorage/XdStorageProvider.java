@@ -20,7 +20,7 @@ public class XdStorageProvider {
     private static Lock lock = new ReentrantLock();
 
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize) {
-        return newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.XML);
+        return newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML);
     }
 
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize, FilesFormat format) {

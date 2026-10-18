@@ -146,6 +146,7 @@ public class XdStorageYamlBlockObjectsReader {
     public static Object readReference(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final XdStorageObjectIdField knownField, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         String className = null;
         String idValue = null;
+        Object idObject = null;
 
         YamlLineToken token;
         while ((token = tokenizer.peekToken()) != null) {
@@ -155,10 +156,19 @@ public class XdStorageYamlBlockObjectsReader {
                 className = token.value;
             } else if ("objectId".equals(token.key) || "dataStorageId".equals(token.key)) {
                 idValue = token.value;
+                if (idValue == null) {
+                    // Составной идентификатор (например XdStorageBTreeId) пишется вложенным объектом —
+                    // симметрично writeReferenceData; скаляром такое значение невосстановимо
+                    YamlLineToken next = tokenizer.peekToken();
+                    if (next != null && next.level > token.level && "object".equals(next.key)) {
+                        tokenizer.nextToken();
+                        idObject = readObject(tokenizer, next.level, simpleTypeHelper);
+                    }
+                }
             }
         }
 
-        if (className == null || idValue == null) return null;
+        if (className == null) return null;
 
         final Class<?> entityClass = Class.forName(className);
         final Object result = entityClass.newInstance();
@@ -167,11 +177,16 @@ public class XdStorageYamlBlockObjectsReader {
         final XdStorageObjectIdField idField = (knownField != null) ? knownField : clInfo.getIdField();
 
         Object objectId;
-        Class<?> idClass = idField.getFieldInfo().getClazz();
-        if (idClass == String.class) {
-            objectId = idValue;
+        if (idObject != null) {
+            objectId = idObject;
         } else {
-            objectId = simpleTypeHelper.simpleTypeFromString(normalizePrimitive(idClass), idValue);
+            if (idValue == null) return null;
+            Class<?> idClass = idField.getFieldInfo().getClazz();
+            if (idClass == String.class) {
+                objectId = idValue;
+            } else {
+                objectId = simpleTypeHelper.simpleTypeFromString(normalizePrimitive(idClass), idValue);
+            }
         }
 
         idField.set(result, objectId);

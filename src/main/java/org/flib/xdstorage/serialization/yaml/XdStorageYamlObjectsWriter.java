@@ -63,7 +63,7 @@ public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
 
                 // Контракт записи чистых транзакционных связей СУБД
                 emitter.openBlock("- reference");
-                XdStorageYamlBlockObjectsWriter.writeReferenceData(ref, field, emitter);
+                XdStorageYamlBlockObjectsWriter.writeReferenceData(ref, field, emitter, services, simpleTypeHelper, idGenerator);
                 emitter.closeBlock();
             }
 

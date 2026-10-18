@@ -43,7 +43,7 @@ class XdStorage implements IXdFileStorage {
      * @param folder Storage path.
      */
     XdStorage(final String name, final String folder, final int fragmentSize) {
-        this(name, folder, fragmentSize, FilesFormat.XML);
+        this(name, folder, fragmentSize, FilesFormat.YAML);
     }
 
     XdStorage(final String name, final String folder, final int fragmentSize, FilesFormat format) {
