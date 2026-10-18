@@ -50,13 +50,20 @@ public class XdStorageDefaultReferenceProvider implements IXdStorageReferencePro
                 if (result == null) {
                     try {
                         final IXdStorageSimpleWrapper tmp = XdStorageObjectUtils.wrapAsSimpleObject(cl.newInstance(), storage, transaction);
-                        if (tmp != null) {
-                            idField.set(tmp, objectId);
+                        // КАНОНИЧЕСКОЕ ИСПРАВЛЕНИЕ (покрыто тестами поискового движка): null-обертка
+                        // (деградация генерации в dummy — JRE без компилятора или класс вне classpath
+                        // рантайм-компилятора) раньше писалась в CHM как null-значение и рвала чтение
+                        // NPE внутри ConcurrentHashMap.put. Теперь отказ - явная диагностируемая ошибка.
+                        if (tmp == null) {
+                            throw new XdStorageException("cannot create simple wrapper reference for "
+                                    + cl.getName() + " (wrapper generation degraded to dummy: check system compiler availability)");
                         }
+                        idField.set(tmp, objectId);
                         transactionClassReferences.put(objectId, tmp);
                         result = tmp;
                     } catch (final Exception e) {
                         transactionClassReferences.remove(objectId);
+                        if (e instanceof XdStorageException) throw (XdStorageException) e;
                         throw new XdStorageException(e);
                     }
                 }

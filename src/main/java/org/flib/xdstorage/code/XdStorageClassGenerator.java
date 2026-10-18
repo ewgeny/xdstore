@@ -79,7 +79,12 @@ public class XdStorageClassGenerator {
         }
 
         final Iterable<? extends JavaFileObject> compilationUnits = Arrays.asList(files);
-        String currentClasspath = System.getProperty("java.class.path");
+        // R-48: под манифест-бутером surefire System.getProperty("java.class.path") содержит
+        // только booter.jar - рантайм-компилятор оберток не видел классы сущностей и молча
+        // деградировал в dummy-обертки (а чтение сущностей падало в CHM.put(null)).
+        // Расширяем classpath кодовыми источниками генерируемого графа: сама сущность,
+        // ее суперклассы и ядро СУБД. В обычном запуске это no-op (они уже в java.class.path).
+        String currentClasspath = buildCompilationClasspath(cl);
         final Iterable<String> options = Arrays.asList("-d", CODE_DIRECTORY, "-classpath", currentClasspath);
         JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, options, null, compilationUnits);
 
@@ -104,5 +109,32 @@ public class XdStorageClassGenerator {
             }
         }
         return new HashMap<>();
+    }
+
+    private static String buildCompilationClasspath(final Class<?> cl) {
+        final java.util.Set<String> entries = new java.util.LinkedHashSet<>();
+        entries.addAll(Arrays.asList(System.getProperty("java.class.path", "").split(File.pathSeparator)));
+        entries.removeIf(String::isEmpty);
+
+        // кодовые источники иерархии сущности (обычно target/test-classes или jar сущности)
+        for (Class<?> c = cl; c != null && c != Object.class; c = c.getSuperclass()) {
+            addCodeSource(entries, c);
+        }
+        // кодовый источник ядра СУБД (все движковые типы, на которые ссылается обертка)
+        addCodeSource(entries, XdStorageClassGenerator.class);
+        addCodeSource(entries, org.flib.xdstorage.observing.XdStorageAbstractIdObserver.class);
+
+        return String.join(File.pathSeparator, entries);
+    }
+
+    private static void addCodeSource(final java.util.Set<String> entries, final Class<?> c) {
+        try {
+            final java.security.CodeSource source = c.getProtectionDomain().getCodeSource();
+            if (source != null && source.getLocation() != null) {
+                entries.add(new File(source.getLocation().toURI()).getAbsolutePath());
+            }
+        } catch (final Exception e) {
+            log.debug("cannot resolve code source of {}", c.getName(), e);
+        }
     }
 }

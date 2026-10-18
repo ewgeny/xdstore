@@ -254,8 +254,12 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
         final XdStoragePolicy policy = clInfo.getPolicy();
 
+        // КАНОНИЧЕСКОЕ ИСПРАВЛЕНИЕ (покрыто интеграционными тестами): ресурс id-индекса существует
+        // ТОЛЬКО для StoreAsClassObjects. Для StoreAsSingleObject lockIndexResource возвращает null
+        // (NPE при сохранении любого индексируемого одиночного объекта); сам resourceId при политике
+        // одиночного объекта не используется - чтение идет через lockObjectResource(clInfo, objectId).
         Object resourceId = null;
-        if (policy == XdStoragePolicy.StoreAsClassObjects || policy == XdStoragePolicy.StoreAsSingleObject) {
+        if (policy == XdStoragePolicy.StoreAsClassObjects) {
             final IXdStorageIndexDaoResource resource = services.getResourcesManager().lockIndexResource(clInfo, transaction);
             resourceId = resource.getObjectResourceId(objectId, transaction);
         }

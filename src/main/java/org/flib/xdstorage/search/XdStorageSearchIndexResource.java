@@ -269,7 +269,10 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         } else {
             final XdStorageSearchKeyIndexRecord newHashIndexRecord = new XdStorageSearchKeyIndexRecord(record.getId(), record.getPrimaryIndexValue());
 
-            keyTree.update((XdStorageSearchIndexKey) record.getId(), newHashIndexRecord, storage, transaction);
+            // КАНОНИЧЕСКОЕ ИСПРАВЛЕНИЕ (покрыто тестами переименования): ключ key-дерева - ид объекта
+            // (Comparable), а НЕ XdStorageSearchIndexKey. Прежний каст бросал ClassCastException на
+            // КАЖДОМ update со сменой первичного значения (переименование), ломая перенос ключа.
+            keyTree.update((Comparable) record.getId(), newHashIndexRecord, storage, transaction);
 
             final XdStorageSearchIndexKey searchIndexKeyToDelete = new XdStorageSearchIndexKey(oldHashIndexRecord.getValue(), oldHashIndexRecord.getObjectId(), XdStorageSearchIndexOperationType.Delete);
             tree.delete(searchIndexKeyToDelete, storage, transaction);
