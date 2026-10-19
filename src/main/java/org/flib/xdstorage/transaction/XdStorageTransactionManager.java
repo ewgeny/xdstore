@@ -4,6 +4,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.IXdStorage;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
+import org.flib.xdstorage.metrics.XdStorageMetrics;
 import org.flib.xdstorage.resource.IXdStorageResourceObject;
 import org.flib.xdstorage.services.XdStorageServicesLocator;
 
@@ -55,6 +56,12 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
                 }
             }
         }
+    }
+
+    private XdStorageMetrics metrics() {
+        // mock-локаторы в юнит-тестах возвращают null — счетчики опциональны, работа нет
+        final XdStorageMetrics m = services.getMetrics();
+        return m != null ? m : new XdStorageMetrics();
     }
 
     @Override
@@ -114,6 +121,8 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         transactionsByThreadId.put(currentThreadId, newTransaction);
         transactionsById.put(newTransactionId, newTransaction);
         transactionActiveThreadsCounter.put(newTransactionId, new AtomicLong(0));
+        metrics().increment(XdStorageMetrics.TRANSACTIONS_BEGUN);
+        metrics().increment(XdStorageMetrics.ACTIVE_TRANSACTIONS);
 
         log.info(String.format("Started transaction %s (timeout %d ms%s)", newTransactionId, timeout,
                 transaction != null ? ", nested in " + transaction.getTransactionId() : ""));
@@ -189,6 +198,8 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         }
 
         transaction.markFinished();
+        metrics().increment(XdStorageMetrics.TRANSACTIONS_COMMITTED);
+        metrics().decrement(XdStorageMetrics.ACTIVE_TRANSACTIONS);
         log.info(String.format("Committed transaction %s", transaction.getTransactionId()));
     }
 
@@ -231,6 +242,8 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         } finally {
             transaction.finishCriticalSection();
         }
+        metrics().increment(XdStorageMetrics.TRANSACTIONS_ROLLED_BACK);
+        metrics().decrement(XdStorageMetrics.ACTIVE_TRANSACTIONS);
 
         resources.stream().forEach(resource -> {
             resource.release(transaction);
@@ -278,6 +291,8 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
                 if (transactionsById.containsKey(transaction.getTransactionId()) && transaction.isRollbackOnly()) {
                     // Аномалия, которую нельзя терять в логах: транзакция не смогла завершиться
                     // сама (таймаут/конфликт) и откатывается уборщиком — все ее изменения теряются.
+                    metrics().increment(XdStorageMetrics.ROLLBACK_ONLY_MARKS);
+                    metrics().increment(XdStorageMetrics.TIMEOUT_SWEPT_ROLLBACKS);
                     log.warn("Rollback-only sweep: transaction {} is being rolled back by the timeout sweeper (its changes are discarded)",
                             transaction.getTransactionId());
                     // БАРЬЕР ЗАЩИТЫ ПОТОКОВ: Фоновый уборщик выполнит откат ресурсов, но жестко ждет,

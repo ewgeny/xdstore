@@ -501,6 +501,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
             // воркеры уходили в шторм аллокаций (snapshot-копии на каждом ретрае,
             // ~2ГБ/мин) и висели намертво. Громкий отказ лучше бесконечного клина.
             if (++findAttempts > MAX_FIND_RETRY_BUDGET) {
+                org.flib.xdstorage.metrics.XdStorageMetrics.engineEvents().increment(org.flib.xdstorage.metrics.XdStorageMetrics.FIND_RETRY_BUDGET_EXHAUSTIONS);
                 log.warn("B+Tree find retry budget exhausted for key {} in tree {} — sustained write pressure (operation failed loudly)", key, id);
                 throw new XdStorageException("find retry budget exhausted by search of idgeneration " + key
                         + " in " + id + ": устойчивая конкуренция за блокировки ребалансировки");

@@ -4,6 +4,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.IXdStoragePredicate;
 import org.flib.xdstorage.IXdStorageWatcher;
+import org.flib.xdstorage.XdStorageConfig;
 import org.flib.xdstorage.exceptions.XdStorageException;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.factories.IXdStorageCloner;
@@ -89,6 +90,12 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         this.structuralNodeCache = clazz != null && clazz.getName().equals("org.flib.xdstorage.btree.XdStorageBTreeNode");
         this.clazz = clazz;
         this.cloner = this.services.getCloner();
+        // O-3: уровень изоляции хранилища задается конфигом при открытии (раньше был
+        // недостижим из публичного API); mock-локаторы в тестах остаются на SNAPSHOT
+        final XdStorageConfig config = services.getStorageConfig();
+        if (config != null && config.getIsolationLevel() != null) {
+            this.isolationLevel = config.getIsolationLevel();
+        }
     }
 
     // =========================================================================

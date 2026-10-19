@@ -739,6 +739,8 @@ public class XdStorageBTreeTest {
     public void testConcurrent_RangeScanUnderMutation_ShouldReturnConsistentCounts() throws Exception {
         // Каноничный легковесный Stub-объект дискового хранилища
         IXdStorage stubStorage = new IXdStorage() {
+            @Override public org.flib.xdstorage.metrics.XdStorageMetrics getMetrics() { return new org.flib.xdstorage.metrics.XdStorageMetrics(); }
+
             @Override public <T> T load(Class<T> cl, Object id, IXdStorageTransaction tx) throws XdStorageException { return null; }
 
             @Override

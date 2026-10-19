@@ -14,6 +14,9 @@ public interface IXdStorage {
 
     String getName();
 
+    /** O-1: operational counters for this storage (see XdStorageMetrics). */
+    org.flib.xdstorage.metrics.XdStorageMetrics getMetrics();
+
     <T> void registerTrigger(IXdStorageTrigger<T> trigger);
 
     IXdStorageTransaction beginTransaction(long timeout);

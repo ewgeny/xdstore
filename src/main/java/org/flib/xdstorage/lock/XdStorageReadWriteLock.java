@@ -123,6 +123,8 @@ public class XdStorageReadWriteLock {
         while (!tryLockWrite()) {
             long elapsed = System.nanoTime() - startTime;
             if (elapsed >= timeout) {
+                org.flib.xdstorage.metrics.XdStorageMetrics.engineEvents()
+                        .increment(org.flib.xdstorage.metrics.XdStorageMetrics.LOCK_ACQUISITION_TIMEOUTS);
                 log.error("Write-lock acquisition failed after {} ms (holder thread: {}, tx: {}){} — timeout or leaked write-lock",
                         elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null,
                         describeLockState());
@@ -142,6 +144,8 @@ public class XdStorageReadWriteLock {
         while (!tryLockRead()) {
             long elapsed = System.nanoTime() - startTime;
             if (elapsed >= timeout) {
+                org.flib.xdstorage.metrics.XdStorageMetrics.engineEvents()
+                        .increment(org.flib.xdstorage.metrics.XdStorageMetrics.LOCK_ACQUISITION_TIMEOUTS);
                 log.error("Read-lock acquisition failed after {} ms (holder thread: {}, tx: {}){} — timeout or leaked write-lock",
                         elapsed / 1_000_000, writeLockThread, transaction != null ? transaction.getTransactionId() : null,
                         describeLockState());
@@ -179,6 +183,8 @@ public class XdStorageReadWriteLock {
     private void logLockContention(final long startTimeNanos, final String kind, final IXdStorageTransaction transaction) {
         final long waitedMs = (System.nanoTime() - startTimeNanos) / 1_000_000;
         if (waitedMs >= 1000) {
+            org.flib.xdstorage.metrics.XdStorageMetrics.engineEvents()
+                    .increment(org.flib.xdstorage.metrics.XdStorageMetrics.LOCK_WAITS_OVER_1S);
             log.warn("{}-lock acquired after {} ms — possible write-lock leak (holder: {}) or reader starvation",
                     kind, waitedMs, writeLockThread);
         }

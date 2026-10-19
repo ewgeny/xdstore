@@ -17,6 +17,11 @@ public class MockStorage implements IXdStorage {
     }
 
     @Override
+    public org.flib.xdstorage.metrics.XdStorageMetrics getMetrics() {
+        return new org.flib.xdstorage.metrics.XdStorageMetrics();
+    }
+
+    @Override
     public <T> void registerTrigger(IXdStorageTrigger<T> trigger) {
 
     }
