@@ -192,6 +192,34 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         cache.remove(id);
     }
 
+    /**
+     * W-2: per-transaction materialization budget (XdStorageConfig.txMaterializedObjectsCap,
+     * 0 = unlimited). Checked at the exit of every READ-path materialization; WRITE_OUT
+     * (коммитная выписка) сознательно не бюджетируется. Превышение — громкий отказ с
+     * подсказкой вместо молчаливого роста кучи до OOM.
+     */
+    /** W-2: бюджет включают ТОЛЬКО ресурсы пользовательских данных (id-индексы — служебные записи, не бюджетируются). */
+    private volatile boolean enforceMaterializationBudget;
+
+    public void setEnforceMaterializationBudget(final boolean value) {
+        this.enforceMaterializationBudget = value;
+    }
+
+    private void checkMaterializationBudget(final XdStorageTransaction transaction,
+                                            final Map<Object, XdStorageCacheObjectChange> readObjects)
+            throws XdStorageException {
+        if (!enforceMaterializationBudget || readObjects == null) {
+            return;
+        }
+        final XdStorageConfig config = services.getStorageConfig();
+        final long cap = config != null ? config.getTxMaterializedObjectsCap() : 0L;
+        if (cap > 0 && readObjects.size() > cap) {
+            throw new XdStorageException("transaction " + transaction.getTransactionId()
+                    + " materialization budget exceeded: " + readObjects.size() + " materialized objects > cap " + cap
+                    + " — narrow the query (predicate / index search / watch) or raise txMaterializedObjectsCap");
+        }
+    }
+
     public <T> void fillCacheOnlyIfNotExists(final Collection<T> objects) {
         for (final Object object : objects) {
             final Object objectCanonical = adoptCanonicalInstance(object);
@@ -307,7 +335,9 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     public <T> Collection<T> read(final XdStorageTransaction transaction, final IXdStoragePredicate<T> predicate) throws XdStorageException {
         transaction.startCriticalSection();
         try {
-            return readInternal(transaction, predicate);
+            final Collection<T> result = readInternal(transaction, predicate);
+            checkMaterializationBudget(transaction, workspace.readObjectsOf(transaction));
+            return result;
         } finally {
             transaction.finishCriticalSection();
         }
@@ -422,6 +452,7 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         transaction.startCriticalSection();
         try {
             watchInternal(transaction, watcher);
+            checkMaterializationBudget(transaction, workspace.readObjectsOf(transaction));
         } finally {
             transaction.finishCriticalSection();
         }
@@ -519,7 +550,9 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     public <T> Collection<T> read(final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
-            return readInternal(transaction);
+            final Collection<T> result = readInternal(transaction);
+            checkMaterializationBudget(transaction, workspace.readObjectsOf(transaction));
+            return result;
         } finally {
             transaction.finishCriticalSection();
         }
@@ -636,7 +669,9 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     public Object read(final Object id, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
-            return readInternal(id, transaction);
+            final Object result = readInternal(id, transaction);
+            checkMaterializationBudget(transaction, workspace.readObjectsOf(transaction));
+            return result;
         } finally {
             transaction.finishCriticalSection();
         }
@@ -735,6 +770,7 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         transaction.startCriticalSection();
         try {
             readByReferenceInternal(reference, transaction);
+            checkMaterializationBudget(transaction, workspace.readObjectsOf(transaction));
         } finally {
             transaction.finishCriticalSection();
         }
