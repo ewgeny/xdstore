@@ -265,17 +265,30 @@ private String name;
 ```java
 IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize);
 IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML);
+IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize, XdStorageConfig.defaults());
+IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML, config);
 ```
 
 - `name` — logical storage name. The provider keeps a **registry**: calling `newOrGetFileStorage` again with
   the same name returns the *existing* instance (until `shutdown()`), even if the folder was deleted and
   recreated.
-- `folder` — the directory holding all storage files (created on demand).
+- `folder` — the directory holding all storage files (created on demand). The folder is **exclusively
+  locked** for the storage's lifetime (`.xdstorage.lock`): a second process — or a second instance in the
+  same JVM — on the same folder fails loudly with `XdStorageFolderLock.XdStorageInUseException` instead of
+  corrupting data. The lock is released by `shutdown()`.
 - `fragmentSize` — number of objects per fragment file for the `StoreAsClassObjects` policy.
 - `FilesFormat` — `YAML` (default), `XML` or `JSON`.
+- `XdStorageConfig` — open-time knobs (all defaults reproduce the pre-config behavior):
+  `durableWrites` (fsync file+directory per commit — power-loss safe at fsync cost),
+  `acceptMissingEofSentinel` (legacy migration: open pre-sentinel storages instead of failing loudly on
+  truncated files), `daemonWorkerThreads` (worker pool cannot block JVM exit), `registerShutdownHook`
+  (best-effort `shutdown()` on JVM exit), `workerPoolSize`, `defaultTransactionTimeoutMillis`,
+  `isolationLevel` (`SNAPSHOT` default, `READ_COMMITTED`).
 
-`shutdown()` **must be called** when you are done: it stops the storage worker threads and removes the
-instance from the provider registry, allowing the name/folder to be reopened cleanly afterwards.
+`shutdown()` **must be called** when you are done: it stops the storage worker threads, releases the folder
+lock and removes the instance from the provider registry, allowing the name/folder to be reopened cleanly
+afterwards. It is idempotent; after it, every storage call throws a loud `XdStorageRuntimeException`
+("storage ... is shut down") instead of failing deep inside the engine.
 
 The `IXdFileStorage` interface extends `IXdStorage`, so every storage also exposes `getName()`,
 `getTransactionManager()`, and trigger registration.
@@ -562,8 +575,12 @@ List<IXdStorageStructureUpdater> executed = storage.executeStructureUpdate(MyEnt
 - **Runtime code generation.** For each entity class the storage generates wrapper classes at first use:
   an *observable* wrapper (write-through + deferred-id observation) and an *unmodifiable* wrapper (the
   snapshot view handed to readers). This is why entities must be top-level classes with full getters/setters.
-- **Worker threads.** Each storage instance owns a fixed thread pool (15 threads) used for parallel resource
-  I/O during load/commit. Always call `shutdown()` when finished.
+- **Worker threads.** Each storage instance owns a fixed thread pool (default 15, `workerPoolSize`) of named
+  `xdstorage-worker-N` threads used for parallel resource I/O during load/commit, the timeout sweeper and
+  triggers. Threads are non-daemon by default (pre-config behavior); with
+  `XdStorageConfig.builder().daemonWorkerThreads(true)` a forgotten `shutdown()` cannot block JVM exit.
+  Always call `shutdown()` when finished — it is idempotent and optionally registered as a JVM shutdown
+  hook (`registerShutdownHook(true)`).
 - **Resource layout.** A storage folder contains fragment files per class resource, reference files for
   `StoreAsSingleObject` classes, id-index files (hash/B+tree persisted as B+tree nodes), search-index
   trees, and structure metadata. Fragment size caps the number of objects per `StoreAsClassObjects`
@@ -598,12 +615,15 @@ java -cp "$CP" org.flib.xdstorage.performance.XdStoragePerformanceBenchmark
 Worth knowing before production use (details and remediation plan in
 [docs/SRE-OPTIMIZATION-PLAN.md](docs/SRE-OPTIMIZATION-PLAN.md)):
 
-- **One process per storage folder.** There is no cross-process file lock — concurrent access from several
-  JVMs to the same folder corrupts state. The provider's per-name singleton is per-JVM only.
-- **Not power-safe yet.** Commits are written without `fsync`, so an OS/power crash may lose the most recent
-  commits (process crashes are handled by transaction rollback).
+- **One process per storage folder (enforced).** The folder is locked exclusively for the storage's
+  lifetime; a second opener fails loudly instead of corrupting data.
+- **Power safety is opt-in.** By default commits are process-crash-safe but not power-loss-safe
+  (no `fsync`); pass `XdStorageConfig.builder().durableWrites(true)` for `fsync`-per-commit durability.
+  A truncated resource file fails loudly at open (EOF sentinel); legacy pre-sentinel storages open once
+  with `acceptMissingEofSentinel(true)`.
 - **Whole-file rewrite per commit.** Each commit rewrites every touched resource file, which dominates
-  write latency for large resources (a journal-based writer is on the roadmap).
+  write latency for large resources (a journal-based writer is on the roadmap,
+  [docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md)).
 - `StoreWithParentObject` classes cannot be stored top-level: only `StoreAsClassObjects` /
   `StoreAsSingleObject` classes can be passed to `save`/`load`.
 - Nested entity classes are not supported (runtime codegen limitation, see above).
@@ -629,6 +649,9 @@ Notes:
 - [docs/OPTIMIZATION-PLAN.md](docs/OPTIMIZATION-PLAN.md) — performance/architecture optimization backlog.
 - [docs/SRE-OPTIMIZATION-PLAN.md](docs/SRE-OPTIMIZATION-PLAN.md) — operational hardening plan
   (durability, locking, metrics).
+- [docs/EMBEDDING.md](docs/EMBEDDING.md) — the embedding contract (threads, statics, codegen, lifecycle).
+- [docs/FLAKY.md](docs/FLAKY.md) — known flaky test families and quarantine conventions.
+- [docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md) — journal-based commit design (the write-path roadmap).
 
 Main packages (`org.flib.xdstorage`):
 
