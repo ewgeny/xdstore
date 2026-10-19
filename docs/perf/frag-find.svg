@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="420" viewBox="0 0 860 420" font-family="DejaVu Sans,Verdana,Arial,sans-serif">
+<rect width="100%" height="100%" fill="white"/>
+<text x="78" y="26" font-size="17" font-weight="bold" fill="#222">Fragment size: point lookup latency vs fragment size</text>
+<text x="78" y="46" font-size="12" fill="#666">Hash id index, N=5000, YAML, serial single-thread</text>
+<line x1="78" y1="64.0" x2="836" y2="64.0" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="68.0" font-size="11" fill="#555" text-anchor="end">0.0</text>
+<line x1="78" y1="126.2" x2="836" y2="126.2" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="130.2" font-size="11" fill="#555" text-anchor="end">5.0</text>
+<line x1="78" y1="188.3" x2="836" y2="188.3" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="192.3" font-size="11" fill="#555" text-anchor="end">10.0</text>
+<line x1="78" y1="250.5" x2="836" y2="250.5" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="254.5" font-size="11" fill="#555" text-anchor="end">15.0</text>
+<line x1="78" y1="312.6" x2="836" y2="312.6" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="316.6" font-size="11" fill="#555" text-anchor="end">20.0</text>
+<line x1="102.4" y1="354" x2="102.4" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="102.4" y="372" font-size="11" fill="#555" text-anchor="middle">10</text>
+<line x1="354.2" y1="354" x2="354.2" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="354.2" y="372" font-size="11" fill="#555" text-anchor="middle">100</text>
+<line x1="606.0" y1="354" x2="606.0" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="606.0" y="372" font-size="11" fill="#555" text-anchor="middle">1000</text>
+<line x1="78" y1="354" x2="836" y2="354" stroke="#333" stroke-width="1.5"/>
+<line x1="78" y1="64" x2="78" y2="354" stroke="#333" stroke-width="1.5"/>
+<text x="457" y="396" font-size="12" fill="#333" text-anchor="middle">objects per fragment (log)</text>
+<text x="18" y="209" font-size="12" fill="#333" text-anchor="middle" transform="rotate(-90 18 209)">µs per op</text>
+<polyline points="78.0,337.6 229.6,290.4 381.2,295.4 532.8,292.4 684.4,291.2 836.0,276.7" fill="none" stroke="#1f77b4" stroke-width="2.2"/>
+<circle cx="78.0" cy="337.6" r="3.4" fill="#1f77b4"/>
+<circle cx="229.6" cy="290.4" r="3.4" fill="#1f77b4"/>
+<circle cx="381.2" cy="295.4" r="3.4" fill="#1f77b4"/>
+<circle cx="532.8" cy="292.4" r="3.4" fill="#1f77b4"/>
+<circle cx="684.4" cy="291.2" r="3.4" fill="#1f77b4"/>
+<circle cx="836.0" cy="276.7" r="3.4" fill="#1f77b4"/>
+<rect x="659.2" y="70.0" width="166" height="20" fill="white" stroke="#ddd"/>
+<rect x="667.2" y="79.0" width="12" height="4" fill="#1f77b4"/>
+<text x="685.2" y="84.0" font-size="11.5" fill="#333">batched find, µs/op</text>
+</svg>

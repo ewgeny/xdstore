@@ -1,0 +1,115 @@
+{
+  "tag": "search",
+  "recorded": "2026-10-19T17:42:25.182009277+07:00[Asia/Novosibirsk]",
+  "format": "YAML",
+  "results": [
+    {
+      "suite": "search",
+      "entity": "SweepSearchShipT8",
+      "t": 8,
+      "frag": 512,
+      "n": 2500,
+      "jvm": "21.0.7 / Linux",
+      "error": null,
+      "heapUsedMb": 22.846,
+      "wallTotalMs": 1550,
+      "phases": {
+        "openMs": 5.596,
+        "preloadMs": 392.455,
+        "preloadOpsPerS": 6370.157,
+        "commitMeanMs": 40.271,
+        "searchEqualsUsPerOp": 20.571,
+        "searchEqualsOpsPerS": 48612.814,
+        "searchChildUsPerOp": 53.849,
+        "searchScanMs": 53.433,
+        "reopenMs": 21.461,
+        "coldFirstSearchMs": 19.479,
+        "coldSearchUsPerOp": 162.972
+      },
+      "stats": {
+        "bytesAfterPreload": 13445726,
+        "peakFilesTotal": 833,
+        "peakBytesTotal": 13445666,
+        "peakEntityFiles": 9,
+        "peakEntityBytes": 4301708,
+        "peakTreeFiles": 823,
+        "peakTreeBytes": 9143637},
+      "metricDeltas": {
+        "preload": {"resourceWriteOutNanos": 194382823,"resourceWriteOuts": 962,"rollbackOnlyMarks": 0,"timeoutSweptRollbacks": 0,"transactionsBegun": 14,"transactionsCommitted": 14,"writeOutAvgUsPerFile": 202}
+      },
+      "engineEvents": {}
+    },
+    {
+      "suite": "search",
+      "entity": "SweepSearchShipT64",
+      "t": 64,
+      "frag": 512,
+      "n": 2500,
+      "jvm": "21.0.7 / Linux",
+      "error": null,
+      "heapUsedMb": 22.601,
+      "wallTotalMs": 1400,
+      "phases": {
+        "openMs": 14.021,
+        "preloadMs": 280.593,
+        "preloadOpsPerS": 8909.698,
+        "commitMeanMs": 22.619,
+        "searchEqualsUsPerOp": 20.407,
+        "searchEqualsOpsPerS": 49003.666,
+        "searchChildUsPerOp": 52.416,
+        "searchScanMs": 53.204,
+        "reopenMs": 17.102,
+        "coldFirstSearchMs": 15.629,
+        "coldSearchUsPerOp": 133.898
+      },
+      "stats": {
+        "bytesAfterPreload": 11970287,
+        "peakFilesTotal": 133,
+        "peakBytesTotal": 11970227,
+        "peakEntityFiles": 9,
+        "peakEntityBytes": 4304208,
+        "peakTreeFiles": 123,
+        "peakTreeBytes": 7665698},
+      "metricDeltas": {
+        "preload": {"resourceWriteOutNanos": 110498878,"resourceWriteOuts": 168,"rollbackOnlyMarks": 0,"timeoutSweptRollbacks": 0,"transactionsBegun": 7,"transactionsCommitted": 7,"writeOutAvgUsPerFile": 657}
+      },
+      "engineEvents": {}
+    },
+    {
+      "suite": "search",
+      "entity": "SweepSearchShipT500",
+      "t": 500,
+      "frag": 512,
+      "n": 2500,
+      "jvm": "21.0.7 / Linux",
+      "error": null,
+      "heapUsedMb": 20.854,
+      "wallTotalMs": 2637,
+      "phases": {
+        "openMs": 14.873,
+        "preloadMs": 1413.389,
+        "preloadOpsPerS": 1768.798,
+        "commitMeanMs": 25.963,
+        "searchEqualsUsPerOp": 26.331,
+        "searchEqualsOpsPerS": 37977.776,
+        "searchChildUsPerOp": 56.91,
+        "searchScanMs": 52.451,
+        "reopenMs": 21.818,
+        "coldFirstSearchMs": 34.35,
+        "coldSearchUsPerOp": 151.879
+      },
+      "stats": {
+        "bytesAfterPreload": 11843249,
+        "peakFilesTotal": 67,
+        "peakBytesTotal": 11843189,
+        "peakEntityFiles": 9,
+        "peakEntityBytes": 4306708,
+        "peakTreeFiles": 57,
+        "peakTreeBytes": 7536160},
+      "metricDeltas": {
+        "preload": {"resourceWriteOutNanos": 127429794,"resourceWriteOuts": 98,"rollbackOnlyMarks": 0,"timeoutSweptRollbacks": 0,"transactionsBegun": 6,"transactionsCommitted": 6,"writeOutAvgUsPerFile": 1300}
+      },
+      "engineEvents": {}
+    }
+  ]
+}

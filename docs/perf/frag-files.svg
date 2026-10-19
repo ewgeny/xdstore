@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="420" viewBox="0 0 860 420" font-family="DejaVu Sans,Verdana,Arial,sans-serif">
+<rect width="100%" height="100%" fill="white"/>
+<text x="78" y="26" font-size="17" font-weight="bold" fill="#222">Fragment size: number of data files vs fragment size</text>
+<text x="78" y="46" font-size="12" fill="#666">Hash id index, N=5000, YAML, serial single-thread</text>
+<line x1="78" y1="145.2" x2="836" y2="145.2" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="149.2" font-size="11" fill="#555" text-anchor="end">10.0</text>
+<line x1="78" y1="261.4" x2="836" y2="261.4" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="265.4" font-size="11" fill="#555" text-anchor="end">100.0</text>
+<line x1="102.4" y1="354" x2="102.4" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="102.4" y="372" font-size="11" fill="#555" text-anchor="middle">10</text>
+<line x1="354.2" y1="354" x2="354.2" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="354.2" y="372" font-size="11" fill="#555" text-anchor="middle">100</text>
+<line x1="606.0" y1="354" x2="606.0" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="606.0" y="372" font-size="11" fill="#555" text-anchor="middle">1000</text>
+<line x1="78" y1="354" x2="836" y2="354" stroke="#333" stroke-width="1.5"/>
+<line x1="78" y1="64" x2="78" y2="354" stroke="#333" stroke-width="1.5"/>
+<text x="457" y="396" font-size="12" fill="#333" text-anchor="middle">objects per fragment (log)</text>
+<text x="18" y="209" font-size="12" fill="#333" text-anchor="middle" transform="rotate(-90 18 209)">files (log)</text>
+<polyline points="78.0,354.0 229.6,284.5 381.2,216.4 532.8,150.0 684.4,99.0 836.0,64.0" fill="none" stroke="#1f77b4" stroke-width="2.2"/>
+<circle cx="78.0" cy="354.0" r="3.4" fill="#1f77b4"/>
+<circle cx="229.6" cy="284.5" r="3.4" fill="#1f77b4"/>
+<circle cx="381.2" cy="216.4" r="3.4" fill="#1f77b4"/>
+<circle cx="532.8" cy="150.0" r="3.4" fill="#1f77b4"/>
+<circle cx="684.4" cy="99.0" r="3.4" fill="#1f77b4"/>
+<circle cx="836.0" cy="64.0" r="3.4" fill="#1f77b4"/>
+<rect x="659.2" y="70.0" width="166" height="20" fill="white" stroke="#ddd"/>
+<rect x="667.2" y="79.0" width="12" height="4" fill="#1f77b4"/>
+<text x="685.2" y="84.0" font-size="11.5" fill="#333">data fragment files</text>
+</svg>

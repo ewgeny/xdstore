@@ -1,0 +1,49 @@
+[    0.0s] mode=all n=5000 jvm=21.0.7
+2026-10-19T10:38:42.757239321Z main ERROR Reconfiguration failed: No configuration found for '639fee48' at 'null' in 'null'
+[    9.1s] config SweepBTreeT2Entity (t=2 frag=512) done in 9.1s 
+[   12.9s] config SweepBTreeT4Entity (t=4 frag=512) done in 3.8s 
+[   16.1s] config SweepBTreeT8Entity (t=8 frag=512) done in 3.2s 
+[   19.0s] config SweepBTreeT16Entity (t=16 frag=512) done in 2.9s 
+[   21.9s] config SweepBTreeT32Entity (t=32 frag=512) done in 2.8s 
+[   24.7s] config SweepBTreeT64Entity (t=64 frag=512) done in 2.8s 
+[   27.5s] config SweepBTreeT128Entity (t=128 frag=512) done in 2.8s 
+[   31.4s] config SweepBTreeT500Entity (t=500 frag=512) done in 4.0s 
+
+=== tsweep ===
+entity                       t   frag |  insertMs   insOps/s   commitMs |   findUsOp   findTx/s |    files  bytes(MB) |  heapMB
+SweepBTreeT2Entity           2    512 |      2256       2216      128.9 |      15.85      63105 |    10000      21.86 |      16 
+SweepBTreeT4Entity           4    512 |       397      12583       25.4 |      13.10      76313 |     2239       8.09 |      14 
+SweepBTreeT8Entity           8    512 |       201      24903       11.2 |      12.01      83251 |      837       5.51 |      14 
+SweepBTreeT16Entity         16    512 |       132      37822        7.0 |      12.34      81060 |      376       4.66 |      14 
+SweepBTreeT32Entity         32    512 |       132      37823        6.1 |      12.22      81807 |      189       4.30 |      14 
+SweepBTreeT64Entity         64    512 |       101      49575        3.7 |      12.38      80773 |      102       4.14 |      14 
+SweepBTreeT128Entity       128    512 |       145      34562        3.3 |      13.41      74577 |       62       4.08 |      14 
+SweepBTreeT500Entity       500    512 |      1177       4246        3.4 |      15.56      64261 |       33       4.02 |      14 
+
+[   55.2s] config SweepHashEntity (t=0 frag=8) done in 23.7s 
+[   78.5s] config SweepHashEntity (t=0 frag=32) done in 23.3s 
+[  103.3s] config SweepHashEntity (t=0 frag=128) done in 24.8s 
+[  130.3s] config SweepHashEntity (t=0 frag=512) done in 27.0s 
+[  165.3s] config SweepHashEntity (t=0 frag=2048) done in 35.0s 
+[  217.0s] config SweepHashEntity (t=0 frag=8192) done in 51.7s 
+
+=== fragsweep ===
+entity                       t   frag |  insertMs   insOps/s   commitMs |   findUsOp   findTx/s |    files  bytes(MB) |  heapMB
+SweepHashEntity              0      8 |       271      18466       11.7 |      22.01      45435 |      626       4.50 |      14 
+SweepHashEntity              0     32 |       196      25456        7.6 |      18.21      54911 |      158       4.49 |      14 
+SweepHashEntity              0    128 |       185      27066        6.6 |      18.61      53723 |       41       4.49 |      14 
+SweepHashEntity              0    512 |       212      23638        7.6 |      18.38      54412 |       11       4.49 |      14 
+SweepHashEntity              0   2048 |       263      18980        9.0 |      18.27      54721 |        4       4.50 |      14 
+SweepHashEntity              0   8192 |       339      14757       10.7 |      17.11      58457 |        2       4.50 |      14 
+
+[  218.6s] search config SweepSearchShipT8 (t=8) done in 1.6s 
+[  220.0s] search config SweepSearchShipT64 (t=64) done in 1.4s 
+[  222.6s] search config SweepSearchShipT500 (t=500) done in 2.6s 
+
+=== search ===
+entity                       t   frag |  insertMs   insOps/s   commitMs |   findUsOp   findTx/s |    files  bytes(MB) |  heapMB
+SweepSearchShipT8            8    512 |       392       6370       40.3 |      20.57      48613 |      833      12.82 |      23 
+SweepSearchShipT64          64    512 |       281       8910       22.6 |      20.41      49004 |      133      11.42 |      23 
+SweepSearchShipT500        500    512 |      1413       1769       26.0 |      26.33      37978 |       67      11.29 |      21 
+
+[  222.6s] DONE mode=all

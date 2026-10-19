@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="420" viewBox="0 0 860 420" font-family="DejaVu Sans,Verdana,Arial,sans-serif">
+<rect width="100%" height="100%" fill="white"/>
+<text x="78" y="26" font-size="17" font-weight="bold" fill="#222">B+Tree id index: commit latency vs t</text>
+<text x="78" y="46" font-size="12" fill="#666">N=5000, fragment=512 obj, YAML, serial single-thread, batch commits of 500</text>
+<line x1="78" y1="145.7" x2="836" y2="145.7" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="149.7" font-size="11" fill="#555" text-anchor="end">10.0</text>
+<line x1="78" y1="317.3" x2="836" y2="317.3" stroke="#e8e8e8" stroke-width="1"/>
+<text x="72" y="321.3" font-size="11" fill="#555" text-anchor="end">100.0</text>
+<line x1="298.9" y1="354" x2="298.9" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="298.9" y="372" font-size="11" fill="#555" text-anchor="middle">10</text>
+<line x1="615.1" y1="354" x2="615.1" y2="64" stroke="#f0f0f0" stroke-width="1"/>
+<text x="615.1" y="372" font-size="11" fill="#555" text-anchor="middle">100</text>
+<line x1="78" y1="354" x2="836" y2="354" stroke="#333" stroke-width="1.5"/>
+<line x1="78" y1="64" x2="78" y2="354" stroke="#333" stroke-width="1.5"/>
+<text x="457" y="396" font-size="12" fill="#333" text-anchor="middle">B+Tree fill factor t (log)</text>
+<text x="18" y="209" font-size="12" fill="#333" text-anchor="middle" transform="rotate(-90 18 209)">ms (log)</text>
+<polyline points="78.0,336.3 173.2,215.2 268.3,154.0 363.5,119.0 458.6,108.3 553.8,70.7 648.9,64.0 836.0,65.6" fill="none" stroke="#1f77b4" stroke-width="2.2"/>
+<circle cx="78.0" cy="336.3" r="3.4" fill="#1f77b4"/>
+<circle cx="173.2" cy="215.2" r="3.4" fill="#1f77b4"/>
+<circle cx="268.3" cy="154.0" r="3.4" fill="#1f77b4"/>
+<circle cx="363.5" cy="119.0" r="3.4" fill="#1f77b4"/>
+<circle cx="458.6" cy="108.3" r="3.4" fill="#1f77b4"/>
+<circle cx="553.8" cy="70.7" r="3.4" fill="#1f77b4"/>
+<circle cx="648.9" cy="64.0" r="3.4" fill="#1f77b4"/>
+<circle cx="836.0" cy="65.6" r="3.4" fill="#1f77b4"/>
+<polyline points="78.0,354.0 173.2,220.2 268.3,160.5 363.5,139.9 458.6,138.8 553.8,92.0 648.9,77.9 836.0,81.7" fill="none" stroke="#d62728" stroke-width="2.2"/>
+<circle cx="78.0" cy="354.0" r="3.4" fill="#d62728"/>
+<circle cx="173.2" cy="220.2" r="3.4" fill="#d62728"/>
+<circle cx="268.3" cy="160.5" r="3.4" fill="#d62728"/>
+<circle cx="363.5" cy="139.9" r="3.4" fill="#d62728"/>
+<circle cx="458.6" cy="138.8" r="3.4" fill="#d62728"/>
+<circle cx="553.8" cy="92.0" r="3.4" fill="#d62728"/>
+<circle cx="648.9" cy="77.9" r="3.4" fill="#d62728"/>
+<circle cx="836.0" cy="81.7" r="3.4" fill="#d62728"/>
+<rect x="695.2" y="92.0" width="130" height="20" fill="white" stroke="#ddd"/>
+<rect x="703.2" y="101.0" width="12" height="4" fill="#d62728"/>
+<text x="721.2" y="106.0" font-size="11.5" fill="#333">max commit, ms</text>
+<rect x="688.0" y="70.0" width="138" height="20" fill="white" stroke="#ddd"/>
+<rect x="696.0" y="79.0" width="12" height="4" fill="#1f77b4"/>
+<text x="714.0" y="84.0" font-size="11.5" fill="#333">mean commit, ms</text>
+</svg>

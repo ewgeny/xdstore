@@ -1,0 +1,4 @@
+suite,entity,t,frag,n,jvm,error,heapUsedMb,wallTotalMs,openMs,preloadMs,preloadOpsPerS,commitMeanMs,searchEqualsUsPerOp,searchEqualsOpsPerS,searchChildUsPerOp,searchScanMs,reopenMs,coldFirstSearchMs,coldSearchUsPerOp,bytesAfterPreload,peakFilesTotal,peakBytesTotal,peakEntityFiles,peakEntityBytes,peakTreeFiles,peakTreeBytes
+search,SweepSearchShipT8,8,512,2500,"21.0.7 / Linux",,22.846,1550,5.596,392.455,6370.157,40.271,20.571,48612.814,53.849,53.433,21.461,19.479,162.972,13445726,833,13445666,9,4301708,823,9143637
+search,SweepSearchShipT64,64,512,2500,"21.0.7 / Linux",,22.601,1400,14.021,280.593,8909.698,22.619,20.407,49003.666,52.416,53.204,17.102,15.629,133.898,11970287,133,11970227,9,4304208,123,7665698
+search,SweepSearchShipT500,500,512,2500,"21.0.7 / Linux",,20.854,2637,14.873,1413.389,1768.798,25.963,26.331,37977.776,56.91,52.451,21.818,34.35,151.879,11843249,67,11843189,9,4306708,57,7536160
