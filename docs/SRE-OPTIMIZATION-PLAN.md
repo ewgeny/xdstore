@@ -166,7 +166,7 @@ and the benchmark documentation discipline.
 Ordering principle: stop the bleeding (data safety) before tuning (performance), make it
 observable before making it faster at scale, and mechanize (CI) what is today discipline.
 
-### Phase 0 — Hygiene quick wins (half a session, zero engine risk)
+### Phase 0 — Hygiene quick wins (half a session, zero engine risk) — **DONE 2026-10-18** (H-1..H-5 landed: junit 4.13.2, postgresql removed, compiler 3.13.0 + release=8 + UTF-8, fake repo block removed, `*_db/` gitignored, JDK policy codified in pom/README)
 
 | # | Item | How |
 |---|------|-----|
@@ -178,7 +178,7 @@ observable before making it faster at scale, and mechanize (CI) what is today di
 
 **Gate:** `mvn clean test` green, one JMH smoke run still produces the expected 9-row table.
 
-### Phase S — Data safety (P0; the items an SRE would block a release on)
+### Phase S — Data safety (P0; the items an SRE would block a release on) — **DONE 2026-10-18** (S-1 sentinel+strict EOF via `XdStorageYamlObjectsWriter/Reader` + `XdStorageConfig.acceptMissingEofSentinel`; S-2 `durableWrites` fsync in `XdStorageAtomicFile`; S-3 `XdStorageFolderLock` — OS lock + same-JVM registry; S-4 closed-guard + `daemonWorkerThreads`/`registerShutdownHook` + `XdStorageConfig`; S-5 `.tmp` sweep + open summary; tests: `reliability/` package, 10 tests; full suite 641/0 green)
 
 | # | Item | Design sketch | Verification |
 |---|------|---------------|--------------|
@@ -194,7 +194,9 @@ green; BENCHMARKS.md re-measured with S-2 on and off.
 ### Phase W — Write-path performance (P1; the big lever, needs its own design round)
 
 This is D-3's full scope. The campaign deliberately parked it because it changes crash/commit
-semantics — so it gets a design document before code.
+semantics — so it gets a design document before code. **Design landed 2026-10-18:
+[WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md) — per-class append journal + checkpointing; W-0
+prerequisites (S-1/S-2) are already in. Implementation is the next campaign.**
 
 1. **Design first (one doc):** append-only commit journal per data class
    (`data/<Class>/journal.<fmt>`): phase-1 appends redo records (op, id, payload) + fsync-able
@@ -220,7 +222,7 @@ semantics — so it gets a design document before code.
 **Gate:** new journal/eviction invariant suites (the R-46 pattern: collaborators + stub context);
 full suite green; before/after JMH table in BENCHMARKS.md; a kill -9 mid-journal recovery test.
 
-### Phase O — Observability & config (P2)
+### Phase O — Observability & config (P2) — **MOSTLY DONE 2026-10-18** (O-1 `XdStorageMetrics` + `storage.getMetrics()` + JVM-wide `engineEvents()` wired at tx lifecycle/write-outs/RW-lock timeouts/BTree budget sites; O-2 RollingFile 3×50MB append=true + `-Dxdstorage.log.file`; O-3 config knobs landed with `XdStorageConfig` in Phase S incl. isolation/timeout/pool; O-4 `docs/EMBEDDING.md`. NOT done: JMX/Micrometer adapter — deliberately left to embedders; per-storage lock counters (RW-lock/BTree are JVM-wide `engineEvents` — deep-component construction wiring rejected as too invasive for a freshly stabilized engine))
 
 1. **Metrics facade (O-1):** an `IXdStorageMetrics` interface — counters for
    commits/rollbacks/rollbackOnly marks, lock-acquisition timeouts & 1s+ waits (the R-24 WARN
@@ -243,7 +245,7 @@ full suite green; before/after JMH table in BENCHMARKS.md; a kill -9 mid-journal
 snapshot-tested against today's constants; full suite green (no hot-path regression in the JMH
 smoke).
 
-### Phase C — CI, tests, docs (P3)
+### Phase C — CI, tests, docs (P3) — **DONE 2026-10-18** (C-1 `.github/workflows/ci.yml`: gate job + nightly ×3 + JMH smoke with row-count assertion, all gated on Maven's own BUILD SUCCESS line; C-2 `-Pquick-gate` surefire profile + `docs/FLAKY.md` ledger; C-3 unique-storage discipline codified in FLAKY.md conventions; C-4 README rewritten against the current API incl. config/limits updates, `docs/EMBEDDING.md`. Note: `XdStore.docx` is historical 1.x-era API docs — kept as-is, the README is the living guide)
 
 1. **CI pipeline (C-1):** one job `mvn clean test` (the R-52 shell gotcha — grep's exit code
    masquerading as build success — is exactly what CI prevents: gate on `BUILD SUCCESS`, archive
@@ -286,5 +288,7 @@ its instructions.
 | C CI/docs | 0.5–1 | 0 | none |
 | W Write-path | 3–5 (design doc first) | S-1, S-2 | medium-high (crash semantics) |
 
-The single most valuable next session: **Phase 0 + S-1 + S-3** — one half-session removes the
-silent-partial-load and concurrent-processes data-loss classes entirely.
+~~The single most valuable next session: Phase 0 + S-1 + S-3~~ **EXECUTED 2026-10-18 — Phases
+0, S, O, C complete and the Phase W design landed; the remaining work is Phase W implementation
+(W-1 journal behind a flag → W-2 checkpointing + cache bounds → W-3 default flip), guided by
+[WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md).**

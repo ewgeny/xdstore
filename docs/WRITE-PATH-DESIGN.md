@@ -1,0 +1,109 @@
+# Write-path design: journal-based commit (Phase W)
+
+Status: **DESIGN DOCUMENT — implementation not started** (SRE-OPTIMIZATION-PLAN Phase W; supersedes
+the parked D-3 "batching" item). One design round is mandatory before any code: this changes
+crash/commit semantics, the hardest class of change in this engine.
+
+## 1. The wall, quantified
+
+Every commit rewrites the ENTIRE file of every touched resource — data fragment(s), id-index tree
+file, search-index file — serially in phase 1 (`XdStorageResource.performFirstPhaseCommit` →
+`writeObjects` → `XdStorageAtomicFile.writeReplacing`). The cost of one small-object commit is
+O(size of every file it touches), and it is I/O on the commit's critical path:
+
+| Benchmark (BENCHMARKS.md, 2026-10-18) | ops/s | dominant cost |
+|---|---|---|
+| save+delete indexed ship w/ crew (2 commits) | ~39 | 2 × full rewrite of fragment + id-index + search-index |
+| update/rename search key (1 commit) | ~75 | full rewrite incl. key transfer |
+| facade save+load+commit | ~127 | full rewrite of one fragment + index |
+| loadById / indexed search (~480) | — | reads are fine; the wall is writes |
+
+10× on writes ⇒ commit cost must become O(delta), not O(file).
+
+## 2. Chosen design: per-class append journal + checkpointing
+
+### 2.1 Layout
+
+```
+<folder>/data/<Class>/journal.yaml          — redo log, append-only
+<folder>/data/<Class>/<Class>[-frag].yaml   — base files (today's format, unchanged)
+<folder>/data/<Class>/journal.checkpoint    — marker: journal offset/serial covered by base files
+```
+
+The base files and the existing full-file writer stay exactly as they are — they become the
+*checkpoint artifact* instead of the per-commit artifact.
+
+### 2.2 Commit path (phase 1 rewrite)
+
+1. Serialize the transaction's changes for each touched class as redo records:
+   `(commitSerial, txId, op=UPSERT|DELETE, id, payload)` — payload is the object body in the
+   existing YAML object-block format; `DELETE` carries id only.
+2. Append records to `journal.yaml` in commit-order priority (same order as today's resource
+   locking), then **one fsync** (`durableWrites=false` → flush only, contract unchanged).
+3. In-memory: apply to caches exactly as today (phase 2 untouched).
+4. Truncate-on-success is NOT done per commit — the journal grows until checkpoint.
+
+Failure semantics: an append interrupted mid-record leaves the journal without the EOF sentinel
+(S-1) → on recovery the torn tail is discarded (base files remain authoritative — same guarantee
+class as today's torn multi-file commit, now confined to the journal instead of data files).
+
+### 2.3 Read/prepare path
+
+`prepare()` = load base files (today's `readObjects`) **+ replay journal records with
+`commitSerial > checkpointSerial`** (id-keyed, last-writer-wins — commit-serial ordering already
+exists via R-45's `assignCommitSerial`). The reader stops at the sentinel; a torn tail is dropped
+with a loud WARN naming the discarded serial range.
+
+### 2.4 Checkpointing
+
+- Trigger: journal bytes > threshold (default 64 MB) OR record count > threshold — checked after
+  commit, executed by the storage's worker pool (never on the committing thread's critical path).
+- Procedure: run today's full-file `writeObjects` for the class (existing writer, existing
+  serialization guard R-43, atomic rename R-11) from the committed cache view; then atomically
+  rename `journal.checkpoint` containing `{serial: maxAppliedCommitSerial}`; then truncate the
+  journal to zero and rewrite the sentinel. Crash between steps is safe: worst case the next
+  recovery replays records the base already covers — replay must be **idempotent** (UPSERT by id
+  is; DELETE of an already-absent id is).
+- The existing "empty resource = no file" semantics move to the checkpoint: a class whose base
+  state is empty deletes its base files as today.
+
+### 2.5 What this preserves
+
+- 2PC shape (prepare/perform across resources) — the journal append *replaces* the phase-1 file
+  rewrite, the phase-2 cache install is untouched.
+- MVCC/serial semantics (R-45 single commit serial per tx drives journal ordering).
+- S-1 sentinel + S-2 durable flags (the journal is just another resource file to them).
+- The legacy migration story: a storage without a journal has checkpoint serial 0 and empty
+  journal — reads behave exactly as today.
+
+## 3. Alternatives considered (and why not chosen)
+
+| Option | Verdict | Reason |
+|---|---|---|
+| (b) Group commit only: accumulate N txs → one full rewrite | rejected as the end state, kept as a fallback | ~N× amplification reduction but still O(file) latency spike per flush; no asymptotic fix; simplest to build (≈2 days) — the designated fallback if the journal stalls |
+| (c) Copy-on-write fragment rotation (write new fragment file, drop old at checkpoint) | rejected | many small files per class, directory churn, breaks the one-file-per-resource contract the canonical registry and prepare() rely on |
+| Binary journal (non-YAML) | deferred | faster but a second serializer to guard (R-43 snapshots, S-1 sentinel); YAML reuses the existing object-block writer verbatim — revisit only if profiled as the bottleneck |
+
+## 4. Risk register
+
+1. **Recovery correctness** — the journal is new persisted state. Gate: kill-9 mid-journal
+   recovery tests (torn tail, checkpoint crash windows) + full suite.
+2. **Idempotent replay under in-place infra mutations** — B+tree node graphs are NOT journalable
+   as records; **scope: journal covers data + search-index classes only; id-index/B+tree infra
+   keeps the full-file write-out** until structural versioning exists (Phase 3b's frozen core).
+   This caps the win for index-heavy writes but keeps the tree out of the blast radius.
+3. **Journal growth without checkpoints** (read-only workload appending forever) — size-threshold
+   checkpoint bounds it; plus `journal.yaml` is a resource file, so S-5 sweeps its `.tmp`s.
+4. **Threading** — appends serialize per class (the commit-order lock already serializes phase-1
+   per resource today; unchanged).
+
+## 5. Sequencing
+
+1. **W-0 (prerequisite, DONE 2026-10-18):** S-1 sentinel + S-2 durable — the journal leans on both.
+2. **W-1:** journal writer/reader + prepare-replay behind a config flag (`journalWrites=false`
+   default); invariant tests (replay idempotency, torn tail, checkpoint windows).
+3. **W-2:** checkpointing + cache-bounds ship together (cache caps: cold committed-record LRU,
+   re-loadable from base+journal on demand).
+4. **W-3:** flip default behind the flag after a soak run; re-measure BENCHMARKS.md (acceptance:
+   `saveAndDelete` ≥ 10× (38.7 → 400+ ops/s), facade flow ≥ 8× (127 → 1000+), `loadById` unchanged
+   ±10%, kill-9 recovery green).
