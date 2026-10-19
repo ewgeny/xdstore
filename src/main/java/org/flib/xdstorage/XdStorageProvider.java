@@ -18,9 +18,29 @@ public class XdStorageProvider {
 
     private static final Logger log = LogManager.getLogger(XdStorageProvider.class);
 
+    /**
+     * РАЗМЕР ФРАГМЕНТА ПО УМОЛЧАНИЮ (объектов на файл класса, политика StoreAsClassObjects).
+     * 128 — измеренный оптимум конфигурационного свипа (docs/PERFORMANCE-RECOMMENDATIONS.md §5):
+     * минимум латентности коммита, лучшая скорость вставки, ровные сканы; ~десятки-сотни КБ на файл
+     * для типичных небольших сущностей. Файлы фрагментов > ~1 МБ — красный флаг (перезапись целого
+     * файла на каждый коммит), < ~10 КБ — накладные расходы на файл (холодный скан, открытые fd).
+     * Диапазон 128-512 оставляет запас для сущностей крупнее эталонных ~430 байт.
+     */
+    public static final int DEFAULT_FRAGMENT_SIZE = 128;
+
     private static Map<String, XdStorage> storages = new ConcurrentHashMap<>();
 
     private static Lock lock = new ReentrantLock();
+
+    /** Открытие с рекомендованным размером фрагмента {@link #DEFAULT_FRAGMENT_SIZE} и конфигурацией по умолчанию (YAML). */
+    public static IXdFileStorage newOrGetFileStorage(final String name, final String folder) {
+        return newOrGetFileStorage(name, folder, DEFAULT_FRAGMENT_SIZE, FilesFormat.YAML, XdStorageConfig.defaults());
+    }
+
+    /** Открытие с рекомендованным размером фрагмента {@link #DEFAULT_FRAGMENT_SIZE}, явной конфигурацией, формат YAML. */
+    public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final XdStorageConfig config) {
+        return newOrGetFileStorage(name, folder, DEFAULT_FRAGMENT_SIZE, FilesFormat.YAML, config);
+    }
 
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize) {
         return newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML, XdStorageConfig.defaults());

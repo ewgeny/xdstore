@@ -8,12 +8,12 @@ import org.flib.xdstorage.index.XdStorageIndexType;
 import java.util.*;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
-@XdStorageObjectSearchIndex(indexName = "planet_idx", indexFieldNames = {"name", "waterPercent"}, t = 500,
+@XdStorageObjectSearchIndex(indexName = "planet_idx", indexFieldNames = {"name", "waterPercent"}, t = 64,
     childrenIndexes = {
         @XdStorageObjectChildSearchIndex(childFieldName = "satellite", childClassIndexName = "satellite_idx"),
         @XdStorageObjectChildSearchIndex(childFieldName = "colSatellites", childClassIndexName = "satellite_idx")
 })
-@XdStorageObjectIdIndexType(indexType = XdStorageIndexType.BTree, t = 20)
+@XdStorageObjectIdIndexType(indexType = XdStorageIndexType.BTree, t = 64)
 public class XdPlanet {
 
     @XdStorageObjectId

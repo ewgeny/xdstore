@@ -13,7 +13,13 @@ public @interface XdStorageObjectSearchIndex {
 
     String[] indexFieldNames();
 
-    int t() default 500;
+    /**
+     * B+Tree fill factor for the two per-index trees (main value tree + key tree).
+     * Default 64 — the measured optimum of the config sweep (docs/PERFORMANCE-RECOMMENDATIONS.md §7):
+     * best indexed-insert throughput and cold-search latency. The pre-study default 500 is ~5×
+     * slower on indexed inserts and pays tens of ms on the first cold query.
+     */
+    int t() default 64;
 
     XdStorageObjectChildSearchIndex[] childrenIndexes() default {};
 }

@@ -22,9 +22,9 @@ Harness: `org.flib.xdstorage.performance.sweep.XdStorageConfigSweep` (test sourc
 | Question | Recommendation |
 |---|---|
 | **Id index type** | **Both are restart-safe now (R-53) — choose by workload:** **Hash** (default) for the best cold-read-after-restart (52 µs/op vs 87), the fewest files (12 vs 101), and the simplest ops story; **B+Tree t=64** for insert-heavy and long-running warm workloads (bulk insert 49.6k vs 23.6k ops/s, read-with-tx 591 vs 40 ops/s). See [§7.1](#71-id-index-choice-hash-vs-btree-same-entity-frag512-n5000). |
-| **B+Tree fill factor `t` (id index)** | **t = 32…128, measured optimum t = 64** (bulk insert 49.6k ops/s, 3.7 ms commits, cold find 87 µs/op, delete-all 183 ms). **Never below 8.** The annotation default **t = 500 is ~12× slower on inserts** at N=5000 and pays a 14 ms cold first find. |
-| **Fragment size** | **128–512 objects per fragment** (≈ 55–225 KB per fragment file for ~430 B entities). Measured optimum **128**. Avoid fragment files > ~1 MB (whole-file-rewrite write amplification) and < ~10 KB (per-file overhead, cold-scan penalty). |
-| **Search index `t`** | **t = 64** — best indexed-insert (8.9k ops/s), best cold search (134 µs/op vs 163 at t=8); the t=500 default is **5× slower on indexed inserts** and pays 34 ms on the first cold query. Query latency is otherwise t-insensitive; keep primary criteria `EQUALS`. |
+| **B+Tree fill factor `t` (id index)** | **t = 32…128, measured optimum t = 64** — **APPLIED as the engine default**: both annotations' `t()` defaults changed 500 → 64 (bulk insert 49.6k ops/s, 3.7 ms commits, cold find 87 µs/op, delete-all 183 ms). **Never below 8.** The annotation default **t = 500 is ~12× slower on inserts** at N=5000 and pays a 14 ms cold first find. |
+| **Fragment size** | **128–512 objects per fragment** (≈ 55–225 KB per fragment file for ~430 B entities). Measured optimum **128** — **APPLIED as the engine default**: `XdStorageProvider.DEFAULT_FRAGMENT_SIZE = 128` + `newOrGetFileStorage(name, folder[, config])` overloads. Avoid fragment files > ~1 MB (whole-file-rewrite write amplification) and < ~10 KB (per-file overhead, cold-scan penalty). |
+| **Search index `t`** | **t = 64** — **APPLIED** (same annotation default change) — best indexed-insert (8.9k ops/s), best cold search (134 µs/op vs 163 at t=8); the t=500 default is **5× slower on indexed inserts** and pays 34 ms on the first cold query. Query latency is otherwise t-insensitive; keep primary criteria `EQUALS`. |
 | **Storage config** | Defaults are sound for OLTP-ish embedding: `durableWrites=false` for throughput, **turn it on when power-loss durability matters**; `journalWrites` (W-1) is the candidate fix for the commit-bound write path; `workerPoolSize=15` fits a 24-core box; tx timeout 3 s default is tight for bulk batches — pass explicit timeouts (harness uses 120 s for 500-object batches). |
 | ~~**P0 blocker**~~ **RESOLVED (R-53)** | B+Tree-backed structures were unreadable after storage re-open (Hash id index unaffected). Fixed in `cf36f7f`, regression-covered by `XdStorageW2ReopenBTreeTest`; history and verification in [§6](#6-btree-re-open-blocker-resolved-and-verified-r-53). |
 
@@ -157,7 +157,7 @@ overhead-bound and t-insensitive (~580–613 ops/s).
 every axis). Re-evaluate the `t()` defaults in both annotations
 (`XdStorageObjectIdIndexType`, `XdStorageObjectSearchIndex`) — 500 optimizes file count at the price
 of 12× insert throughput at N=5000; if a single default must serve all sizes, **64 is the safer
-default**. For much larger N the optimum drifts up slowly (depth is log_t N) — re-run the sweep at
+default**. **Applied:** the annotation `t()` defaults are now 64 (commit applying the study recommendations); test entities that deliberately exercise deep trees keep explicit small `t` values. For much larger N the optimum drifts up slowly (depth is log_t N) — re-run the sweep at
 target volume before finalizing.
 
 ## 5. Results: fragment size (Hash id index)
@@ -188,7 +188,9 @@ N=5000 (~430 B/entity → ~4.5 MB of data), YAML. Full data: [`docs/perf/fragswe
 2. **Sweet spot 128–512 objects/file** — ~55–225 KB fragment files for this entity size: minimum
    commit latency (6.6 ms), best insert (27.1k ops/s), flat scans, stable deletes. As a rule of thumb
    for other entity sizes: **aim fragment files in the tens-to-low-hundreds of KB; treat >1 MB
-   fragment files as a red flag** (every writer commit rewrites the file).
+   fragment files as a red flag** (every writer commit rewrites the file). **Applied:**
+   `XdStorageProvider.DEFAULT_FRAGMENT_SIZE = 128` backs the new no-fragment-size
+   `newOrGetFileStorage` overloads.
 3. **Point-lookup latency barely reacts** (17–22 µs/op warm, ~50–70 µs/op cold): `get(id)` resolves
    through the in-memory hash index to one fragment; only the file-count overhead at frag=8 shows
    (+20% warm, +20–35% cold).

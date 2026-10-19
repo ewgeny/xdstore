@@ -27,8 +27,8 @@ public class XdStoragePerformanceBenchmark {
     public void setUp() {
         // Очищаем старую дисковую партицию перед запуском
         deleteDir(new File(TEST_DIR));
-        // Инициализируем хранилище с размером фрагмента кэша 1024 элемента
-        storage = XdStorageProvider.newOrGetFileStorage("BenchStorage", TEST_DIR, 1024);
+        // Рекомендованный размер фрагмента по умолчанию (128, свип docs/PERFORMANCE-RECOMMENDATIONS.md §5)
+        storage = XdStorageProvider.newOrGetFileStorage("BenchStorage", TEST_DIR);
     }
 
     @TearDown(Level.Trial)
