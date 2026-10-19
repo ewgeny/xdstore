@@ -1,0 +1,70 @@
+name: xdstorage CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *'   # nightly: full suite x3 + JMH smoke
+
+jobs:
+  gate:
+    # C-1: main gate. Verdict comes from Maven's own "BUILD SUCCESS" line — never from a
+    # piped grep's exit code (the R-52 shell gotcha: a failed build masqueraded as success).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'          # dev/test runtime; library bytecode stays release=8
+          cache: maven
+      - name: Build and run full suite
+        run: |
+          mvn clean test > /tmp/mvn-gate.log 2>&1 || { tail -100 /tmp/mvn-gate.log; exit 1; }
+          grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-gate.log
+          grep -q "BUILD SUCCESS" /tmp/mvn-gate.log || { echo "BUILD FAILURE detected"; exit 1; }
+          grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-gate.log | tail -1
+      - name: Archive surefire reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          if-no-files-found: ignore
+
+  nightly:
+    # C-2: flake-rate tracking (full suite x3) + JMH smoke with an assertion on the
+    # table row count (JMH silently SKIPS failed trials — the row count is the check,
+    # BENCHMARKS.md gotcha #1).
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Full suite x3 (flake-rate tracking)
+        run: |
+          for i in 1 2 3; do
+            mvn clean test > /tmp/mvn-nightly-$i.log 2>&1 || { tail -100 /tmp/mvn-nightly-$i.log; exit 1; }
+            grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-nightly-$i.log | tail -1
+          done
+      - name: JMH smoke (search engine, quick mode)
+        run: |
+          mvn test-compile > /dev/null 2>&1
+          CP="target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test)"
+          java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark quick > /tmp/jmh-smoke.log 2>&1 || { tail -50 /tmp/jmh-smoke.log; exit 1; }
+          ROWS=$(grep -c "^XdStorageSearchEngineBenchmark\." /tmp/jmh-smoke.log || true)
+          echo "JMH table rows: $ROWS"
+          if [ "$ROWS" -lt 9 ]; then echo "EXPECTED 9 benchmark rows, got $ROWS — a trial failed and JMH skipped it silently"; exit 1; fi
+      - name: Archive nightly logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-logs
+          path: |
+            /tmp/mvn-nightly-*.log
+            /tmp/jmh-smoke.log
+          if-no-files-found: ignore
