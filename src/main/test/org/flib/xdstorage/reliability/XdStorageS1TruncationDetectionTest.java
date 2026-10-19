@@ -47,8 +47,9 @@ public class XdStorageS1TruncationDetectionTest {
             Files.write(dataFile.toPath(), content.substring(0, thirdRecord).getBytes("UTF-8"));
 
             // строгое умолчание: загрузка должна ОТКАЗАТЬ с диагностикой обрыва,
-            // а не отдать частичную базу
-            IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128);
+            // а не отдать частичную базу (журнал выключен — тест пинит семантику БАЗОВЫХ файлов)
+            final XdStorageConfig baseOnly = XdStorageConfig.builder().journalWrites(false).build();
+            IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128, baseOnly);
             try {
                 final IXdStorageTransaction tx = storage.beginTransaction();
                 final Exception thrown = assertThrows(Exception.class, () -> storage.load(BenchmarkEntity.class, tx),
@@ -61,7 +62,7 @@ public class XdStorageS1TruncationDetectionTest {
             }
 
             // легаси-режим миграции: читает частичные данные (2 из 3 записей) без ошибки сентинела
-            final XdStorageConfig legacy = XdStorageConfig.builder().acceptMissingEofSentinel(true).build();
+            final XdStorageConfig legacy = XdStorageConfig.builder().journalWrites(false).acceptMissingEofSentinel(true).build();
             IXdFileStorage legacyStorage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128, legacy);
             try {
                 final IXdStorageTransaction tx = legacyStorage.beginTransaction();
@@ -84,10 +85,11 @@ public class XdStorageS1TruncationDetectionTest {
         try {
             saveThreeEntities(dir.toString());
 
-            IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128);
+            IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128,
+                    XdStorageConfig.builder().journalWrites(false).build());
             try {
                 final IXdStorageTransaction tx = storage.beginTransaction();
-                final List<BenchmarkEntity> loaded = new ArrayList<>(storage.load(BenchmarkEntity.class, tx));
+                final java.util.List<BenchmarkEntity> loaded = new java.util.ArrayList<>(storage.load(BenchmarkEntity.class, tx));
                 assertEquals(3, loaded.size(), "complete file must load fully");
                 tx.commit();
             } finally {
@@ -99,7 +101,8 @@ public class XdStorageS1TruncationDetectionTest {
     }
 
     private void saveThreeEntities(final String folder) throws Exception {
-        IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, folder, 128);
+        IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, folder, 128,
+                XdStorageConfig.builder().journalWrites(false).build());
         try {
             final IXdStorageTransaction tx = storage.beginTransaction();
             storage.save(new BenchmarkEntity("id-1", "alpha"), tx);

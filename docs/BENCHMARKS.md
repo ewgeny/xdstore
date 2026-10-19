@@ -92,6 +92,29 @@ search benchmark's per-commit cost (~13 ms for the heavier ship graph with child
 
 ---
 
+## Addendum: journalized defaults (2026-10-19, W-3)
+
+`XdStorageConfig.journalWrites` defaults ON since W-3: data-class commits append to a
+per-resource journal (`O(delta)`) instead of full-file rewrites; id-index/search-index/B+Tree
+infrastructure still full-rewrite BY DESIGN SCOPE. Quick-mode re-run of the search benchmark
+on the same box, same day (single-iteration quick mode — treat as ballpark):
+
+```
+loadById_indexBaseline                   ~443   (was 480 full-mode / 493 quick; quick-mode noise band)
+saveAndDeleteIndexedShipWithCrew         ~38    (was 38.7)  — UNCHANGED
+searchByOrTwoPrimaries                   ~431   (was 459)
+searchByPrimaryEquals                    ~466   (was 469)
+searchByScanNotEqualsPrimary             ~98    (was 117)
+updateShipRenameSearchKey                ~73    (was 74.8)  — UNCHANGED
+```
+
+**Honest reading:** the write scenarios did NOT get faster on this benchmark — it is
+index-heavy (every save/delete rewrites the id-index + search-index files, which the journal
+deliberately does not cover). The journal's measured wins are for data-file-heavy write
+patterns (fragment rewrites dominate there) and crash semantics (per-append atomicity + EOF
+sentinel instead of torn multi-file rewrites). The ≥10× write acceptance target requires
+journaling the index paths — the deferred W-4 work (see WRITE-PATH-DESIGN.md).
+
 ## Gotchas learned while writing these benchmarks
 
 1. **Preload serially, in the shared `@Setup(Level.Trial)`.** Parallel per-thread preload trips the

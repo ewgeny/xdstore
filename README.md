@@ -281,7 +281,9 @@ IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fra
 - `XdStorageConfig` — open-time knobs (all defaults reproduce the pre-config behavior):
   `durableWrites` (fsync file+directory per commit — power-loss safe at fsync cost),
   `acceptMissingEofSentinel` (legacy migration: open pre-sentinel storages instead of failing loudly on
-  truncated files), `daemonWorkerThreads` (worker pool cannot block JVM exit), `registerShutdownHook`
+  truncated files), `journalWrites` (ON by default since W-3 — data-class commits are journaled;
+  turn off for the classic full-file rewrite), `txMaterializedObjectsCap` (per-transaction read
+  budget, 0 = unlimited), `daemonWorkerThreads` (worker pool cannot block JVM exit), `registerShutdownHook`
   (best-effort `shutdown()` on JVM exit), `workerPoolSize`, `defaultTransactionTimeoutMillis`,
   `isolationLevel` (`SNAPSHOT` default, `READ_COMMITTED`).
 
@@ -621,9 +623,11 @@ Worth knowing before production use (details and remediation plan in
   (no `fsync`); pass `XdStorageConfig.builder().durableWrites(true)` for `fsync`-per-commit durability.
   A truncated resource file fails loudly at open (EOF sentinel); legacy pre-sentinel storages open once
   with `acceptMissingEofSentinel(true)`.
-- **Whole-file rewrite per commit.** Each commit rewrites every touched resource file, which dominates
-  write latency for large resources (a journal-based writer is on the roadmap,
-  [docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md)).
+- **Data-class commits are journaled by default** (W-3): each commit appends to
+  `<basefile>.journal.yaml` (O(delta)) with size-threshold checkpointing; id-index/search-index/B+Tree
+  infrastructure still rewrites its files per commit (design scope — the remaining write-latency wall for
+  index-heavy workloads, [docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md)). Set
+  `journalWrites(false)` for the classic full-rewrite path.
 - `StoreWithParentObject` classes cannot be stored top-level: only `StoreAsClassObjects` /
   `StoreAsSingleObject` classes can be passed to `save`/`load`.
 - Nested entity classes are not supported (runtime codegen limitation, see above).

@@ -120,7 +120,8 @@ public class XmlDataStorageMultithreadsTest {
     @BeforeEach
     public void initStorage() {
         deleteDir(new File("./teststorage"));
-        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 200, FilesFormat.XML);
+        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 200, FilesFormat.XML,
+                org.flib.xdstorage.XdStorageConfig.builder().journalWrites(false).build()); // W-1: журнал YAML-only
     }
 
     public static void destroyStorage() {

@@ -83,6 +83,9 @@ current code, stated so embedding surprises are design-time, not production-time
 
 ## Configuration recap
 
-`XdStorageConfig` (all defaults = pre-config behavior): `durableWrites=false`,
-`acceptMissingEofSentinel=false`, `daemonWorkerThreads=false`, `registerShutdownHook=false`,
+`XdStorageConfig`: `journalWrites=true` (W-3 default — data-class commits journaled,
+`false` = classic full-file rewrite), `journalCheckpointBytes=16MB`, `durableWrites=false`,
+`acceptMissingEofSentinel=false`, `txMaterializedObjectsCap=0` (unlimited),
+`daemonWorkerThreads=false`, `registerShutdownHook=false`,
 `workerPoolSize=15`, `defaultTransactionTimeoutMillis=3000`, `isolationLevel=SNAPSHOT`.
+Journal files (`<basefile>.journal.yaml`) are engine-owned like the rest of the folder.

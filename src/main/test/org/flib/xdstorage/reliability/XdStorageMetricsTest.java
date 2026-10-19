@@ -26,7 +26,10 @@ public class XdStorageMetricsTest {
     public void testCountersReflectStorageWork() throws Exception {
         final Path dir = Files.createTempDirectory("o1_metrics_db");
         try {
-            final IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage("o1-metrics", dir.toString(), 128);
+            // классический путь записи (журнал выключен): счетчик RESOURCE_WRITE_OUTS
+            // считается на полной перезаписи; журнализированные коммиты идут аппендами
+            final IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage("o1-metrics", dir.toString(), 128,
+                    org.flib.xdstorage.XdStorageConfig.builder().journalWrites(false).build());
             try {
                 final IXdStorageTransaction tx = storage.beginTransaction();
                 storage.save(new BenchmarkEntity("m-1", "alpha"), tx);

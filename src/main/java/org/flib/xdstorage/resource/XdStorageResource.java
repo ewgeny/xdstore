@@ -60,13 +60,20 @@ public class XdStorageResource extends XdStorageAbstractResource {
         super(services, manager, resourceId, clInfo, idGenerator, isReferences);
         this.reader = factory.newInstanceReader();
         this.writer = factory.newInstanceWriter();
-        this.journalWrites = services.getStorageConfig() != null && services.getStorageConfig().isJournalWrites();
+        // W-1 scope (WRITE-PATH-DESIGN.md): журнал ведут ТОЛЬКО ресурсы пользовательских данных.
+        // Инфраструктура B+Дерева (деревья/ноды/references) хранит канонические живые графы —
+        // реплей их UPSERT-ов при переоткрытии плодит конфликтные копии канонических инстансов
+        // (реестр R-20) и рвет дерево: инфраструктура сохраняется полной перезаписью, как раньше.
+        this.journalWrites = services.getStorageConfig() != null && services.getStorageConfig().isJournalWrites()
+                && !cache.isInfrastructureCache() && !cache.isStructuralNodeCache();
         this.journalFile = journalWrites
                 ? org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.journalFileFor(getFileName())
                 : null;
         this.yamlJournalFactory = journalWrites && factory instanceof org.flib.xdstorage.serialization.yaml.XdStorageYamlIOFactory
                 ? (org.flib.xdstorage.serialization.yaml.XdStorageYamlIOFactory) factory
                 : null;
+        // W-2: бюджет материализации считают ТОЛЬКО ресурсы данных (id-индексные кэши — служебные)
+        this.cache.setEnforceMaterializationBudget(true);
     }
 
     private final boolean journalWrites;

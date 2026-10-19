@@ -139,16 +139,17 @@ public class XdStorageW1JournalTest {
     }
 
     @Test
-    @DisplayName("Флаг выключен (умолчание): журнал не создается, база пишется как раньше")
-    public void testJournalOffByDefault() throws Exception {
-        final Path dir = Files.createTempDirectory("w1_off");
+    @DisplayName("W-3: журнал включен по умолчанию — данные в журнале, база до чекпоинта не пишется")
+    public void testJournalOnByDefault() throws Exception {
+        final Path dir = Files.createTempDirectory("w1_default_on");
         try {
             openSaveShutdown(dir, XdStorageConfig.defaults(), saver -> {
                 saver.save(new BenchmarkEntity("o-1", "alpha"));
             });
 
-            assertNotNull(findDataBaseFile(dir), "default: full-file write-out as before");
-            assertNull(findJournalFile(dir), "default: no journal file");
+            assertNull(findDataBaseFile(dir), "default (W-3): commits are journaled, base not written before checkpoint");
+            assertNotNull(findJournalFile(dir), "default (W-3): journal file exists");
+            assertEquals(1, loadCount(dir, XdStorageConfig.defaults()), "default (W-3): replay recovers the data");
         } finally {
             deleteQuietly(dir);
         }

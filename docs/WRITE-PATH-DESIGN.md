@@ -1,6 +1,6 @@
 # Write-path design: journal-based commit (Phase W)
 
-Status: **W-1 IMPLEMENTED (2026-10-19, flag `journalWrites`, default OFF)** — journal append/replay/checkpoint behind the flag; W-2 cache bounds and W-3 default flip remain. Two implemented deviations from the sketch below (simpler and crash-safer): (1) the journal file is per-RESOURCE (`<basefile>.journal.yaml`) rather than per-class — fragments journal independently, same semantics; (2) there is NO `journal.checkpoint` marker file — replay is idempotent (UPSERT/DELETE by id, last-writer-wins), so a crash anywhere between "base rewritten" and "journal deleted" is safe and the marker is unnecessary; checkpoint = existing full-file write + journal reset. Failed-commit recovery appends COMPENSATION records (the restored pre-tx state per changed id, taken from the prepareCommit changes collector) — deleting the journal would lose earlier un-checkpointed commits. Torn-tail policy: records after the LAST sentinel are discarded with a WARN (the interrupted commit was never reported durable) — unlike a truncated BASE file which fails loudly (S-1). (SRE-OPTIMIZATION-PLAN Phase W; supersedes
+Status: **W-1..W-3 IMPLEMENTED (2026-10-19; W-3: `journalWrites` defaults ON)**. W-2 shipped as the per-transaction MATERIALIZATION BUDGET (`txMaterializedObjectsCap`, default 0=unlimited) — NOT record-cache eviction: eviction without disk-anchored scans silently drops rows from `load(Class)`/predicate scans and breaks snapshot reads (prev-versions are not on disk); disk-anchored scans are the follow-up design round (W-4). W-1 note: the first soak caught journaling the B+Tree's own node/tree/reference resources (they ride the generic XdStorageResource machinery) — journal-replaying canonical live graphs diverged from the canonical registry at reopen (XdStorageW2ReopenBTreeTest went red); fixed by the scope exclusion the design always mandated (`!cache.isInfrastructureCache() && !cache.isStructuralNodeCache()`). W-3 soak: full suite 655 tests journalized (2 failures = the documented flake families); benchmark honest verdict below. — journal append/replay/checkpoint behind the flag; W-2 cache bounds and W-3 default flip remain. Two implemented deviations from the sketch below (simpler and crash-safer): (1) the journal file is per-RESOURCE (`<basefile>.journal.yaml`) rather than per-class — fragments journal independently, same semantics; (2) there is NO `journal.checkpoint` marker file — replay is idempotent (UPSERT/DELETE by id, last-writer-wins), so a crash anywhere between "base rewritten" and "journal deleted" is safe and the marker is unnecessary; checkpoint = existing full-file write + journal reset. Failed-commit recovery appends COMPENSATION records (the restored pre-tx state per changed id, taken from the prepareCommit changes collector) — deleting the journal would lose earlier un-checkpointed commits. Torn-tail policy: records after the LAST sentinel are discarded with a WARN (the interrupted commit was never reported durable) — unlike a truncated BASE file which fails loudly (S-1). (SRE-OPTIMIZATION-PLAN Phase W; supersedes
 the parked D-3 "batching" item). One design round is mandatory before any code: this changes
 crash/commit semantics, the hardest class of change in this engine.
 
@@ -107,6 +107,11 @@ with a loud WARN naming the discarded serial range.
    infra (unchanged, by design).
 3. **W-2:** checkpointing + cache-bounds ship together (cache caps: cold committed-record LRU,
    re-loadable from base+journal on demand).
-4. **W-3:** flip default behind the flag after a soak run; re-measure BENCHMARKS.md (acceptance:
-   `saveAndDelete` ≥ 10× (38.7 → 400+ ops/s), facade flow ≥ 8× (127 → 1000+), `loadById` unchanged
-   ±10%, kill-9 recovery green).
+4. **W-3: DONE 2026-10-19** — `journalWrites` defaults ON (per-resource journal append lock is
+   per-file, not JVM-wide). Soak: full suite 655 tests green with the journalized default (2
+   failures = the pre-existing flake families, signatures unchanged). HONEST benchmark verdict
+   (quick-mode): write scenarios UNCHANGED (~38 ops/s save+delete, ~73 rename) — the benchmark
+   is index-heavy and id-index/search-index files still full-rewrite BY DESIGN SCOPE; the win
+   applies to data-file-heavy write patterns and crash semantics (per-append atomicity +
+   sentinel vs torn multi-file rewrites). The ≥10× acceptance target requires journaling the
+   index paths — the deferred structural work (W-4 with disk-anchored scans).

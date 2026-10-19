@@ -40,6 +40,7 @@ public final class XdStorageConfig {
     private final XdStorageIsolationLevel isolationLevel;
     private final boolean journalWrites;
     private final long journalCheckpointBytes;
+    private final long txMaterializedObjectsCap;
 
     private XdStorageConfig(final Builder builder) {
         this.durableWrites = builder.durableWrites;
@@ -51,6 +52,7 @@ public final class XdStorageConfig {
         this.isolationLevel = builder.isolationLevel;
         this.journalWrites = builder.journalWrites;
         this.journalCheckpointBytes = builder.journalCheckpointBytes;
+        this.txMaterializedObjectsCap = builder.txMaterializedObjectsCap;
     }
 
     public static XdStorageConfig defaults() {
@@ -99,6 +101,16 @@ public final class XdStorageConfig {
         return journalCheckpointBytes;
     }
 
+    /**
+     * W-2: per-transaction materialization budget (default 0 = unlimited). When a single
+     * transaction materializes more distinct objects (by-id reads, scans, watch), the read
+     * fails LOUDLY with an actionable message instead of letting the heap grow unbounded
+     * (the OOM death the SRE plan flagged). Write-out for a commit is deliberately exempt.
+     */
+    public long getTxMaterializedObjectsCap() {
+        return txMaterializedObjectsCap;
+    }
+
     public static final class Builder {
         private boolean durableWrites = false;
         private boolean acceptMissingEofSentinel = false;
@@ -107,8 +119,9 @@ public final class XdStorageConfig {
         private int workerPoolSize = 15;
         private long defaultTransactionTimeoutMillis = 3 * 1000L;
         private XdStorageIsolationLevel isolationLevel = XdStorageIsolationLevel.SNAPSHOT;
-        private boolean journalWrites = false;
+        private boolean journalWrites = true;   // W-3: journal is the default write path
         private long journalCheckpointBytes = 16L * 1024 * 1024;
+        private long txMaterializedObjectsCap = 0;
 
         public Builder durableWrites(final boolean value) {
             this.durableWrites = value;
@@ -160,6 +173,13 @@ public final class XdStorageConfig {
             if (value <= 0)
                 throw new IllegalArgumentException("journalCheckpointBytes must be positive");
             this.journalCheckpointBytes = value;
+            return this;
+        }
+
+        public Builder txMaterializedObjectsCap(final long value) {
+            if (value < 0)
+                throw new IllegalArgumentException("txMaterializedObjectsCap must be >= 0");
+            this.txMaterializedObjectsCap = value;
             return this;
         }
 

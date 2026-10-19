@@ -127,8 +127,22 @@ public final class XdStorageYamlCommitJournal {
         append(file, records, services, factory, durable);
     }
 
-    /** One synchronized append: records + trailing sentinel, O(delta) bytes. */
-    private static synchronized void append(final Path file, final List<Record> records,
+    /**
+     * Per-journal-file append lock: appends to DIFFERENT resources must not serialize
+     * JVM-wide (W-3 made journalizing the default — 25-worker storms commit in parallel).
+     * Same-folder cross-process exclusion is the folder lock's job (S-3); inside one JVM
+     * the canonical-path interned string is the lock identity.
+     */
+    private static Object appendLockFor(final Path file) {
+        try {
+            return file.toFile().getCanonicalFile().getPath().intern();
+        } catch (final IOException e) {
+            return file.toAbsolutePath().toString().intern();
+        }
+    }
+
+    /** One locked append: records + trailing sentinel, O(delta) bytes. */
+    private static void append(final Path file, final List<Record> records,
                                             final XdStorageServicesLocator services,
                                             final XdStorageYamlIOFactory factory,
                                             final boolean durable) throws IOException, org.flib.xdstorage.exceptions.XdStorageException {
@@ -157,14 +171,18 @@ public final class XdStorageYamlCommitJournal {
         emitter.writeEofSentinel();
 
         final byte[] bytes = out.toString().getBytes(Charset.defaultCharset());
-        final File parent = file.getParent() != null ? file.getParent().toFile() : null;
-        if (parent != null && !parent.exists()) {
-            parent.mkdirs();
-        }
-        try (FileOutputStream fos = new FileOutputStream(file.toFile(), true)) {   // true = append
-            fos.write(bytes);
-            if (durable) {
-                fos.getFD().sync();   // S-2 parity: the journal is the durability point when it holds the commit
+        final Object appendLock = appendLockFor(file);
+        // сериализация выше — вне лока; под локом только системный аппенд
+        synchronized (appendLock) {
+            final File parent = file.getParent() != null ? file.getParent().toFile() : null;
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            try (FileOutputStream fos = new FileOutputStream(file.toFile(), true)) {   // true = append
+                fos.write(bytes);
+                if (durable) {
+                    fos.getFD().sync();   // S-2 parity: the journal is the durability point when it holds the commit
+                }
             }
         }
     }
