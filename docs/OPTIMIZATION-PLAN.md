@@ -3,6 +3,8 @@
 > Whole-project SRE view (durability, lifecycle, observability, build/CI hygiene, write-path
 > design): see [SRE-OPTIMIZATION-PLAN.md](SRE-OPTIMIZATION-PLAN.md). This file remains the
 > engine-internal campaign journal (R-entries) and the phased engine plan.
+> Consolidated forward-looking roadmap (priorities, frozen-items inventory, release train):
+> [MASTER-PLAN.md](MASTER-PLAN.md).
 
 JMH baselines (search engine via facade, resource cache, facade tx flow): see [BENCHMARKS.md](BENCHMARKS.md)
 (recorded 2026-10-18, JDK 17).
