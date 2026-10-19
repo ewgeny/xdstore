@@ -9,7 +9,7 @@ tracks their flake rate (full suite ×3).
 | Test class | Family / signature | Rate | Evidence | Status |
 |------------|--------------------|------|----------|--------|
 | `XdStorageGraphPhantomReadStressTest` | tearDown "Разрушен вложенный спутник" — R-44 fixed the read-path null-satellite; rare residual of the same concurrent purge-vs-rollback family | ~1/11 isolated | R-45, R-44 | open residual, needs dumps (R-45 next-session note) |
-| `XdStorageFacadeStressTest` | "рассинхрон структуры" — the R-32 validator's two traversals are not atomic under 25 workers; false-positive suspicion | rare in-suite, green isolated ×2 | R-45, R-46 | open suspicion: validator-side, not engine |
+| `XdStorageFacadeStressTest` | "рассинхрон структуры" — the R-32 validator's two traversals are not atomic under 25 workers; false-positive suspicion | rare in-suite; **no longer isolated-green** (2026-10-19 A/B ×2 on clean HEAD: fails isolated too, varying load-timing signatures — find retry-budget exhaustion / CME on btree write-out) | R-45, R-46 | open suspicion: validator-side, not engine; isolated-red is NOT evidence of an engine regression |
 | `XdStoragePhantomReadIsolationStressTest` | read-lock contention under full-suite load; stable green isolated since R-13 | flaky in-suite only | R-13, R-18 | known family |
 | `XmlDataStorageMultithreadsTest` | concurrent purge vs rolled-back tx ("cannot load by reference" in afterEach) | flaky ~1/3 in-suite | R-18, R-21, R-31 | known family |
 

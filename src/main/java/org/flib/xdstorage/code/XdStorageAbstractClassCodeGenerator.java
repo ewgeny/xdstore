@@ -200,12 +200,20 @@ public abstract class XdStorageAbstractClassCodeGenerator {
 
     protected static Method[] getPublicMethods(final Class<?> cl) {
         final List<Method> result = new ArrayList<>();
+        final java.util.Set<String> seen = new java.util.HashSet<>();
         for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {
             final Method[] tmp = clazz.getDeclaredMethods();
             for (final Method method : tmp) {
-                if ((method.getModifiers() & Modifier.PUBLIC) > 0) {
-                    result.add(method);
-                }
+                final int modifiers = method.getModifiers();
+                if ((modifiers & Modifier.PUBLIC) == 0) continue;
+                // static/final методы нельзя переопределить в генерируемой обертке — их эмиссия
+                // ломает компиляцию и молча деградирует обертку в dummy; synthetic (bridge) методы
+                // дублируют свою целевую декларацию
+                if ((modifiers & (Modifier.STATIC | Modifier.FINAL)) != 0 || method.isSynthetic()) continue;
+                // обход идет от наследника вверх: первая декларация — самая производная,
+                // повторное переопределение в предке не эмитится вторым копией метода
+                if (!seen.add(method.getName() + java.util.Arrays.toString(method.getParameterTypes()))) continue;
+                result.add(method);
             }
         }
         return result.toArray(new Method[result.size()]);

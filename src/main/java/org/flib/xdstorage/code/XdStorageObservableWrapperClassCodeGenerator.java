@@ -1,6 +1,5 @@
 package org.flib.xdstorage.code;
 
-import org.flib.xdstorage.annotations.XdStorageObjectId;
 import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.observing.IXdStorageIdObservableWrapper;
 import org.flib.xdstorage.observing.XdStorageAbstractIdObserver;
@@ -33,6 +32,10 @@ public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstr
         if (targetIdSetter != null) {
             generateIdSetter(builder, className, targetIdSetter);
         }
+
+        // 3.1 Остальные сеттеры обязаны делегировать во внутренний объект: обертка наследует
+        // мертвые поля сущности, и мутирующий их сеттер молча ТЕРЯЛ изменение состояния
+        generateDelegatingSetters(builder, ctx, targetIdSetter);
 
         // 4. Генерируем блоки методов, делегируя контекст
         generateSimpleGetters(builder, ctx);
@@ -74,22 +77,33 @@ public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstr
     // === ЛОГИКА СБОРКИ КОДОВЫХ БЛОКОВ МЕТОДОВ ===
 
     private Method findIdSetter(final Class<?> cl) {
-        final Method[] methods = getPublicMethods(cl);
-        for (final Method method : methods) {
+        final String idFieldName = getIdFieldName(cl);
+        if (idFieldName == null) return null;
+        for (final Method method : getPublicMethods(cl)) {
             final String name = method.getName();
-            if (name.startsWith("set")) {
-                try {
-                    final String fieldName = name.substring(3, 4).toLowerCase() + name.substring(4);
-                    final Field field = cl.getDeclaredField(fieldName);
-                    if (field.isAnnotationPresent(XdStorageObjectId.class)) {
-                        return method;
-                    }
-                } catch (final NoSuchFieldException ignored) {
-                    // Игнорируем поля без явного совпадения по имени
+            if (name.startsWith("set") && name.length() > 3) {
+                final String fieldName = Character.toLowerCase(name.charAt(3)) + name.substring(4);
+                if (fieldName.equals(idFieldName)) {
+                    return method;
                 }
             }
         }
         return null;
+    }
+
+    private void generateDelegatingSetters(final StringBuilder builder, final GenerationContext ctx, final Method excludedIdSetter) {
+        for (Method method : ctx.setters) {
+            // рефлекшн возвращает новые копии Method на каждый вызов — сравниваем
+            // по сигнатуре, а не по ссылке
+            if (excludedIdSetter != null
+                    && method.getName().equals(excludedIdSetter.getName())
+                    && java.util.Arrays.equals(method.getParameterTypes(), excludedIdSetter.getParameterTypes())) {
+                continue;
+            }
+            builder.append("\r\n\t@Override\r\n\t");
+            builder.append(buildMethodDefinition(method.getModifiers(), method.getName(), method.getTypeParameters(), method.getReturnType(), method.getGenericReturnType(), method.getParameterTypes(), method.getGenericParameterTypes(), method.getExceptionTypes())).append(" {\r\n");
+            builder.append("\t\tobject.").append(buildMethodCalling(method.getName(), method.getParameterTypes())).append(";\r\n\t}\r\n");
+        }
     }
 
     private void generateIdSetter(final StringBuilder builder, final String className, final Method method) {
@@ -131,11 +145,14 @@ public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstr
     private void generateObjectMethods(final StringBuilder builder, final String className) {
         builder.append("\r\n\t@Override\r\n\tpublic int hashCode() {\r\n\t\treturn object.hashCode();\r\n\t}\r\n");
 
+        builder.append("\r\n\t@Override\r\n\tpublic Object getWrappedObject__() {\r\n\t\treturn object;\r\n\t}\r\n");
+
         // =========================================================================
-        // ЭТАЛОННЫЙ ФИКС КОДОГЕНЕРАЦИИ RECTIVE WRAPPER (По твоему канону без прикрас):
+        // ЭТАЛОННЫЙ ФИКС КОДОГЕНЕРАЦИИ REACTIVE WRAPPER (По твоему канону без прикрас):
         // Сравнение идет СТРОГО враппер-к-врапперу. Любой чистый доменный объект или
         // прокси другого типа гарантированно возвращает false, полностью защищая
         // реактивный контур СУБД от утечек симметрии!
+        // Распаковка через getWrappedObject__() — без рефлекшна на каждый вызов.
         // =========================================================================
         builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n");
         builder.append("\t\tif (this == obj) return true;\r\n");
@@ -143,15 +160,8 @@ public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstr
 
         // 1) Проверяем объект-параметр: является ли он IXdStorageIdObservableWrapper?
         builder.append("\t\tif (obj instanceof ").append(IXdStorageIdObservableWrapper.class.getName()).append(") {\r\n");
-        // 1.1) Если да — вытаскиваем обёрнутый объект через Java Reflection и сравниваем через .equals()
-        builder.append("\t\t\ttry {\r\n");
-        builder.append("\t\t\t\tjava.lang.reflect.Field f__ = obj.getClass().getDeclaredField(\"object\");\r\n");
-        builder.append("\t\t\t\tf__.setAccessible(true);\r\n");
-        builder.append("\t\t\t\tObject otherInner__ = f__.get(obj);\r\n");
-        builder.append("\t\t\t\treturn this.object.equals(otherInner__);\r\n");
-        builder.append("\t\t\t} catch (Exception e__) {\r\n");
-        builder.append("\t\t\t\treturn false;\r\n");
-        builder.append("\t\t\t}\r\n");
+        // 1.1) Если да — вытаскиваем обёрнутый объект напрямую и сравниваем через .equals()
+        builder.append("\t\t\treturn this.object.equals(((").append(IXdStorageIdObservableWrapper.class.getName()).append(") obj).getWrappedObject__());\r\n");
         builder.append("\t\t}\r\n\r\n");
 
         // 1.2) Если нет — объекты ГАРАНТИРОВАННО не равны!

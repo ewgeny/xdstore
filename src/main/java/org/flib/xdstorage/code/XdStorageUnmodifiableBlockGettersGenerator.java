@@ -55,7 +55,10 @@ public class XdStorageUnmodifiableBlockGettersGenerator {
             builder.append(gen.buildMethodDefinition(getter.getModifiers(), name, getter.getTypeParameters(), returnType, genReturnType, getter.getParameterTypes(), getter.getGenericParameterTypes(), getter.getExceptionTypes())).append(" {\r\n");
 
             builder.append("\t\tif(!").append(fieldName).append("Loaded) {\r\n\t\t\ttry{\r\n");
-            builder.append("\t\t\t\tstorage.load(object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(", transaction);\r\n");
+            // null-стража: пустое ленивое поле не должно превращаться в storage.load(null)
+            // (семейство simple-оберток делает ту же проверку)
+            builder.append("\t\t\t\tObject toLoadObject = object.").append(gen.buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
+            builder.append("\t\t\t\tif (toLoadObject != null) {\r\n\t\t\t\t\tstorage.load(toLoadObject, transaction);\r\n\t\t\t\t}\r\n");
             builder.append("\t\t\t\t").append(fieldName).append("Loaded = true;\r\n");
             builder.append("\t\t\t} catch(").append(XdStorageConnectionException.class.getName()).append(" | ").append(XdStorageException.class.getName()).append(" e) {\r\n");
             builder.append("\t\t\t\ttransaction.markRollbackOnly();\r\n");

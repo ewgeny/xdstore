@@ -58,7 +58,6 @@ public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator exten
             final Class<?> returnType = getter.getReturnType();
             final Type genReturnType = getter.getGenericReturnType();
             final String name = getter.getName();
-            final String fieldName = extractFieldName(getter);
 
             builder.append("\r\n\t@Override\r\n\t");
             builder.append(buildMethodDefinition(modifiers, name, typeParameters, returnType, genReturnType, getter.getParameterTypes(), getter.getGenericParameterTypes(), getter.getExceptionTypes())).append(" {\r\n");
@@ -67,13 +66,14 @@ public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator exten
                 buildReturnType(builder, genReturnType, returnType);
                 builder.append(")parent;\r\n\t\t} else {\r\n\t\t\treturn (");
                 buildReturnType(builder, genReturnType, returnType);
-                builder.append(")").append(XdStorageObjectUtils.class.getName()).append(".wrapAsUnmodifiableObject(");
-                builder.append("object.getProperty(\"").append(fieldName).append("\"));\r\n\t\t}\r\n");
+                // обертка инфраструктурного объекта не несет storage/transaction — прямая
+                // делегация вместо wrapAsUnmodifiableObject (литерал getProperty("id") читал
+                // не то хранилище и возвращал null)
+                builder.append(")object.").append(buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n\t\t}\r\n");
             } else {
                 builder.append("\t\treturn (");
                 buildReturnType(builder, genReturnType, returnType);
-                builder.append(")").append(XdStorageObjectUtils.class.getName()).append(".wrapAsUnmodifiableObject(this, ");
-                builder.append("object.getProperty(\"").append(fieldName).append("\"));\r\n");
+                builder.append(")object.").append(buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
             }
             builder.append("\t}\r\n");
         }
@@ -86,13 +86,10 @@ public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator exten
             final Class<?> returnType = getter.getReturnType();
             final Type genReturnType = getter.getGenericReturnType();
             final String name = getter.getName();
-            final String fieldName = extractFieldName(getter);
 
             builder.append("\r\n\t@Override\r\n\t");
             builder.append(buildMethodDefinition(modifiers, name, typeParameters, returnType, genReturnType, getter.getParameterTypes(), getter.getGenericParameterTypes(), getter.getExceptionTypes())).append(" {\r\n");
-            builder.append("\t\treturn (");
-            buildReturnType(builder, genReturnType, returnType);
-            builder.append(")object.getProperty(\"").append(fieldName).append("\");\r\n");
+            builder.append("\t\treturn object.").append(buildMethodCalling(name, getter.getParameterTypes())).append(";\r\n");
             builder.append("\t}\r\n");
         }
     }
@@ -117,17 +114,21 @@ public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator exten
 
     private void generateObjectMethods(final StringBuilder builder) {
         builder.append("\r\n\t@Override\r\n\tpublic int hashCode() {\r\n\t\treturn object.hashCode();\r\n\t}\r\n");
-        builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n\t\treturn object.equals(obj);\r\n\t}\r\n");
-        builder.append("\r\n\t@Override\r\n\tpublic String toString() {\r\n\t\treturn object.toString();\r\n\t}\r\n");
-    }
 
-    private String extractFieldName(final Method getter) {
-        final String getterName = getter.getName();
-        if (getterName.startsWith("get")) {
-            return getterName.substring(3, 4).toLowerCase() + getterName.substring(4);
-        } else {
-            return getterName.substring(2, 3).toLowerCase() + getterName.substring(3);
-        }
+        builder.append("\r\n\t@Override\r\n\tpublic Object getWrappedObject__() {\r\n\t\treturn object;\r\n\t}\r\n");
+
+        // Единый канон семейства: строгое сравнение враппер-к-врапперу с прямой
+        // распаковкой getWrappedObject__() — без рефлекшна и без сравнения с голыми объектами
+        builder.append("\r\n\t@Override\r\n\tpublic boolean equals(Object obj) {\r\n");
+        builder.append("\t\tif (this == obj) return true;\r\n");
+        builder.append("\t\tif (obj == null) return false;\r\n");
+        builder.append("\t\tif (obj instanceof ").append(IXdStorageUnmodifiableWrapper.class.getName()).append(") {\r\n");
+        builder.append("\t\t\treturn this.object.equals(((").append(IXdStorageUnmodifiableWrapper.class.getName()).append(") obj).getWrappedObject__());\r\n");
+        builder.append("\t\t}\r\n");
+        builder.append("\t\treturn false;\r\n");
+        builder.append("\t}\r\n");
+
+        builder.append("\r\n\t@Override\r\n\tpublic String toString() {\r\n\t\treturn object.toString();\r\n\t}\r\n");
     }
 
     private void buildReturnType(StringBuilder builder, Type genReturnType, Class<?> returnType) {
