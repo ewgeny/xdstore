@@ -66,6 +66,10 @@ class XdStorage implements IXdFileStorage {
     XdStorage(final String name, final String folder, final int fragmentSize, final FilesFormat format, final XdStorageConfig config) {
         this.name = name;
         this.config = config == null ? XdStorageConfig.defaults() : config;
+        if (this.config.isJournalWrites() && format != FilesFormat.YAML) {
+            // W-1: журнал коммитов реализован для YAML-формата; остальное — громкий отказ при открытии
+            throw new XdStorageRuntimeException("journalWrites is supported for the YAML format only (got " + format + ")");
+        }
         services = new XdStorageServicesLocator();
         services.initFileConfiguration(this, folder, fragmentSize, format, this.config);
         if (this.config.isRegisterShutdownHook()) {

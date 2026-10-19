@@ -34,6 +34,11 @@ public class XdStorageResource extends XdStorageAbstractResource {
 
     private final IXdStorageObjectsWriter writer;
 
+    /** W-1: append-only commit journal; null = journaling off (full-file rewrite per commit, прежнее поведение). */
+    private final java.nio.file.Path journalFile;
+
+    private final org.flib.xdstorage.serialization.yaml.XdStorageYamlIOFactory yamlJournalFactory;
+
     private Lock lock = new ReentrantLock();
 
     private AtomicBoolean prepared = new AtomicBoolean(false);
@@ -43,9 +48,7 @@ public class XdStorageResource extends XdStorageAbstractResource {
                              final Object resourceId,
                              final XdStorageClassInfo clInfo,
                              final IXdStorageIOFactory factory) {
-        super(services, manager, resourceId, clInfo);
-        this.reader = factory.newInstanceReader();
-        this.writer = factory.newInstanceWriter();
+        this(services, manager, resourceId, clInfo, null, false, factory);
     }
 
     public XdStorageResource(final XdStorageServicesLocator services,
@@ -57,7 +60,16 @@ public class XdStorageResource extends XdStorageAbstractResource {
         super(services, manager, resourceId, clInfo, idGenerator, isReferences);
         this.reader = factory.newInstanceReader();
         this.writer = factory.newInstanceWriter();
+        this.journalWrites = services.getStorageConfig() != null && services.getStorageConfig().isJournalWrites();
+        this.journalFile = journalWrites
+                ? org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.journalFileFor(getFileName())
+                : null;
+        this.yamlJournalFactory = journalWrites && factory instanceof org.flib.xdstorage.serialization.yaml.XdStorageYamlIOFactory
+                ? (org.flib.xdstorage.serialization.yaml.XdStorageYamlIOFactory) factory
+                : null;
     }
+
+    private final boolean journalWrites;
 
     private Map<String, Long> blockingTime = new HashMap<>();
 
@@ -197,6 +209,9 @@ public class XdStorageResource extends XdStorageAbstractResource {
             log.info("resource {} prepared from disk: {} objects", getFileName(), objects != null ? objects.size() : 0);
             if (objects != null)
                 cache.fillCache(objects);
+            if (journalWrites) {
+                replayCommitJournal();
+            }
             postPrepare(transaction);
             manager.updateCounter(getObjectsClass(), this);
 
@@ -206,11 +221,64 @@ public class XdStorageResource extends XdStorageAbstractResource {
         }
     }
 
+    /** W-1: восстановление закоммиченного состояния из журнала поверх базы (идемпотентно, last writer wins). */
+    private void replayCommitJournal() throws XdStorageException {
+        try {
+            final org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.Replay replay =
+                    org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.readForReplay(
+                            journalFile, idField.field.getType(), yamlJournalFactory);
+            for (final Object upsert : replay.upserts) {
+                cache.applyCommittedJournalUpsert(upsert);
+            }
+            for (final Object id : replay.deletes) {
+                cache.applyCommittedJournalDelete(id);
+            }
+            if (!replay.upserts.isEmpty() || !replay.deletes.isEmpty()) {
+                log.info("resource {} replayed commit journal: {} upsert(s), {} delete(s), {} discarded tail record(s)",
+                        getFileName(), replay.upserts.size(), replay.deletes.size(), replay.discardedTailRecords);
+            }
+        } catch (final Throwable e) {
+            throw new XdStorageException("invalid state of database: commit journal of resource " + resourceId + " cannot be replayed", e);
+        }
+    }
+
     public void performFirstPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
         if (cache.hasChanges(transaction)) {
-            final Collection<Object> objects = cache.readUnsafe(transaction);
-            cache.prepareCommit(transaction, record);
-            writeObjects(objects);
+            if (journalWrites) {
+                // W-1: журнал — точка записи фазы 1: O(delta) аппенд вместо полной перезаписи файла.
+                // Изменения берутся ПОСЛЕ prepareCommit — коллектор (type, id, old, new) заполнен им.
+                cache.prepareCommit(transaction, record);
+                try {
+                    org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.appendRedo(journalFile,
+                            transaction.getCommitSerial(), record.getChangesObjects(),
+                            services, yamlJournalFactory, services.getStorageConfig().isDurableWrites());
+                } catch (final Throwable e) {
+                    throw new XdStorageRuntimeException("invalid state of database: error by appending commit journal of resource " + resourceId, e);
+                }
+                checkpointIfJournalTooBig(transaction);
+            } else {
+                final Collection<Object> objects = cache.readUnsafe(transaction);
+                cache.prepareCommit(transaction, record);
+                writeObjects(objects);
+            }
+        }
+    }
+
+    /** W-1: порог размера журнала — чекпоинт (полная перезапись базы существующим writer-ом + сброс журнала). */
+    private void checkpointIfJournalTooBig(final XdStorageTransaction transaction) throws XdStorageException {
+        final long threshold = services.getStorageConfig().getJournalCheckpointBytes();
+        if (org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.sizeOf(journalFile) <= threshold) {
+            return;
+        }
+        log.info("resource {} commit journal exceeded {} bytes — checkpointing (full base rewrite + journal reset)",
+                getFileName(), threshold);
+        writeObjects(cache.readUnsafe(transaction));
+        try {
+            org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.reset(journalFile);
+        } catch (final Throwable e) {
+            // безвредно: база уже содержит все закоммиченное; повтор реплея поверх нее идемпотентен
+            log.warn("commit journal {} could not be reset after checkpoint (safe: replay is idempotent): {}",
+                    journalFile, e.getMessage());
         }
     }
 
@@ -222,7 +290,18 @@ public class XdStorageResource extends XdStorageAbstractResource {
 
     public void rollbackPerformingFirstPhaseCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) throws XdStorageException {
         cache.rollbackFailedCommit(transaction, changes);
-        writeObjects(cache.readUnsafe(transaction));
+        if (journalWrites) {
+            // W-1: компенсация — восстановленное (до-транзакционное) состояние каждого измененного id.
+            // Писать в журнал обязательно: без этого обрыв после аппенда redo вернул бы отклоненную транзакцию при реплее.
+            try {
+                org.flib.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.appendCompensation(journalFile,
+                        changes, services, yamlJournalFactory, services.getStorageConfig().isDurableWrites());
+            } catch (final Throwable e) {
+                throw new XdStorageRuntimeException("invalid state of database: error by appending commit journal compensation of resource " + resourceId, e);
+            }
+        } else {
+            writeObjects(cache.readUnsafe(transaction));
+        }
         postRollback(transaction);
     }
 

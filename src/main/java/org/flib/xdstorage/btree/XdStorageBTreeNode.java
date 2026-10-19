@@ -17,13 +17,24 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
-public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstorage.serialization.IXdStorageSerializationGuard {
+public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstorage.serialization.IXdStorageSerializationGuard,
+        org.flib.xdstorage.code.IXdStorageReferenceMarked {
 
     private static final Logger log = LogManager.getLogger(XdStorageBTreeNode.class);
 
     @XdStorageObjectId
     @XdStorageObjectFieldProperties(idGeneratorType = XdStorageIdGeneratorType.DATABASE_GENERATOR)
     private Long id;
+
+    /**
+     * R-53: маркер ПАРСЕРНОГО СТАБА (PERFORMANCE-RECOMMENDATIONS.md §6). По умолчанию true:
+     * readReference материализует ссылку через newInstance() с заполненным только id, и такой
+     * инстанс обязан догружаться с диска. Реальные ноды ставят false в конструкторе.
+     * Флаг ПЕРСИСТИТСЯ: геттер isReference()/сеттер setReference() образуют свойство 'reference'
+     * (сканер свойств выводит имя поля из геттера), поэтому живая нода, парсированная с диска,
+     * восстанавливается с false, а стаб до парсинга полей несет true по умолчанию.
+     */
+    private boolean reference = true;
 
     private XdStorageBTree tree;
 
@@ -63,6 +74,15 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
 
     public void setId(final Long id) {
         this.id = id;
+    }
+
+    @Override
+    public boolean isReference() {
+        return reference;
+    }
+
+    public void setReference(final boolean reference) {
+        this.reference = reference;
     }
 
     public XdStorageBTree getTree() {
@@ -122,9 +142,48 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
     public XdStorageBTreeNode(final XdStorageBTree tree, final XdStorageBTreeNode parent) {
         this.tree = tree;
         this.parent = parent;
+        this.reference = false; // R-53: живая нода — не парсерный стаб
         this.keys = newSyncList();
         this.objects = newSyncList();
         this.children = newSyncList();
+    }
+
+    /**
+     * R-53: материализация парсерного стаба узла на холодном открытии
+     * (PERFORMANCE-RECOMMENDATIONS.md §6: B+Tree структуры нечитаемы после переоткрытия).
+     *
+     * Загрузка по (класс, id) возвращает канонический инстанс из инфраструктурного кэша
+     * (ФАЗА 3B: единственный живой инстанс на все транзакции) — стаб ЗАМЕНЯЕТСЯ каноном,
+     * а не наполняется копией через generic-fill (тот уводит бэк-референсы в пустые
+     * врапперы: getTree().getT() == 0 ломало сплиты после реопена).
+     * setReference(false) — самолечение баз, записанных до введения флага.
+     *
+     * @param liveTree   живое дерево для починки бэк-референса tree (может быть null)
+     * @param liveParent живой родитель для починки бэк-референса parent (может быть null)
+     * @return канонический инстанс узла (или сам stub, если он не стаб)
+     */
+    static XdStorageBTreeNode materialize(final XdStorageBTreeNode stub, final IXdStorage storage,
+                                          final IXdStorageTransaction transaction,
+                                          final XdStorageBTree liveTree, final XdStorageBTreeNode liveParent)
+            throws XdStorageException, XdStorageConnectionException {
+        if (stub == null || !XdStorageObjectUtils.isReference(stub)) {
+            return stub;
+        }
+        if (stub.getId() == null) {
+            throw new XdStorageException("B+Tree parser stub without id cannot be materialized");
+        }
+        final XdStorageBTreeNode canonical = storage.load(XdStorageBTreeNode.class, stub.getId(), transaction);
+        if (canonical == null) {
+            throw new XdStorageException("B+Tree node " + stub.getId() + " is referenced but missing in storage (broken structure?)");
+        }
+        canonical.setReference(false);
+        if (liveTree != null) {
+            canonical.setTree(liveTree);
+        }
+        if (liveParent != null && (canonical.getParent() == null || XdStorageObjectUtils.isReference(canonical.getParent()))) {
+            canonical.setParent(liveParent);
+        }
+        return canonical;
     }
 
     /**
@@ -339,7 +398,14 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
                 nextTreeNode.lockWrite(transaction);
                 try {
                     if (XdStorageObjectUtils.isReference(nextTreeNode)) {
-                        storage.load(nextTreeNode, transaction);
+                        // R-53: стаб следующего листа заменяется каноническим инстансом;
+                        // слот next чинится на живой канон (родителя next здесь не знаем —
+                        // его починит спуск записи через loadChildOfThisNode)
+                        final XdStorageBTreeNode materialized =
+                                materialize(nextTreeNode, storage, transaction, getTree(), null);
+                        if (materialized != nextTreeNode) {
+                            setNextTreeNodeOnThisLevel(materialized);
+                        }
                     }
                 } finally {
                     nextTreeNode.unlockWrite();
@@ -374,14 +440,33 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
             }
 
             if (XdStorageObjectUtils.isReference(child)) {
-                child.lockWrite(transaction);
+                // R-53: лок держим на СТАБЕ (отдельная переменная — child ниже переприсваивается)
+                final XdStorageBTreeNode stub = child;
+                stub.lockWrite(transaction);
                 try {
-                    if (XdStorageObjectUtils.isReference(child)) {
-                        storage.load(child, transaction);
-                        child.loadThisNode(storage, transaction);
+                    if (XdStorageObjectUtils.isReference(stub)) {
+                        // стаб ребенка заменяется каноническим инстансом по id (ФАЗА 3B
+                        // идентичность), бэк-референсы чинятся на живые дерево/родителя (this)
+                        final XdStorageBTreeNode materialized =
+                                materialize(stub, storage, transaction, getTree(), this);
+                        if (materialized != stub) {
+                            synchronized (getChildren()) {
+                                final List<XdStorageBTreeNode> slotChildren = getChildren();
+                                if (slotChildren != null) {
+                                    final int at = slotChildren.indexOf(stub);
+                                    if (at >= 0) {
+                                        slotChildren.set(at, materialized);
+                                    }
+                                }
+                            }
+                            // канон.child.next: стаб следующего листа разрешаем сразу
+                            // (прежняя семантика child.loadThisNode после загрузки)
+                            materialized.loadThisNode(storage, transaction);
+                            child = materialized;
+                        }
                     }
                 } finally {
-                    child.unlockWrite();
+                    stub.unlockWrite();
                 }
 
                 synchronized (getChildren()) {
@@ -995,21 +1080,17 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
 
         // Пакетный перенос дочерних страниц
         for (XdStorageBTreeNode child : rightChildren) {
+            XdStorageBTreeNode resolved = child;
             if (XdStorageObjectUtils.isReference(child)) {
-                child.lockWrite(transaction);
-                try {
-                    if (XdStorageObjectUtils.isReference(child)) {
-                        storage.load(child, transaction);
-                    }
-                } finally {
-                    child.unlockWrite();
-                }
+                // R-53: стаб разрешается в канонический инстанс до переноса (бэк-референсы
+                // чинятся ниже через setParent(this) + materialize(liveTree))
+                resolved = materialize(child, storage, transaction, getTree(), this);
             }
-            child.lockAndAddToDeepLock(deepLockedNode, transaction);
-            child.setParent(this);
-            storage.update(child, transaction);
+            resolved.lockAndAddToDeepLock(deepLockedNode, transaction);
+            resolved.setParent(this);
+            storage.update(resolved, transaction);
             synchronized (this.getChildren()) {
-                this.getChildren().add(child);
+                this.getChildren().add(resolved);
             }
         }
 
@@ -1074,21 +1155,17 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
             }
 
             for (XdStorageBTreeNode child : thisChildren) {
+                XdStorageBTreeNode resolved = child;
                 if (XdStorageObjectUtils.isReference(child)) {
-                    child.lockWrite(transaction);
-                    try {
-                        if (XdStorageObjectUtils.isReference(child)) {
-                            storage.load(child, transaction);
-                        }
-                    } finally {
-                        child.unlockWrite();
-                    }
+                    // R-53: стаб разрешается в канонический инстанс до переноса (бэк-референсы
+                    // чинятся ниже через setParent(left) + materialize(liveTree))
+                    resolved = materialize(child, storage, transaction, getTree(), left);
                 }
-                child.lockAndAddToDeepLock(deepLockedNode, transaction);
-                child.setParent(left);
-                storage.update(child, transaction);
+                resolved.lockAndAddToDeepLock(deepLockedNode, transaction);
+                resolved.setParent(left);
+                storage.update(resolved, transaction);
                 synchronized (left.getChildren()) {
-                    left.getChildren().add(child);
+                    left.getChildren().add(resolved);
                 }
             }
 

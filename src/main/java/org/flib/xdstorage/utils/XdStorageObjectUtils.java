@@ -51,7 +51,11 @@ public final class XdStorageObjectUtils {
     }
 
     public static boolean isReference(final Object object) {
-        return object instanceof IXdStorageSimpleWrapper ? ((IXdStorageSimpleWrapper) object).isReference__() : false;
+        if (object instanceof IXdStorageSimpleWrapper) return ((IXdStorageSimpleWrapper) object).isReference__();
+        // R-53: парсерные стабы инфраструктуры B+Дерева (readReference -> newInstance) — не
+        // обертки; опознаем их по маркер-интерфейсу, иначе холодная догрузка не срабатывала
+        if (object instanceof IXdStorageReferenceMarked) return ((IXdStorageReferenceMarked) object).isReference();
+        return false;
     }
 
     public static <TObject> IXdStorageSimpleWrapper wrapAsSimpleObject(final TObject object, final IXdStorage storage, final IXdStorageTransaction transaction) throws Exception {

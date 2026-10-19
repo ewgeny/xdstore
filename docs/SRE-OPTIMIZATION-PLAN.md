@@ -196,7 +196,10 @@ green; BENCHMARKS.md re-measured with S-2 on and off.
 This is D-3's full scope. The campaign deliberately parked it because it changes crash/commit
 semantics — so it gets a design document before code. **Design landed 2026-10-18:
 [WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md) — per-class append journal + checkpointing; W-0
-prerequisites (S-1/S-2) are already in. Implementation is the next campaign.**
+prerequisites (S-1/S-2) are already in. Implementation started: **W-1 LANDED 2026-10-19** (`journalWrites` flag, default OFF;
+`XdStorageYamlCommitJournal` + prepare-replay + size-threshold checkpoint + failed-commit
+compensation; 6/6 tests; see WRITE-PATH-DESIGN.md for the implemented deviations). W-2 (cache
+bounds) and W-3 (default flip) remain.**
 
 1. **Design first (one doc):** append-only commit journal per data class
    (`data/<Class>/journal.<fmt>`): phase-1 appends redo records (op, id, payload) + fsync-able

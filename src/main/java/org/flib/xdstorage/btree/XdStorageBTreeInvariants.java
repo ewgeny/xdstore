@@ -103,6 +103,11 @@ public final class XdStorageBTreeInvariants {
         final Comparable[] previousKey = new Comparable[]{null};
 
         XdStorageBTreeNode current = tree.getFirstLeaf();
+        // R-53: стаб первого листа (холодное открытие) разрешается до обхода цепочки
+        if (current != null && XdStorageObjectUtils.isReference(current)) {
+            current = XdStorageBTreeNode.materialize(current, storage, transaction, tree, null);
+            tree.setFirstLeaf(current);
+        }
         int guard = 0;
         while (current != null) {
             if (failure[0] != null) {
@@ -131,9 +136,16 @@ public final class XdStorageBTreeInvariants {
 
             final XdStorageBTreeNode next = current.getNextTreeNodeOnThisLevel();
             if (next != null && XdStorageObjectUtils.isReference(next)) {
-                storage.load(next, transaction);
+                // R-53: стаб следующего листа разрешается в канонический инстанс (слот чинится:
+                // валидация идет под write-локом дерева, мутаций не видно)
+                final XdStorageBTreeNode resolved = XdStorageBTreeNode.materialize(next, storage, transaction, tree, null);
+                if (resolved != next) {
+                    current.setNextTreeNodeOnThisLevel(resolved);
+                }
+                current = resolved;
+            } else {
+                current = next;
             }
-            current = next;
 
             if (++guard > 100000) {
                 throw new XdStorageException(context + ": цепочка листьев длиннее 100000 — защита от зацикливания");
@@ -238,12 +250,12 @@ public final class XdStorageBTreeInvariants {
             XdStorageBTreeNode resolved = child;
             if (XdStorageObjectUtils.isReference(child)) {
                 try {
-                    storage.load(child, transaction);
+                    // R-53: стаб ребенка разрешается в канонический инстанс по id
+                    resolved = XdStorageBTreeNode.materialize(child, storage, transaction, null, node);
                 } catch (final Throwable t) {
                     throw new XdStorageException(context + ": ВИСЯЧАЯ ССЫЛКА — внутренняя нода " + node.getId()
                             + " ссылается на ребенка " + child.getId() + ", который не разрешается: " + t.getMessage(), t);
                 }
-                resolved = child;
             }
             descendCollectingLeaves(resolved, storage, transaction, leaves, context, visited, allowEqualSeparators);
         }

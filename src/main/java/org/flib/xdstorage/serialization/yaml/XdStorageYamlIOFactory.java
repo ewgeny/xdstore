@@ -58,4 +58,14 @@ public class XdStorageYamlIOFactory implements IXdStorageIOFactory {
         }
         return writer;
     }
+
+    /** W-1: доступ кодека журнала коммитов к простым типам (пакетный, внутренний). */
+    IXdStorageSimpleTypeHelper simpleTypeHelper() {
+        return simpleTypeHelper;
+    }
+
+    /** W-1: генератор id для writeObjectData при записи тела объекта в журнал. */
+    IXdStorageIdGenerator idGenerator() {
+        return idGenerator;
+    }
 }

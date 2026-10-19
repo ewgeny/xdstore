@@ -38,6 +38,8 @@ public final class XdStorageConfig {
     private final int workerPoolSize;
     private final long defaultTransactionTimeoutMillis;
     private final XdStorageIsolationLevel isolationLevel;
+    private final boolean journalWrites;
+    private final long journalCheckpointBytes;
 
     private XdStorageConfig(final Builder builder) {
         this.durableWrites = builder.durableWrites;
@@ -47,6 +49,8 @@ public final class XdStorageConfig {
         this.workerPoolSize = builder.workerPoolSize;
         this.defaultTransactionTimeoutMillis = builder.defaultTransactionTimeoutMillis;
         this.isolationLevel = builder.isolationLevel;
+        this.journalWrites = builder.journalWrites;
+        this.journalCheckpointBytes = builder.journalCheckpointBytes;
     }
 
     public static XdStorageConfig defaults() {
@@ -85,6 +89,16 @@ public final class XdStorageConfig {
         return isolationLevel;
     }
 
+    /** W-1: append-only commit journal for data/reference resources (YAML format only; default off = full-file rewrite as before). */
+    public boolean isJournalWrites() {
+        return journalWrites;
+    }
+
+    /** Journal size above which a checkpoint (full base rewrite + journal reset) runs after a commit. */
+    public long getJournalCheckpointBytes() {
+        return journalCheckpointBytes;
+    }
+
     public static final class Builder {
         private boolean durableWrites = false;
         private boolean acceptMissingEofSentinel = false;
@@ -93,6 +107,8 @@ public final class XdStorageConfig {
         private int workerPoolSize = 15;
         private long defaultTransactionTimeoutMillis = 3 * 1000L;
         private XdStorageIsolationLevel isolationLevel = XdStorageIsolationLevel.SNAPSHOT;
+        private boolean journalWrites = false;
+        private long journalCheckpointBytes = 16L * 1024 * 1024;
 
         public Builder durableWrites(final boolean value) {
             this.durableWrites = value;
@@ -132,6 +148,18 @@ public final class XdStorageConfig {
             if (value == null)
                 throw new IllegalArgumentException("isolationLevel cannot be null");
             this.isolationLevel = value;
+            return this;
+        }
+
+        public Builder journalWrites(final boolean value) {
+            this.journalWrites = value;
+            return this;
+        }
+
+        public Builder journalCheckpointBytes(final long value) {
+            if (value <= 0)
+                throw new IllegalArgumentException("journalCheckpointBytes must be positive");
+            this.journalCheckpointBytes = value;
             return this;
         }
 

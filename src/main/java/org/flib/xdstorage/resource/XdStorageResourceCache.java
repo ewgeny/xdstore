@@ -181,6 +181,17 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
+    /** W-1: replay of a committed journal UPSERT — base-парсинг уступает состоянию журнала (last writer wins), поэтому put, не putIfAbsent. */
+    public void applyCommittedJournalUpsert(final Object object) {
+        final Object objectCanonical = adoptCanonicalInstance(object);
+        cache.put(field.get(objectCanonical), createReadRecord(objectCanonical));
+    }
+
+    /** W-1: replay of a committed journal DELETE. */
+    public void applyCommittedJournalDelete(final Object id) {
+        cache.remove(id);
+    }
+
     public <T> void fillCacheOnlyIfNotExists(final Collection<T> objects) {
         for (final Object object : objects) {
             final Object objectCanonical = adoptCanonicalInstance(object);
@@ -222,6 +233,15 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
      */
     private Object adoptCanonicalInstance(final Object parsed) {
         if (!infrastructureCache || parsed == null) {
+            return parsed;
+        }
+        // R-53: парсерные стабы (references.yaml/readReference -> newInstance с одним id)
+        // НЕ канонизируются: references-ресурс инфраструктурного класса готовится раньше
+        // по-id объектных файлов, и зарегистрированный стаб навсегда подменял собой
+        // канонический инстанс (реальный парс затем отбрасывался как LOST-TO-EXISTING) —
+        // materialize() получал пустой узел. Реестр держит только живые/полные инстансы.
+        if (parsed instanceof org.flib.xdstorage.code.IXdStorageReferenceMarked
+                && ((org.flib.xdstorage.code.IXdStorageReferenceMarked) parsed).isReference()) {
             return parsed;
         }
         final XdStorageCanonicalInstanceRegistry registry = services.getCanonicalInstances();

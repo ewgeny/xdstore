@@ -1,6 +1,6 @@
 # Write-path design: journal-based commit (Phase W)
 
-Status: **DESIGN DOCUMENT — implementation not started** (SRE-OPTIMIZATION-PLAN Phase W; supersedes
+Status: **W-1 IMPLEMENTED (2026-10-19, flag `journalWrites`, default OFF)** — journal append/replay/checkpoint behind the flag; W-2 cache bounds and W-3 default flip remain. Two implemented deviations from the sketch below (simpler and crash-safer): (1) the journal file is per-RESOURCE (`<basefile>.journal.yaml`) rather than per-class — fragments journal independently, same semantics; (2) there is NO `journal.checkpoint` marker file — replay is idempotent (UPSERT/DELETE by id, last-writer-wins), so a crash anywhere between "base rewritten" and "journal deleted" is safe and the marker is unnecessary; checkpoint = existing full-file write + journal reset. Failed-commit recovery appends COMPENSATION records (the restored pre-tx state per changed id, taken from the prepareCommit changes collector) — deleting the journal would lose earlier un-checkpointed commits. Torn-tail policy: records after the LAST sentinel are discarded with a WARN (the interrupted commit was never reported durable) — unlike a truncated BASE file which fails loudly (S-1). (SRE-OPTIMIZATION-PLAN Phase W; supersedes
 the parked D-3 "batching" item). One design round is mandatory before any code: this changes
 crash/commit semantics, the hardest class of change in this engine.
 
@@ -100,8 +100,11 @@ with a loud WARN naming the discarded serial range.
 ## 5. Sequencing
 
 1. **W-0 (prerequisite, DONE 2026-10-18):** S-1 sentinel + S-2 durable — the journal leans on both.
-2. **W-1:** journal writer/reader + prepare-replay behind a config flag (`journalWrites=false`
-   default); invariant tests (replay idempotency, torn tail, checkpoint windows).
+2. **W-1: DONE 2026-10-19** — journal writer/reader + prepare-replay behind a config flag
+   (`journalWrites=false` default); tests: journal-only round-trip, delete/update replay,
+   checkpoint reset, torn-tail discard, flag-off default, YAML-only validation
+   (`XdStorageW1JournalTest`, 6/6). FULL-FILE write-out remains for id-index/search B+tree
+   infra (unchanged, by design).
 3. **W-2:** checkpointing + cache-bounds ship together (cache caps: cold committed-record LRU,
    re-loadable from base+journal on demand).
 4. **W-3:** flip default behind the flag after a soak run; re-measure BENCHMARKS.md (acceptance:

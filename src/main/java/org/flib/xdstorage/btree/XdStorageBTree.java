@@ -198,15 +198,13 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
                 createRoot(storage, transaction);
             }
 
-            if (XdStorageObjectUtils.isReference(root)) {
-                root.lockWrite(transaction);
-                try {
-                    if (XdStorageObjectUtils.isReference(root)) {
-                        storage.load(root, transaction);
-                    }
-                } finally {
-                    root.unlockWrite();
-                }
+            // R-53: парсерный стаб корня (холодное открытие) заменяется каноническим
+            // инстансом — иначе спуск идет по пустому узлу и вставки после реопена
+            // портят структуру (PERFORMANCE-RECOMMENDATIONS.md §6);
+            // firstLeaf — тоже: цепочка листьев нужна валидатору и сканам
+            root = this.root = XdStorageBTreeNode.materialize(root, storage, transaction, this, null);
+            if (firstLeaf != null) {
+                firstLeaf = this.firstLeaf = XdStorageBTreeNode.materialize(firstLeaf, storage, transaction, this, null);
             }
         } finally {
             unlockWrite();
@@ -279,15 +277,12 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
             }
 
             if (root != null) {
-                if (XdStorageObjectUtils.isReference(root)) {
-                    root.lockWrite(transaction);
-                    try {
-                        if (XdStorageObjectUtils.isReference(root)) {
-                            storage.load(root, transaction);
-                        }
-                    } finally {
-                        root.unlockWrite();
-                    }
+                // R-53: парсерный стаб корня (холодное открытие) заменяется каноническим
+                // инстансом — удаления после реопена обязаны идти по живому графу;
+                // firstLeaf — тоже (цепочка листьев: валидатор, слияния листьев)
+                root = this.root = XdStorageBTreeNode.materialize(root, storage, transaction, this, null);
+                if (firstLeaf != null) {
+                    firstLeaf = this.firstLeaf = XdStorageBTreeNode.materialize(firstLeaf, storage, transaction, this, null);
                 }
             } else {
                 if (!wasInitialized && !isReference) {
@@ -365,15 +360,11 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
                 throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
             }
 
-            if (XdStorageObjectUtils.isReference(root)) {
-                root.lockWrite(transaction);
-                try {
-                    if (XdStorageObjectUtils.isReference(root)) {
-                        storage.load(root, transaction);
-                    }
-                } finally {
-                    root.unlockWrite();
-                }
+            // R-53: парсерный стаб корня (холодное открытие) заменяется каноническим инстансом;
+            // firstLeaf — тоже (цепочка листьев: валидатор, сканы)
+            root = this.root = XdStorageBTreeNode.materialize(root, storage, transaction, this, null);
+            if (firstLeaf != null) {
+                firstLeaf = this.firstLeaf = XdStorageBTreeNode.materialize(firstLeaf, storage, transaction, this, null);
             }
         } finally {
             unlockWrite();
@@ -469,13 +460,16 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
             // Раньше дисковый IO выполнялся под write-локом ВСЕГО ДЕРЕВА — все читатели и
             // писатели дерева простаивали весь XML-парс, и на холодном кэше первый поиск
             // вымораживал дерево на секунды (таймауты "монопольно занят на запись" у всех воркеров).
-            root.lockWrite(transaction);
+            // R-53: стаб корня заменяется каноническим инстансом по id (ФАЗА 3B идентичность) —
+            // без этого спуск шел по пустому узлу и все поиски после реопена возвращали пусто.
+            final XdStorageBTreeNode stub = root;
+            stub.lockWrite(transaction);
             try {
-                if (XdStorageObjectUtils.isReference(root)) {
-                    storage.load(root, transaction);
+                if (XdStorageObjectUtils.isReference(stub)) {
+                    root = this.root = XdStorageBTreeNode.materialize(stub, storage, transaction, this, null);
                 }
             } finally {
-                root.unlockWrite();
+                stub.unlockWrite();
             }
         }
 
@@ -536,15 +530,17 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
             unlockWrite();
         }
         if (chainStart != null) {
-            prewarmLeafChain(chainStart, storage, transaction);
+            // R-53: предпрогрев разрешает стабы цепи (включая первый лист) в канонические
+            // инстансы и возвращает разрешенное начало цепи для обхода
+            chainStart = prewarmLeafChain(chainStart, storage, transaction);
         }
 
         lockRead(transaction);
-        if (firstLeaf == null) {
+        if (chainStart == null) {
             unlockRead();
             return;
         }
-        firstLeaf.read(this, storage, transaction, viewer);
+        chainStart.read(this, storage, transaction, viewer);
     }
 
     /**
@@ -553,26 +549,49 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
      * НЕБЛОКИРУЮЩЕЕ (R-42): стаб, чей write-лок занят чужим читателем/писателем, ПРОПУСКАЕТСЯ —
      * его догрузит штатный locked-обход. Блокирующий lockWrite здесь скрещивался с coupled
      * читателями встречным порядком и давал взаимные 3-секундные зависания (PhantomRead).
+     * R-53: стаб разрешается в канонический инстанс по id; слоты firstLeaf/next чинятся
+     * на живой канон. Возвращает разрешенное начало цепи (или null, если startLeaf == null).
      */
-    private void prewarmLeafChain(final XdStorageBTreeNode startLeaf, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+    private XdStorageBTreeNode prewarmLeafChain(final XdStorageBTreeNode startLeaf, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        if (startLeaf == null) {
+            return null;
+        }
         XdStorageBTreeNode current = startLeaf;
+        XdStorageBTreeNode previous = null;
+        XdStorageBTreeNode resolvedStart = startLeaf;
         int steps = 0;
         while (current != null && steps++ < PREWARM_STEP_BUDGET) {
             if (XdStorageObjectUtils.isReference(current) && current.tryLockWrite(transaction)) {
+                // R-53: лок держим на СТАБЕ (current ниже может переприсвоиться каноном)
+                final XdStorageBTreeNode stub = current;
                 try {
-                    if (XdStorageObjectUtils.isReference(current)) {
-                        storage.load(current, transaction);
+                    if (XdStorageObjectUtils.isReference(stub)) {
+                        final XdStorageBTreeNode materialized =
+                                XdStorageBTreeNode.materialize(stub, storage, transaction, this, null);
+                        if (materialized != stub) {
+                            // чинка слота цепи: первый лист — в поле дерева,
+                            // последующие — в next предыдущего (уже канонического) листа
+                            if (previous == null) {
+                                this.firstLeaf = materialized;
+                                resolvedStart = materialized;
+                            } else {
+                                previous.setNextTreeNodeOnThisLevel(materialized);
+                            }
+                            current = materialized;
+                        }
                     }
                 } finally {
-                    current.unlockWrite();
+                    stub.unlockWrite();
                 }
             }
             // Указатель читаем без нодового лока сознательно: гонка со сплитом здесь неопасна —
             // пропущенный стаб догрузит locked-обход; Reference читается атомарно (volatile).
+            previous = current;
             current = current.getNextTreeNodeOnThisLevel();
         }
         if (steps >= PREWARM_STEP_BUDGET) {
             log.warn("B+Tree leaf chain prewarm hit the step budget {} in tree {} — possible chain cycle", PREWARM_STEP_BUDGET, id);
         }
+        return resolvedStart;
     }
 }
