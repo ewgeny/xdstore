@@ -132,6 +132,7 @@ public class XdStorageResource extends XdStorageAbstractResource {
 
         // R-43: guard-ы берутся ДО атомарной записи и отпускаются гарантированно в finally
         final List<Object> guarded = new ArrayList<>();
+        final long writeStartNanos = System.nanoTime();
         try {
             for (final Object object : objects) {
                 if (object instanceof org.flib.xdstorage.serialization.IXdStorageSerializationGuard) {
@@ -141,7 +142,7 @@ public class XdStorageResource extends XdStorageAbstractResource {
             }
             // crash-safe: пишем во временный файл-соседа и атомарно подменяем ресурс,
             // чтобы сбой посреди коммита не мог обрезать существующий файл ресурса
-            XdStorageAtomicFile.writeReplacing(getFileName(), out -> {
+            XdStorageAtomicFile.writeReplacing(getFileName(), services.getStorageConfig().isDurableWrites(), out -> {
                 if (isReferences) {
                     writer.writeReferences(out, idField, objects);
                 } else {
@@ -151,6 +152,9 @@ public class XdStorageResource extends XdStorageAbstractResource {
                     writer.writeObjects(out, objects);
                 }
             });
+            services.getMetrics().increment(org.flib.xdstorage.metrics.XdStorageMetrics.RESOURCE_WRITE_OUTS);
+            services.getMetrics().add(org.flib.xdstorage.metrics.XdStorageMetrics.RESOURCE_WRITE_OUT_NANOS,
+                    System.nanoTime() - writeStartNanos);
         } catch (final Throwable e) {
             throw new XdStorageRuntimeException("invalid state of database: error by writing resource " + resourceId, e);
         } finally {

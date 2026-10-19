@@ -38,7 +38,11 @@ public class XdStorageYamlIOFactory implements IXdStorageIOFactory {
         // Ленивая инициализация ридера строго для текущего потока выполнения
         IXdStorageObjectsReader reader = threadLocalReader.get();
         if (reader == null) {
-            reader = new XdStorageYamlObjectsReader(simpleTypeHelper);
+            // S-1: движок по умолчанию строг (обрезанный файл = отказ загрузки);
+            // XdStorageConfig.acceptMissingEofSentinel включает легаси-режим для миграции
+            final boolean strict = services.getStorageConfig() == null
+                    || !services.getStorageConfig().isAcceptMissingEofSentinel();
+            reader = new XdStorageYamlObjectsReader(simpleTypeHelper, strict);
             threadLocalReader.set(reader);
         }
         return reader;

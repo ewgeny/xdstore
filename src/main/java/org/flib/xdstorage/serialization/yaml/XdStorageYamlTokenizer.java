@@ -10,6 +10,16 @@ import java.io.Reader;
  */
 public class XdStorageYamlTokenizer {
 
+    /**
+     * S-1: последний маркер файла, который райтер ставит после корневого блока.
+     * Его отсутствие = файл обрезан (сбой/внешнее вмешательство) — ридер обязан
+     * отказать в загрузке, а не молча отдать частичную базу.
+     * Формат — строка комментария: старые версии движка (и любые YAML-читатели)
+     * пропускают ее безвредно.
+     */
+    public static final String EOF_SENTINEL_LINE = "# xdstorage-eof";
+    public static final String EOF_SENTINEL_KEY = "xdstorage-eof";
+
     private final BufferedReader reader;
 
     // Внутренний буфер для реализации заглядывания вперёд (Look-Ahead Barrier)
@@ -51,7 +61,16 @@ public class XdStorageYamlTokenizer {
         String line;
         while ((line = reader.readLine()) != null) {
             // 1. Мгновенно отсекаем пустые строки и комментарии СУБД
-            if (line.trim().isEmpty() || line.trim().startsWith("#")) {
+            final String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (trimmed.startsWith("#")) {
+                // S-1: сентинел конца файла НЕ пропускается — возвращается как токен уровня 0,
+                // чтобы высокий ридер мог отличить честный конец файла от обрыва
+                if (EOF_SENTINEL_LINE.equals(trimmed)) {
+                    return new YamlLineToken(0, EOF_SENTINEL_KEY, null, false);
+                }
                 continue;
             }
 

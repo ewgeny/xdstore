@@ -4,6 +4,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.exceptions.XdStorageConnectionException;
 import org.flib.xdstorage.exceptions.XdStorageException;
+import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.index.IXdStorageIndexDaoResource;
 import org.flib.xdstorage.resource.*;
 import org.flib.xdstorage.search.IXdStorageSearchManager;
@@ -17,6 +18,7 @@ import org.flib.xdstorage.transaction.XdStorageTransaction;
 import org.flib.xdstorage.transaction.XdStorageTransactionManager;
 import org.flib.xdstorage.trigger.IXdStorageTrigger;
 import org.flib.xdstorage.utils.XdStorageClassInfo;
+import org.flib.xdstorage.utils.XdStorageFolderLock;
 import org.flib.xdstorage.utils.XdStorageObjectUtils;
 
 import java.util.ArrayList;
@@ -36,6 +38,17 @@ class XdStorage implements IXdFileStorage {
 
     private final XdStorageServicesLocator services;
 
+    private final XdStorageConfig config;
+
+    /** S-4: после shutdown() любой публичный вызов падает громко, а не с RejectedExecutionException где-то в недрах. */
+    private volatile boolean closed = false;
+
+    private final Object shutdownLock = new Object();
+
+    private XdStorageFolderLock folderLock;
+
+    private Thread shutdownHook;
+
     /**
      * This constructor initialize storage for specified folder. All files will be
      * storaged in this folder.
@@ -43,18 +56,59 @@ class XdStorage implements IXdFileStorage {
      * @param folder Storage path.
      */
     XdStorage(final String name, final String folder, final int fragmentSize) {
-        this(name, folder, fragmentSize, FilesFormat.YAML);
+        this(name, folder, fragmentSize, FilesFormat.YAML, XdStorageConfig.defaults());
     }
 
     XdStorage(final String name, final String folder, final int fragmentSize, FilesFormat format) {
+        this(name, folder, fragmentSize, format, XdStorageConfig.defaults());
+    }
+
+    XdStorage(final String name, final String folder, final int fragmentSize, final FilesFormat format, final XdStorageConfig config) {
         this.name = name;
+        this.config = config == null ? XdStorageConfig.defaults() : config;
         services = new XdStorageServicesLocator();
-        services.initFileConfiguration(this, folder, fragmentSize, format);
+        services.initFileConfiguration(this, folder, fragmentSize, format, this.config);
+        if (this.config.isRegisterShutdownHook()) {
+            // S-4: best-effort закрытие при выходе JVM. НЕ заменяет daemonWorkerThreads:
+            // хуки запускаются только после завершения последнего не-daemon потока, поэтому
+            // не-daemon пул блокирует выход JVM еще до того, как хуки успеют сработать.
+            final Thread hook = new Thread(this::shutdownFromHook, "xdstorage-shutdown-hook-" + name);
+            hook.setDaemon(true);
+            try {
+                Runtime.getRuntime().addShutdownHook(hook);
+                this.shutdownHook = hook;
+            } catch (final IllegalStateException e) {
+                log.warn("shutdown hook could not be registered for storage '{}' (JVM already shutting down)", name);
+            }
+        }
+    }
+
+    /** S-3: блокировку каталога выдает провайдер при создании; освобождается в shutdown(). */
+    void attachFolderLock(final XdStorageFolderLock lock) {
+        this.folderLock = lock;
+    }
+
+    /** S-4: громкий отказ после shutdown() вместо сырых RejectedExecutionException в недрах. */
+    private void ensureOpen() {
+        if (closed) {
+            throw new XdStorageRuntimeException("storage '" + name + "' is shut down — open a new instance via XdStorageProvider");
+        }
+    }
+
+    private void shutdownFromHook() {
+        log.info("JVM shutdown hook closing storage '{}'", name);
+        shutdown();
     }
 
     @Override
     public String getName() {
         return name;
+    }
+
+    @Override
+    public org.flib.xdstorage.metrics.XdStorageMetrics getMetrics() {
+        ensureOpen();
+        return services.getMetrics();
     }
 
     /**
@@ -65,6 +119,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public <T> void registerTrigger(final IXdStorageTrigger<T> trigger) {
+        ensureOpen();
         services.getTriggersManager().registerTrigger(trigger);
     }
 
@@ -76,21 +131,25 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public IXdStorageTransaction beginTransaction(final long timeout) {
+        ensureOpen();
         return services.getTransactionsManager().beginTransaction(timeout);
     }
 
     @Override
     public IXdStorageTransaction beginTransaction() {
-        return beginTransaction(3 * 1000);
+        ensureOpen();
+        return beginTransaction(config.getDefaultTransactionTimeoutMillis());
     }
 
     @Override
     public IXdStorageTransaction beginTransaction(final IXdStorageTransaction transaction, final long timeout) {
+        ensureOpen();
         return services.getTransactionsManager().beginTransaction(transaction, timeout);
     }
 
     @Override
     public IXdStorageTransaction beginTransaction(final IXdStorageTransaction transaction) {
+        ensureOpen();
         return beginTransaction(transaction, 3 * 1000);
     }
 
@@ -101,6 +160,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void commitTransaction(final IXdStorageTransaction transaction) throws XdStorageException {
+        ensureOpen();
         if (transaction == null)
             throw new IllegalArgumentException("transaction cannot be null");
 
@@ -114,6 +174,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void rollbackTransaction(final IXdStorageTransaction transaction) {
+        ensureOpen();
         if (transaction == null)
             throw new IllegalArgumentException("transaction cannot be null");
 
@@ -144,6 +205,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void registerStructureUpdater(final IXdStorageStructureUpdater updater) {
+        ensureOpen();
         services.getStructureManager().registerUpdater(updater);
     }
 
@@ -153,6 +215,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public List<IXdStorageStructureUpdater> executeStructureUpdate(final Class<?> cl) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -172,6 +235,7 @@ class XdStorage implements IXdFileStorage {
     @Override
     @SuppressWarnings("unchecked")
     public void save(final Object object) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -182,6 +246,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void save(final Object object, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (object == null)
             throw new XdStorageException("object cannot be null");
         if (transaction == null)
@@ -242,6 +307,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void save(final Collection<?> objects) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -252,6 +318,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void save(final Collection<?> objects, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (objects == null)
             throw new XdStorageException("objects collection cannot be null");
         if (transaction == null)
@@ -346,6 +413,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public boolean has(final Class<?> cl, final Object id) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -356,6 +424,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public boolean has(final Class<?> cl, final Object id, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (cl == null)
             throw new XdStorageException("class cannot be null");
         if (id == null)
@@ -397,6 +466,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void load(final Object reference) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -407,6 +477,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void load(final Object reference, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (reference == null)
             throw new XdStorageException("reference cannot be null");
         if (transaction == null)
@@ -454,6 +525,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public <T> T load(final Class<T> cl, final Object id) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -465,6 +537,7 @@ class XdStorage implements IXdFileStorage {
     @Override
     @SuppressWarnings("unchecked")
     public <T> T load(final Class<T> cl, final Object id, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (cl == null)
             throw new XdStorageException("class cannot be null");
         if (id == null)
@@ -515,6 +588,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void load(final Collection<?> references) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -525,6 +599,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void load(final Collection<?> references, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (references == null)
             throw new XdStorageException("references collection cannot be null");
         if (transaction == null)
@@ -606,6 +681,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public <T> Collection<T> load(final Class<T> cl) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -617,6 +693,7 @@ class XdStorage implements IXdFileStorage {
     @Override
     @SuppressWarnings("unchecked")
     public <T> Collection<T> load(final Class<T> cl, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (cl == null)
             throw new XdStorageException("class cannot be null");
         if (transaction == null)
@@ -698,6 +775,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public <T> Collection<T> load(final Class<T> cl, final IXdStoragePredicate<T> predicate) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -709,6 +787,7 @@ class XdStorage implements IXdFileStorage {
     @Override
     @SuppressWarnings("unchecked")
     public <T> Collection<T> load(final Class<T> cl, final IXdStoragePredicate<T> predicate, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (cl == null)
             throw new XdStorageException("class cannot be null");
         if (predicate == null)
@@ -781,6 +860,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public <T> Collection<T> load(final Class<T> cl, final String indexName, final XdStorageSearchQuery query) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -792,6 +872,7 @@ class XdStorage implements IXdFileStorage {
     @Override
     public <T> Collection<T> load(final Class<T> cl, final String indexName, final XdStorageSearchQuery query,
                                   final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (cl == null)
             throw new XdStorageException("class cannot be null");
         if (query == null)
@@ -834,6 +915,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public <T> void watch(final Class<T> cl, final IXdStorageWatcher<T> watcher) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -845,6 +927,7 @@ class XdStorage implements IXdFileStorage {
     @Override
     @SuppressWarnings("unchecked")
     public <T> void watch(final Class<T> cl, final IXdStorageWatcher<T> watcher, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (cl == null)
             throw new XdStorageException("class cannot be null");
         if (watcher == null)
@@ -925,6 +1008,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void update(final Object object) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -935,6 +1019,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void update(final Object object, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (object == null)
             throw new XdStorageException("object cannot be null");
         if (transaction == null)
@@ -990,6 +1075,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void update(final Collection<?> objects) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -1000,6 +1086,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void update(final Collection<?> objects, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (objects == null)
             throw new XdStorageException("objects cannot be null");
         if (transaction == null)
@@ -1090,6 +1177,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void delete(final Object reference) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -1100,6 +1188,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void delete(final Object reference, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (reference == null)
             throw new XdStorageException("reference cannot be null");
         log.debug("delete {} requested by tx {}", reference.getClass().getSimpleName(), transaction.getTransactionId());
@@ -1160,6 +1249,7 @@ class XdStorage implements IXdFileStorage {
      */
     @Override
     public void delete(final Collection<?> references) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (!checkIsInTransaction())
             throw new XdStorageException("method must be executed in transaction");
 
@@ -1170,6 +1260,7 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public void delete(final Collection<?> references, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
         if (references == null)
             throw new XdStorageException("references collection cannot be null");
         if (transaction == null)
@@ -1254,12 +1345,34 @@ class XdStorage implements IXdFileStorage {
 
     @Override
     public IXdStorageTransactionManager getTransactionManager() {
+        ensureOpen();
         return services.getTransactionsManager();
     }
 
+    @Override
     public void shutdown() {
+        synchronized (shutdownLock) {
+            // S-4: shutdown идемпотентен — повторный вызов (явный + хук) ничего не ломает
+            if (closed)
+                return;
+            closed = true;
+        }
+        if (shutdownHook != null) {
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook);
+            } catch (final IllegalStateException e) {
+                // JVM уже в процессе завершения — хук сейчас сам и сработает
+            } catch (final Throwable t) {
+                log.warn("shutdown hook of storage '{}' could not be removed: {}", name, t.getMessage());
+            }
+            shutdownHook = null;
+        }
         XdStorageProvider.unregisterStorage(this);
         services.shutdown();
+        if (folderLock != null) {
+            folderLock.close();
+            folderLock = null;
+        }
     }
 
     private boolean checkHasObjectIdField(final Class<?> cl) {

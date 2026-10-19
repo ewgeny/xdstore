@@ -179,7 +179,7 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         try {
             // crash-safe: пишем во временный файл-соседа и атомарно подменяем ресурс,
             // чтобы сбой посреди коммита не мог обрезать существующий файл ресурса
-            XdStorageAtomicFile.writeReplacing(getFileName(), out -> {
+            XdStorageAtomicFile.writeReplacing(getFileName(), services.getStorageConfig().isDurableWrites(), out -> {
                 writer.writeObjects(out, objects);
             });
         } catch (final Throwable e) {

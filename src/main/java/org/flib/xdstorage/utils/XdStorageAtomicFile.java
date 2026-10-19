@@ -3,19 +3,32 @@ package org.flib.xdstorage.utils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 
 /**
  * Crash-safe write-out for resource files: content is written to a temporary
  * sibling file which then atomically replaces the target, so a crash can never
  * truncate an existing resource file halfway (the old delete-then-recreate
  * scheme lost the resource if the process died between the two steps).
+ *
+ * <p>S-2 (durability): by default the guarantee stops at the process boundary —
+ * {@code BufferedWriter.close()} only flushes to the OS page cache, so a power
+ * loss right after a commit can still lose the newest file version. With
+ * {@code durable = true} the temp file is {@code fsync}ed before the rename and
+ * the parent directory is {@code fsync}ed after it, making the commit
+ * power-loss-safe at the cost of one sync per written file. Java-8 compatible:
+ * directory sync via a read-only channel {@code force}, best-effort on
+ * filesystems/OSes that do not support it.</p>
  */
 public final class XdStorageAtomicFile {
 
@@ -25,6 +38,10 @@ public final class XdStorageAtomicFile {
     }
 
     public static void writeReplacing(final String fileName, final ContentWriter content) throws IOException {
+        writeReplacing(fileName, false, content);
+    }
+
+    public static void writeReplacing(final String fileName, final boolean durable, final ContentWriter content) throws IOException {
         final File target = new File(fileName);
         final File tmp = new File(fileName + ".tmp");
         if (tmp.exists()) {
@@ -41,22 +58,55 @@ public final class XdStorageAtomicFile {
             tmp.createNewFile();
 
             Writer writer = null;
+            FileOutputStream fos = null;
             try {
                 // Phase D: буферизация обязательна — сырой FileWriter делает syscall на каждый
                 // append сериализации; на full-file write-out это доминирующая стоимость коммита
-                writer = new java.io.BufferedWriter(new FileWriter(tmp), 1 << 16);
+                fos = new FileOutputStream(tmp);
+                writer = new BufferedWriter(new OutputStreamWriter(fos), 1 << 16);
                 content.write(writer);
+                writer.flush();
+                if (durable) {
+                    // S-2: данные файла должны дойти до диска ДО переименования
+                    fos.getFD().sync();
+                }
             } finally {
                 if (writer != null)
                     writer.close();
+                if (fos != null)
+                    fos.close();
             }
 
             moveReplacing(tmp, target);
+            if (durable) {
+                // S-2: сам rename должен пережить отключение питания — синхронизируем каталог
+                syncDirectory(target.getParentFile());
+            }
         } catch (final Exception e) {
             tmp.delete();
             if (e instanceof IOException)
                 throw (IOException) e;
             throw new IOException("error by writing content of resource " + fileName, e);
+        }
+    }
+
+    /** best-effort: not every filesystem allows opening/syncing a directory — degrade to the non-durable rename */
+    private static void syncDirectory(final File dir) {
+        if (dir == null)
+            return;
+        FileChannel channel = null;
+        try {
+            channel = FileChannel.open(dir.toPath(), StandardOpenOption.READ);
+            channel.force(true);
+        } catch (final Exception e) {
+            log.warn("directory fsync unsupported for {} — rename durability is best-effort here ({})",
+                    dir, e.getMessage());
+        } finally {
+            if (channel != null)
+                try {
+                    channel.close();
+                } catch (final IOException ignored) {
+                }
         }
     }
 
@@ -70,6 +120,30 @@ public final class XdStorageAtomicFile {
             Files.move(source.toPath(), target.toPath(),
                     StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    /**
+     * S-5: removes stale {@code *.tmp} litter left by a previous crash, before the first
+     * write of each resource would lazily clean its own. Returns the number removed.
+     */
+    public static int sweepStaleTempFiles(final File folder) {
+        int removed = 0;
+        final File[] entries = folder.listFiles();
+        if (entries == null)
+            return 0;
+        for (final File entry : entries) {
+            if (entry.isDirectory()) {
+                removed += sweepStaleTempFiles(entry);
+            } else if (entry.getName().endsWith(".tmp")) {
+                if (entry.delete()) {
+                    log.warn("stale temp file {} removed at storage open (previous crash mid-write)", entry);
+                    removed++;
+                } else {
+                    log.warn("stale temp file {} could not be removed at storage open", entry);
+                }
+            }
+        }
+        return removed;
     }
 
     public interface ContentWriter {

@@ -129,7 +129,7 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         try {
             // crash-safe: пишем во временный файл-соседа и атомарно подменяем ресурс,
             // чтобы сбой посреди коммита не мог обрезать существующий файл ресурса
-            XdStorageAtomicFile.writeReplacing(getFileName(), out -> {
+            XdStorageAtomicFile.writeReplacing(getFileName(), services.getStorageConfig().isDurableWrites(), out -> {
                 if (isReferences) {
                     writer.writeReferences(out, idField, objects);
                 } else {

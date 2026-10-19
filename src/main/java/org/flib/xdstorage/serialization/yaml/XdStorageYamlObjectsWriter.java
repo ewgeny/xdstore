@@ -46,6 +46,8 @@ public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
             }
 
             emitter.closeBlock(); // Закрываем "objects"
+            // S-1: сентинел конца файла — ридер обязан отказать в загрузке обрезанного файла
+            emitter.writeEofSentinel();
         } catch (final Throwable cause) {
             throw new XdStorageIOException(cause);
         }
@@ -68,6 +70,8 @@ public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
             }
 
             emitter.closeBlock(); // Закрываем "references"
+            // S-1: сентинел конца файла — ридер обязан отказать в загрузке обрезанного файла
+            emitter.writeEofSentinel();
         } catch (final Throwable cause) {
             throw new XdStorageIOException(cause);
         }

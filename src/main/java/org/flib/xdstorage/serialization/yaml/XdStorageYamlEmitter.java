@@ -69,4 +69,12 @@ public class XdStorageYamlEmitter {
             currentLevel--;
         }
     }
+
+    /**
+     * S-1: ставит сентинел конца файла (после закрытия корневого блока).
+     * Строка-комментарий: старые ридеры пропускают ее, новый ридер требует.
+     */
+    public void writeEofSentinel() throws IOException {
+        writer.append("\r\n").append(XdStorageYamlTokenizer.EOF_SENTINEL_LINE).append("\r\n");
+    }
 }
