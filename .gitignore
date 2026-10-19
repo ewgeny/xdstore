@@ -4,7 +4,7 @@ target/
 # runtime-generated engine artifacts
 gencode/
 teststorage/
-xdstorage.log
+xdstorage.log*
 *.tmp
 
 # IDE
