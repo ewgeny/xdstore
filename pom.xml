@@ -11,16 +11,11 @@
     <name>XD Storage</name>
 
 
-    <repositories>
-        <repository>
-            <id>mvnrepository</id>
-            <name>Central Maven Repository</name>
-            <url>https://mvnrepository.com</url>
-        </repository>
-    </repositories>
-
     <properties>
-        <jdk.version>1.8</jdk.version>
+        <!-- H-5: library bytecode stays 1.8-compatible; dev/test runtime is JDK 17. -->
+        <jdk.version>8</jdk.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
 
     <dependencies>
@@ -38,15 +33,9 @@
         </dependency>
 
         <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>9.4.1212</version>
-        </dependency>
-
-        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>RELEASE</version>
+            <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -102,10 +91,11 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>2.3.2</version>
+                <version>3.13.0</version>
                 <configuration>
-                    <source>${jdk.version}</source>
-                    <target>${jdk.version}</target>
+                    <!-- H-5: library bytecode stays 1.8-compatible; dev/test runtime is JDK 17.
+                         release=8 also pins the platform API so post-8 API use fails the build. -->
+                    <release>${jdk.version}</release>
                 </configuration>
             </plugin>
 
@@ -126,4 +116,36 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- C-2: быстрый гейт без известных флаки-семей (docs/FLAKY.md).
+             Полный суит (включая флаки) остается умолчанием: mvn clean test.
+             Включение: mvn clean test -Pquick-gate -->
+        <profile>
+            <id>quick-gate</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0-M4</version>
+                        <configuration>
+                            <forkCount>1</forkCount>
+                            <argLine>-Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
+                            <includes>
+                                <include>**/*Test.java</include>
+                            </includes>
+                            <excludes>
+                                <!-- docs/FLAKY.md: документированные редкие флаки под пиковой нагрузкой -->
+                                <exclude>**/XdStorageGraphPhantomReadStressTest.java</exclude>
+                                <exclude>**/XdStorageFacadeStressTest.java</exclude>
+                                <exclude>**/XdStoragePhantomReadIsolationStressTest.java</exclude>
+                                <exclude>**/XmlDataStorageMultithreadsTest.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
