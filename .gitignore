@@ -14,3 +14,7 @@ xdstorage.log*
 # benchmark/stress storage litter
 facade_stress_db/
 *_db/
+
+# python byte-code litter
+__pycache__/
+*.pyc
