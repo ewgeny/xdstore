@@ -674,6 +674,7 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
         final List<XdStorageBTreeNode> childrenOfParent = this.getParent().getChildren();
         final List<Comparable> keysOfParent = this.getParent().getKeys();
 
+        boolean separatorInserted = false;
         for (int i = 0; i < childrenOfParent.size(); ++i) {
             final XdStorageBTreeNode child = childrenOfParent.get(i);
             final Object childId = child.getId();
@@ -697,11 +698,38 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
                 } else {
                     childrenOfParent.add(right);
                 }
+                separatorInserted = true;
                 break;
             }
         }
+        // R-56: РАНЬШЕ — МОЛЧАЛИВЫЙ ПРОПУСК. Если split-узел не найден в детях своего
+        // родителя (дуальность инстанций/устаревший parent), разделитель и right НЕ
+        // вставлялись никуда и НЕ ФИКСИРОВАЛОСЬ НИКАК: right оставался в цепочке листьев,
+        // но был недостижим из корня ("листьев только из цепочки") — корневой канал
+        // рассинхрона структуры. Теперь — громкий отказ с дампом вместо молчаливой порчи.
+        if (!separatorInserted) {
+            final StringBuilder dump = new StringBuilder("[CHAIN] SPLIT-ORPHAN this=")
+                    .append(this.getId()).append("@").append(System.identityHashCode(this))
+                    .append(" parent=").append(this.getParent().getId()).append("@")
+                    .append(System.identityHashCode(this.getParent()))
+                    .append(" parentChildren=[");
+            for (int i = 0; i < childrenOfParent.size(); ++i) {
+                final XdStorageBTreeNode c = childrenOfParent.get(i);
+                dump.append(c.getId()).append('@').append(System.identityHashCode(c)).append(i < childrenOfParent.size() - 1 ? "," : "");
+            }
+            dump.append("] tree=").append(getTree().getId());
+            chainDebug(dump.toString());
+            throw new XdStorageException("split of node " + this.getId() + " cannot find itself in its parent "
+                    + this.getParent().getId() + " (children=" + childrenOfParent.size() + ") — parent pointer desynchronized");
+        }
 
         storage.update(this.getParent(), transaction);
+
+        // R-56: TRIPWIRE ПОСЛЕ SPLITS — раньше стоял только после join/borrow/rootCollapse.
+        // Родитель после вставки разделителя обязан оставаться консистентным (children==keys+1,
+        // монотонность) — ловим разъезд пары keys/children НА МЕСТЕ операции, а не на
+        // следующем сэмпле валидатора, когда мутатор уже неизвестен.
+        XdStorageBTreeInvariants.checkStructuralAlignment(this.getParent(), "splitIntoParent:" + this.getId());
 
         if (this.getParent().getKeys().size() >= 2 * t) {
             if (this.getParent().getParent() == null) {
@@ -786,6 +814,9 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
         rootChildren.add(right);
 
         storage.update(newRoot, transaction);
+
+        // R-56: tripwire нового корня (симметрично splitIntoParent)
+        XdStorageBTreeInvariants.checkStructuralAlignment(newRoot, "splitCreateRoot:" + this.getId());
     }
 
     private void insertIntoThisNode(final Comparable key, final Object object, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
@@ -1448,9 +1479,18 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
                 // Это гарантирует, что даже если параллельный поток-писатель на фазе сплита
                 // очистит живой LinkedList ключей через remove(), наш читатель спокойно завершит навигацию
                 // по стабильной локальной копии, полностью уничтожая гонки данных!
+                // R-56: снимок берется ПОД МОНИТОРОМ коллекции — итерация synchronized-обертки
+                // без монитора рвалась CME при параллельном split/join (та же дисциплина, что
+                // в сериализаторе R-43).
                 // =========================================================================
-                final List<Comparable> snapshotKeys = new ArrayList<>(current.getKeys());
-                final List<XdStorageBTreeNode> snapshotChildren = new ArrayList<>(current.getChildren());
+                final List<Comparable> snapshotKeys;
+                final List<XdStorageBTreeNode> snapshotChildren;
+                synchronized (current.getKeys()) {
+                    snapshotKeys = new ArrayList<>(current.getKeys());
+                }
+                synchronized (current.getChildren()) {
+                    snapshotChildren = new ArrayList<>(current.getChildren());
+                }
 
                 for (int i = 0; i < snapshotKeys.size(); ++i) {
                     if (key.compareTo(snapshotKeys.get(i)) < 0) {
@@ -1489,8 +1529,15 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
             boolean hasMatches = false;
 
             // На уровне листьев точно так же защищаем чтение через снимок ключей и объектов
-            final List<Comparable> leafKeysSnapshot = new ArrayList<>(current.getKeys());
-            final List<Object> leafObjectsSnapshot = new ArrayList<>(current.getObjects());
+            // (R-56: снимок под монитором — см. комментарий выше)
+            final List<Comparable> leafKeysSnapshot;
+            final List<Object> leafObjectsSnapshot;
+            synchronized (current.getKeys()) {
+                leafKeysSnapshot = new ArrayList<>(current.getKeys());
+            }
+            synchronized (current.getObjects()) {
+                leafObjectsSnapshot = new ArrayList<>(current.getObjects());
+            }
 
             for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
                 final int compareResult = key.compareTo(leafKeysSnapshot.get(i));
@@ -1547,12 +1594,16 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
             // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал IndexOutOfBoundsException!):
             // Делаем атомарные изолированные снимки (Snapshots) коллекций ключей и объектов
             // текущей листовой страницы ДО начала итерации цикла viewer.look().
-            // Это гарантирует, что даже если параллельный поток-писатель на фазе сплита листа
-            // очистит живой LinkedList через remove(), наш читатель диапазона спокойно завершит
-            // обход по стабильной локальной копии, полностью уничтожая гонки данных и Index: 1, Size: 0!
+            // R-56: снимок под монитором коллекции (дисциплина R-43/R-56, см. find).
             // =========================================================================
-            final List<Comparable> leafKeysSnapshot = new ArrayList<>(getKeys());
-            final List<Object> leafObjectsSnapshot = new ArrayList<>(getObjects());
+            final List<Comparable> leafKeysSnapshot;
+            final List<Object> leafObjectsSnapshot;
+            synchronized (getKeys()) {
+                leafKeysSnapshot = new ArrayList<>(getKeys());
+            }
+            synchronized (getObjects()) {
+                leafObjectsSnapshot = new ArrayList<>(getObjects());
+            }
 
             for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
                 if (i < leafObjectsSnapshot.size()) {

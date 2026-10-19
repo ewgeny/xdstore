@@ -53,7 +53,15 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.writeKey("class");
         emitter.writeScalar("'" + cl.getName() + "'");
 
-        for (final Object item : collection) {
+        // R-43 (YAML): снимок под монитором коллекции — итерация по живой LinkedList/ArrayList
+        // ноды Б+Дерева рвалась ConcurrentModificationException, когда write-out сериализует
+        // ноду, чей guard-tryLock не взялся (нода занята мутатором). Зеркало правила
+        // XdStorageDefaultObjectsWriter.writeCollection.
+        final Object[] snapshotItems;
+        synchronized (collection) {
+            snapshotItems = collection.toArray();
+        }
+        for (final Object item : snapshotItems) {
             // Открываем каноничную объектную ячейку списка СУБД
             emitter.openBlock("- item");
             if (item == null) {
@@ -148,7 +156,12 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.writeKey("class");
         emitter.writeScalar("'" + cl.getName() + "'");
 
-        for (final Map.Entry<?, ?> pair : map.entrySet()) {
+        // R-43 (YAML): снимок под монитором карты (см. зеркальный комментарий в writeCollectionInline).
+        final Map.Entry<?, ?>[] snapshotEntries;
+        synchronized (map) {
+            snapshotEntries = map.entrySet().toArray(new Map.Entry<?, ?>[0]);
+        }
+        for (final Map.Entry<?, ?> pair : snapshotEntries) {
             emitter.openBlock("- entry");
 
             // Выгружаем ключ как полноценную независимую type/value пару

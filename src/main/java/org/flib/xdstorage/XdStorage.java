@@ -657,6 +657,10 @@ class XdStorage implements IXdFileStorage {
                     }
                     hasError.set(true);
                     conExceptions[0] = e;
+                } catch (final org.flib.xdstorage.exceptions.XdStorageReferenceInvisibleException e) {
+                    // R-58: the element is invisible in the reader snapshot (committed after its start /
+                    // transiently rolled back) - normal MVCC answer, not an error: the element is not
+                    // part of the visible graph version. The reference stays unfilled.
                 } catch (final XdStorageException e) {
                     if (hasError.get()) {
                         return;

@@ -200,8 +200,12 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
 
         // Атомарно пишем данные в индексы в рамках ЕДИНОЙ транзакции
         keyTree.insert((Comparable) record.getId(), hashIndexRecord, storage, transaction);
+        // R-57: компенсация при откате — keyTree по id записи
+        transaction.registerIndexKeyForRollback(keyTree, (Comparable) record.getId());
         final XdStorageSearchIndexKey searchIndexKey = new XdStorageSearchIndexKey(record.getPrimaryIndexValue(), record.getId(), XdStorageSearchIndexOperationType.Insert);
         tree.insert(searchIndexKey, XdStorageObjectUtils.getWrappedObjectOrSameObject(record), storage, transaction);
+        // R-57: и поисковое дерево по составному ключу
+        transaction.registerIndexKeyForRollback(tree, searchIndexKey);
     }
 
     public void update(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {

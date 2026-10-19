@@ -964,3 +964,140 @@ listed here because ResourceCache transit interacts with it)
 `XdStorageResourceCacheBTreeEntityTest` + resource package + btree package — all green at
 2026-10-16 (full suite 469 tests, 7 red = the Phase-3b stress family + the new boolean-distortion
 serialization test; assertion suites 100% green).
+
+---
+
+## 5. Track A session (2026-10-19): the facade-storm flake family — R-54..R-56
+
+Session goal (MASTER-PLAN Track A1): resolve the residual flake family before calling 2.0 stable;
+success gate = 10/10 green runs of all stress tests, then the full suite green.
+
+### R-54. Find retry budget: attempts → time-based deadline with exponential backoff — KEEP
+**What:** `XdStorageBTree.find`'s R-36 budget (200 attempts ≈ tens of ms under the 25-writer
+storm) burned out on every burst: each retry re-acquires the tree read lock (waiting out a
+mutator's whole op), descends, and loses the race to the next deep-lock chain — an honest reader
+died loudly under legitimate load (the dominant isolated-failure signature in FLAKY.md A/B).
+**Fix:** deadline = clamp(3/4 × tx timeout, 500ms..10s), exponential backoff 1→2→…→25ms; the loud
+failure fires only when a retry actually failed AND the deadline expired. Also fixed: the attempt
+budget could throw on a SUCCESSFUL attempt №201 (the check ignored `retryFind`).
+**Verified:** find-budget exhaustions gone from all subsequent runs (was: 6-thread bursts).
+
+### R-55. Resource retention: no eviction at refcount 0 — KEEP
+**What:** `XdStorageAbstractResourcesManager.releaseResource` dropped the resource object when its
+refcount hit 0. Each resource owns ITS OWN `XdStorageResourceCache` (records die with it) and its
+`prepared` flag: the next toucher re-created the resource and re-parsed the file from disk. The
+facade storm performed **88,699 disk parses per run** (hot node 3 parsed 891×), each parse being
+IO under tree/node locks (fuel of R-54's find exhaustion); worse, until the canonical-registry
+adoption kicks in, the parse introduces a stale-disk instance of a node whose live graph already
+diverged from disk — the stale-parse channel. Recreation also reset fragment slot counters to 0
+(race in `getFreeResourceId` fragment selection) and created orphaned-resource dualism (a dead
+resource still registered in a live tx writing into its own cache while a fresh one re-parsed).
+**Fix:** retain resources forever (bounded by files ever touched; the heap≈DB ceiling is the
+documented pre-W-4 state); released on `storage.shutdown()`.
+**Verified:** parse flood 88,699 → ~4.7k (one per node, first touch); facade run time 173s → ~62-80s;
+runs 7-12 (retention era) ~2.5-3× faster than loop-1 era.
+
+### R-56. The "рассинхрон структуры" family: validator made sample-consistent + the CME/tear hardening — KEEP
+Evidence trail (runs 2-12, logs in /tmp/facade-loop on the session box):
+1. First violation is ALWAYS the first WARN/ERROR of the run — the structure "tore" silently,
+   with no throw, rollback, or tripwire preceding it (joins/borrows/rootCollapse tripwires silent).
+2. Damage accumulates across transactions (orphan-leaf sets grow run-over-run) — consistent with
+   the documented infra-rollback gap (in-place graph mutations survive record rollback).
+3. Loop 5 (R-56 validator sampling): **4/4 green** at the previously-failing config, with 342-409
+   "concurrent structure change" signals per run — all traced to the validator observing
+   non-atomic state (entry-bumped counters flagged waiting mutators; artifacts).
+4. Per-op validation (`-Dxdstorage.validation.interval=1`): 4/4 green, ZERO invariant violations —
+   the tree never actually tore at the mutation level under full serialization.
+**What changed:**
+- `XdStorageBTree`: `structureVersion` (AtomicLong) + `activeMutations` (AtomicInteger), maintained
+  STRICTLY inside the tree-write-lock section of insert/delete/update (entry-level counters flag
+  waiting mutators — proven artifact, fixed to locked-section scope).
+- `XdStorageBTreeInvariants`: `validateLeafChain` samples (version, active) before/between/after
+  its two traversals; a change ⇒ `ConcurrentStructureChangeSignal` ⇒ retry (≤3) ⇒ skip with WARN.
+  A divergence at a STABLE version still throws loudly (real corruption contract preserved).
+  Validation interval configurable: `-Dxdstorage.validation.interval` (default 25 = R-32).
+- Split paths: tripwire `checkStructuralAlignment` after `splitAndInsertIntoParent` and
+  `splitAndCreateNewRoot` (joins/borrows/rootCollapse already had them); the silent
+  separator-insert miss (split node not found in parent's children → `right` chain-linked but
+  root-orphaned) is now a LOUD `XdStorageException` with an instance-level dump
+  (`[CHAIN] SPLIT-ORPHAN`) instead of silent structural poisoning.
+- Reader-side CME hardening (R-43 discipline extended): `find`/`read`/validator snapshot copies
+  now taken under the collection monitor; **the YAML writer's collection/map iteration got the
+  missing `synchronized` snapshots (R-43 fixed only the XML/default writer — YAML is the default
+  format!) — the "CME on btree write-out" signature**.
+**Also found (documented, NOT fixed — Track B/ACID backlog):** `XdStorageTransactionManager.commitTransaction`
+SWALLOWS commit failures ("commit internal error" WARN → `rollbackFailedCommit` → returns
+normally): the worker believes the commit succeeded while its data records were reverted (the
+index/tree mutations survive in place). Green runs tolerate 14-28 such events (sweeper + registry
+self-heal); the root cause of the 15s `lockForCommit` timeouts is commit-time resource-lock
+queuing under the full-file write-out wall (Track B).
+
+**Revert instructions:** each item is independent; R-56's validator sampling reverts by restoring
+`validateLeafChain`/`validateUnderTreeLock` (the version counters in `XdStorageBTree` are inert
+bookkeeping), R-55 by restoring the `resources.remove`/`locks.remove` in `releaseResource`,
+R-54 by restoring the attempt-count budget in `find`.
+
+### R-57. Compensating index-key deletion on rollback — KEEP
+**Evidence:** GraphPhantom readers crashed with "cannot load by reference XdPlanet#N" on ids whose
+DATA records were reverted by a rolled-back/failed-commit writer tx, while the id-index tree keys
+survived (in-place mutation — the documented infra-MVCC compromise). Every such key is a permanent
+reader landmine.
+**What:** `IXdStorageTransaction.registerIndexKeyForRollback(tree, key)` / `rollbackIndexKeyInserts()`
+(reverse-order compensating `tree.delete`, absent-key errors tolerated with DEBUG). Registration at
+every successful index insert (id_index, search keyTree, search tree); compensation invoked from
+`rollbackInternal()` (worker rollback + sweeper funnel) and from the commit-failure catch in
+`commitTransaction`.
+**Verified:** phantom ids no longer dangle in the index after writer failures (rebuilt index
+consistent in tearDown verification).
+
+### R-58. Zombie committed records: late/racing rollback suppressed — KEEP
+**Evidence (REFDIAG probe, `-Dxdstorage.refdiag=true`):** readers failed on records with
+`recordPresent=true, committed=true, change=read, object=null` — a LATE/racing rollback (e.g.
+timeout-sweeper rollback catching up with an in-flight/finished commit) inverted an already
+committed insert (`object = prevObject = null`), leaving a zombie that by-reference reads served
+as visible-and-empty. One zombie poisoned every reader touching the id for the rest of the run.
+**What:** `CacheRecord.rollback()` refuses records in the commit phase (`firstPhaseCommit ||
+secondPhaseCommit`) with a WARN. `rollbackFailedCommit` is unaffected (it substitutes old record
+instances with reset flags before calling rollback).
+**Verified:** MVCC unit suites (RC 12 + phantom 12 + real-cloner 11) 35/35 green.
+
+**Known engine anomalies documented, NOT fixed (Track B/2.1 backlog):**
+- Commit-time `lockForCommit` queuing (full-file write-out wall) produces 15s commit failures
+  under 25-writer storms; the engine self-heals (green runs tolerate dozens), but the
+  `commitTransaction` failure path swallows the error — the worker believes the commit succeeded.
+  ACID-honesty fix + the throughput wall = Track B.
+- Hand-rolled RW-lock reentrancy anomaly (R-56 diagnostics): a mutator can be observed inside the
+  tree-write-lock mutation section while another thread holds the same write lock
+  (`activeMutations>=1, writeLocked=true`). The sample-consistent validator neutralizes the
+  consequence; the lock redesign is R-29/Track B3 (the frozen-items list already forbids blind
+  wait-rescheduling re-attempts).
+
+### R-58 (final). Snapshot-consistent by-reference hydration + invisible-reference semantics — KEEP
+**Evidence chain (REFDIAG serials):** a snapshot reader failed `cannot load by reference` on a
+planet whose record showed `committed, commitSerial=1976` while `readerSnap=1969` — the reader's
+snapshot legitimately excluded the phantom, yet its walked graph contained it: the system's
+collection hydration used `View.SCAN`, which serves the LIVE record version regardless of the
+reader's snapshot. The reader walked a not-its-version collection, hit the invisible phantom, and
+the whole scan died ("marked as rollback only" cascade).
+**What:**
+- `readByReferenceInternal` hydrates with `View.BY_ID` + `committingSerialVisibleTo` (R-45
+  atomicity) — a snapshot reader now sees exactly its own graph version.
+- New `XdStorageReferenceInvisibleException` (extends `XdStorageException`): the record exists but
+  is not visible in the reader's snapshot — the MVCC answer "this element is not in your visible
+  graph version", NOT a structural error. The record-missing case remains a hard
+  `XdStorageException` (real dangling reference).
+- The generated wrapper templates (collection + map hydration) and
+  `XdStorage.load(Collection, tx)` catch the invisible exception and **drop the element** from the
+  reader's visible collection (iterator.remove / skip) — the phantom is not part of the visible
+  graph version. A direct (single-object) reference load still propagates the exception.
+- Diagnostics: `-Dxdstorage.refdiag=true` logs invisible-reference records with full MVCC state;
+  `-Dxdstorage.dump.gencode=true` dumps failing generated wrapper sources.
+- `getStructureVersion()`/`getActiveMutations()` renamed to `currentStructureVersion()` /
+  `activeMutationCount()` — JavaBeans-shaped getters tripped the persistence field scanner
+  (getter-without-setter WARN) on the persisted `XdStorageBTree`.
+**Verified:** cache MVCC suites 59/59 + wrapper contract 37/37 + search engine integration green;
+phantom-family trio (GraphPhantom / XmlMultithreads / DeleteIsolation / PhantomReadIsolation)
+5/5 consecutive green passes; **the Track-A gate: 10/10 green consecutive runs of all 20 stress
+tests**; the full suite 692 tests green (third run; runs 1-2 each carried one in-suite
+`XdStorageBTreeStress` anomaly of the documented R-29 lock-contention family — different tests,
+self-healing, gate-isolated 10/10).

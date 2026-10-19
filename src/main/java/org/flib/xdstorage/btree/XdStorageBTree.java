@@ -24,12 +24,11 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
 
     private static final Logger log = LogManager.getLogger(XdStorageBTree.class);
 
-    /** R-36: бюджет ретраев спуска поиска — как REBALANCE_RETRY_BUDGET для мутаций. */
-    private static final int MAX_FIND_RETRY_BUDGET = 200;
-
-    /** R-42: пауза на каждом N-м ретрае поиска — окно для мутаций + safepoint. */
-    private static final int FIND_RETRY_BACKOFF_INTERVAL = 10;
-    private static final long FIND_RETRY_BACKOFF_MILLIS = 1;
+    /** R-36→R-54: бюджет ретраев спуска поиска — по ВРЕМЕНИ (см. find), не по попыткам.
+     *  Верхняя граница дедлайна: даже при большом таймауте транзакции читатель не hangs дольше 10с. */
+    private static final long FIND_RETRY_BUDGET_CAP_MS = 10_000;
+    /** R-54: потолок экспоненциального backoff между ретраями поиска. */
+    private static final long FIND_RETRY_BACKOFF_MAX_MILLIS = 25;
 
     /** R-38: страховка предпрогрева цепи листьев от зацикливания (штатная цепь конечна). */
     private static final int PREWARM_STEP_BUDGET = 1_000_000;
@@ -67,6 +66,31 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
     }
 
     private final XdStorageReadWriteLock lock = new XdStorageReadWriteLock();
+
+    // R-56: детектор структурных мутаций. structureVersion инкрементируется на входе в
+    // каждую мутацию (insert/delete/update), activeMutations считает мутации «в полете».
+    // Валидатор сэмплирует пару (version, active) до/между/после двух своих обходов:
+    // изменение версии или активные мутации означают, что наблюдение не атомарно
+    // (канал параллельной мутации), и результат валидации обязан быть отброшен/повторен,
+    // а не превращен в громкий отказ («рассинхрон структуры»).
+    private final AtomicLong structureVersion = new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger activeMutations = new java.util.concurrent.atomic.AtomicInteger();
+    /** R-56 диагностика: кто именно внутри мутационной секции (поток → описание операции). */
+    private final java.util.concurrent.ConcurrentHashMap<Thread, String> activeMutatorThreads =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public long currentStructureVersion() {
+        return structureVersion.get();
+    }
+
+    public int activeMutationCount() {
+        return activeMutations.get();
+    }
+
+    /** R-56: снимок активных мутаторов для диагностики сигналов валидатора. */
+    public String describeActiveMutators() {
+        return activeMutatorThreads.toString();
+    }
 
     // БЮДЖЕТ ПОПЫТОК РЕБАЛАНСИРОВКИ: retry-циклы операций обязаны быть ограничены —
     // иначе устойчивая конкуренция за deep-локи превращает их в вечный livelock,
@@ -236,7 +260,18 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
                 if (root == null) {
                     createRoot(storage, transaction);
                 }
-                root.insert(this, key, object, storage, transaction, retryInsert);
+                // R-56: счетчики ТОЛЬКО внутри lockWrite-секции — иначе они флагают
+                // ждущих мутаторов (версия растет у заблокированного на входе воркера),
+                // а не структурные изменения.
+                structureVersion.incrementAndGet();
+                activeMutations.incrementAndGet();
+                activeMutatorThreads.put(Thread.currentThread(), "insert");
+                try {
+                    root.insert(this, key, object, storage, transaction, retryInsert);
+                } finally {
+                    activeMutatorThreads.remove(Thread.currentThread());
+                    activeMutations.decrementAndGet();
+                }
             } finally {
                 // R-33: страховка утечки write-лока при throw из write-секции. deepUnlock
                 // внутри node-операций уже снял глубокую цепь (включая tree); разблокируем
@@ -330,7 +365,15 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
                     log.info("B+Tree {} is empty after delete of key {} (root purged)", id, key);
                     return;
                 }
-                root.delete(this, key, storage, transaction, retryDelete);
+                structureVersion.incrementAndGet();
+                activeMutations.incrementAndGet();
+                activeMutatorThreads.put(Thread.currentThread(), "delete");
+                try {
+                    root.delete(this, key, storage, transaction, retryDelete);
+                } finally {
+                    activeMutatorThreads.remove(Thread.currentThread());
+                    activeMutations.decrementAndGet();
+                }
             } finally {
                 // R-33: см. комментарий в insert
                 if (isWriteLocked()) {
@@ -408,7 +451,15 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
                     }
                     throw new XdStorageException("object of " + id + " with idgeneration " + key + " does not exists");
                 }
-                root.update(this, key, value, storage, transaction, retryUpdate);
+                structureVersion.incrementAndGet();
+                activeMutations.incrementAndGet();
+                activeMutatorThreads.put(Thread.currentThread(), "update");
+                try {
+                    root.update(this, key, value, storage, transaction, retryUpdate);
+                } finally {
+                    activeMutatorThreads.remove(Thread.currentThread());
+                    activeMutations.decrementAndGet();
+                }
             } finally {
                 // R-33: см. комментарий в insert
                 if (isWriteLocked()) {
@@ -475,9 +526,19 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
 
         List<Object> result;
         final AtomicBoolean retryFind = new AtomicBoolean();
-        int findAttempts = 0;
+        // R-54: бюджет поисковых ретраев — ПО ВРЕМЕНИ, не по числу попыток. Попытечный
+        // бюджет (R-36, 200 попыток) выгорал за десятки миллисекунд под лавиной из 25
+        // писателей: каждый retry заново захватывает read-лок дерева (ожидая чужой мутации),
+        // спускается и проигрывает гонку следующему deep-lock — читатель-ЧЕСТНЕЦ погибал
+        // громким отказом под легитимной нагрузкой. Теперь ретраи ограничены дедлайном
+        // (производная от таймаута транзакции) с экспоненциальным backoff: аллокационный
+        // шторм R-36 невозможен (паузы ограничивают темп), а окно ожидания перекрывает
+        // штормы; вечный клин отсечен дедлайном + штатным таймаутом lockRead.
+        final long txTimeoutMs = transaction != null ? transaction.getTimeout() : 5000L;
+        final long findBudgetMs = Math.min(Math.max(txTimeoutMs * 3 / 4, 500L), FIND_RETRY_BUDGET_CAP_MS);
+        final long findDeadlineNanos = System.nanoTime() + findBudgetMs * 1_000_000L;
+        long backoffMillis = 1L;
         do {
-            retryFind.set(true); // Сбрасываем флаг итерации do-while
             retryFind.set(false);
             lockRead(transaction);
             // ВНИМАНИЕ (R-35): read-лок релизится самим node-спуском (lock-coupling —
@@ -490,27 +551,28 @@ public class XdStorageBTree implements IXdStorageBTreeNode, org.flib.xdstorage.s
             }
             result = root.find(this, key, storage, transaction, retryFind);
 
-            // R-36: БЮДЖЕТ ПОИСКОВЫХ РЕТРАЕВ. Цикл был НЕОГРАНИЧЕННЫМ: под непрерывным
-            // давлением мутаций node-level tryLockRead может не пробиваться бесконечно —
-            // воркеры уходили в шторм аллокаций (snapshot-копии на каждом ретрае,
-            // ~2ГБ/мин) и висели намертво. Громкий отказ лучше бесконечного клина.
-            if (++findAttempts > MAX_FIND_RETRY_BUDGET) {
-                org.flib.xdstorage.metrics.XdStorageMetrics.engineEvents().increment(org.flib.xdstorage.metrics.XdStorageMetrics.FIND_RETRY_BUDGET_EXHAUSTIONS);
-                log.warn("B+Tree find retry budget exhausted for key {} in tree {} — sustained write pressure (operation failed loudly)", key, id);
-                throw new XdStorageException("find retry budget exhausted by search of idgeneration " + key
-                        + " in " + id + ": устойчивая конкуренция за блокировки ребалансировки");
-            }
+            // R-36/R-54: громкий отказ — ТОЛЬКО когда спуск снова не пробился (retryFind)
+            // И дедлайн истек. Успешный спуск возвращает результат независимо от числа
+            // ретраев (попытечный бюджет умел ронять УСПЕШНУЮ попытку №201).
+            if (retryFind.get()) {
+                if (System.nanoTime() - findDeadlineNanos >= 0) {
+                    org.flib.xdstorage.metrics.XdStorageMetrics.engineEvents().increment(org.flib.xdstorage.metrics.XdStorageMetrics.FIND_RETRY_BUDGET_EXHAUSTIONS);
+                    log.warn("B+Tree find retry budget exhausted after {} ms for key {} in tree {} — sustained write pressure (operation failed loudly)",
+                            findBudgetMs, key, id);
+                    throw new XdStorageException("find retry budget exhausted by search of idgeneration " + key
+                            + " in " + id + ": устойчивая конкуренция за блокировки ребалансировки");
+                }
 
-            // R-42: спинка на ретрае — без паузы читатель молотит tryLockRead в цикле,
-            // мешая сплитам/джойнам завершиться (шторм аллокаций + голодание мутаций);
-            // пауза дает мутаторам окно и создает safepoint для диагностики.
-            if (findAttempts % FIND_RETRY_BACKOFF_INTERVAL == 0) {
+                // R-42/R-54: экспоненциальный backoff — без паузы читатель молотит
+                // tryLockRead в цикле, мешая сплитам/джойнам завершиться; растущая пауза
+                // дает мутаторам окно и создает safepoint для диагностики.
                 try {
-                    Thread.sleep(FIND_RETRY_BACKOFF_MILLIS);
+                    Thread.sleep(backoffMillis);
                 } catch (final InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new XdStorageException("interrupted during find retry backoff", e);
                 }
+                backoffMillis = Math.min(backoffMillis * 2, FIND_RETRY_BACKOFF_MAX_MILLIS);
             }
         } while (retryFind.get());
         return result == null ? Collections.emptyList() : result;

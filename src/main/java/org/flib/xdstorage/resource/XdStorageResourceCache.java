@@ -827,7 +827,15 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
                 throw new XdStorageException("cannot load by reference object of " + reference.getClass() + " with idgeneration " + field.get(reference));
             }
             synchronized (record) {
-                object = record.resolveVisible(transaction, XdStorageCacheRecord.View.SCAN, 0L);
+                // R-58: гидрация ссылки обязана быть СОГЛАСОВАННОЙ СО СНАПШОТОМ читателя.
+                // View.SCAN отдавал ЖИВУЮ версию записи: читатель-снапшот получал коллекцию,
+                // уже содержащую чужие незакоммиченные/более новые ссылки (S-с-фантомом),
+                // а сами фантомы по своим записям оставались невидимыми — «висячие» ссылки
+                // и крах "cannot load by reference". View.BY_ID несет снапшот-гейт
+                // (prevObject/commitSerial, R-45): читатель видит ровно ту версию, что
+                // и остальной свой снапшот.
+                object = record.resolveVisible(transaction, XdStorageCacheRecord.View.BY_ID,
+                        record.committingSerialVisibleTo(transaction));
 
                 if (object != null) {
                     // READ COMMITTED: наполняем ссылку последним закоммиченным состоянием,
@@ -839,6 +847,29 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
             }
         }
 
+        // R-58: запись существует, но невидима в снапшоте читателя (закоммичена после
+        // начала его транзакции / транзитно откатена) — штатный ответ MVCC
+        // «в вашей версии графа этого элемента нет», а не повреждение структуры.
+        if (record != null) {
+            if (Boolean.getBoolean("xdstorage.refdiag")) {
+                final StringBuilder diag = new StringBuilder("[REFDIAG] invisible by reference ")
+                        .append(clazz.getSimpleName()).append('#').append(objectId)
+                        .append(" update=").append(record.isUpdateChange())
+                        .append(" insert=").append(record.isInsertChange())
+                        .append(" delete=").append(record.isDeleteChange())
+                        .append(" committed=").append(record.isCommitedState())
+                        .append(" ownerAlive=").append(services.getTransactionsManager().isTransactionAlive(record.getOwnerTransaction()))
+                        .append(" ownChange=").append(record.isChangedByTransaction(transaction))
+                        .append(" readerSnap=").append(transaction instanceof XdStorageTransaction ? ((XdStorageTransaction) transaction).getSnapshotSerial() : null)
+                        .append(" readerTimestart=").append(transaction.getTimestart())
+                        .append(" recCommitSerial=").append(record.getCommitSerial())
+                        .append(" recTimestamp=").append(record.getTimestamp());
+                System.out.println(diag);
+            }
+            throw new org.flib.xdstorage.exceptions.XdStorageReferenceInvisibleException(
+                    "reference is not visible in the reader snapshot: object of " + reference.getClass()
+                            + " with idgeneration " + field.get(reference));
+        }
         throw new XdStorageException("cannot load by reference object of " + reference.getClass() + " with idgeneration " + field.get(reference));
     }
 

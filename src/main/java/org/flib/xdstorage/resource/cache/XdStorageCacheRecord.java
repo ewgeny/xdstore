@@ -117,6 +117,16 @@ public final class XdStorageCacheRecord {
         return version;
     }
 
+    /** R-58 диагностика: serial закоммиченной версии записи. */
+    public long getCommitSerial() {
+        return commitSerial;
+    }
+
+    /** R-58 диагностика: timestamp текущей версии записи. */
+    public long getTimestamp() {
+        return timestamp;
+    }
+
     /** R-40 диагностика отказов: состояние записи на момент отказа обновления. */
     public String getState() {
         return String.valueOf(state);
@@ -469,6 +479,19 @@ public final class XdStorageCacheRecord {
     }
 
     public void rollback() {
+        // R-58: откат ЗАКОММИЧЕННОЙ записи запрещен. Поздний/гонный откат (mark-rollback-only
+        // «догнавший» уже идущий или завершенный коммит; commit-флаги к этому моменту уже
+        // сброшены commit'ом) инвертировал закоммиченную вставку/обновление:
+        // object = prevObject (null для вставок) при state=committed — «зомби-запись»,
+        // которую чтение by-reference считало видимой и падало на пустом содержимом
+        // ("cannot load by reference"). Легитимные откаты работают на state=locked/undefined
+        // и не затрагиваются; rollbackFailedCommit подменяет записи старыми инстансами
+        // до вызова rollback — тоже не затронут.
+        if (this.state == State.committed) {
+            log.warn("rollback ignored for record {} — record already committed (change={}, owner={}); late/racing rollback suppressed",
+                    id, change, transaction != null ? transaction.getTransactionId() : null);
+            return;
+        }
         this.object = this.prevObject;
         this.prevObject = null;
         this.newObject = null;

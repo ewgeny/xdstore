@@ -3,6 +3,7 @@ package org.flib.xdstorage.resource.cache;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.exceptions.XdStorageException;
+import org.flib.xdstorage.exceptions.XdStorageRuntimeException;
 import org.flib.xdstorage.observing.IXdStorageIdObservableWrapper;
 import org.flib.xdstorage.resource.XdStorageObjectChange;
 import org.flib.xdstorage.resource.XdStorageObjectOperationType;
@@ -163,7 +164,21 @@ public final class XdStorageCacheCommitProtocol {
                 }
 
                 synchronized (record) {
-                    record.commit(transaction);
+                    try {
+                        record.commit(transaction);
+                    } catch (final XdStorageRuntimeException illegalState) {
+                        // R-58: запись УЖЕ ЗАКОММИЧЕНА (повторный commit той же записи —
+                        // вложенный/двойной контур коммита: флаги фаз потреблены первым
+                        // проходом, state=committed). Пропускаем с WARN: данные уже
+                        // постоянны, повторная фиксация ничего не меняет. Для записей
+                        // в иных состояниях ошибка остается громкой.
+                        if (record.isCommitedState()) {
+                            log.warn("commit of tx {}: record {} already committed (double-commit path) — skipped",
+                                    transactionId, record.getId());
+                        } else {
+                            throw illegalState;
+                        }
+                    }
                 }
 
                 record.unlock(transaction);

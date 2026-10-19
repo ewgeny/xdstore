@@ -38,8 +38,11 @@ public final class XdStorageBTreeInvariants {
      * (пурдж 1250 ключей ≈ 780к посещений узлов). Дешевые O(1)-проверки пар node
      * (children==keys+1, монотонность разделителей) выполняются tripwire-ами после КАЖДОЙ
      * мутации независимо; полный обход — каждая 25-я операция.
+     * R-56: интервал конфигурируем (-Dxdstorage.validation.interval=1) — бисекция
+     * структурных расхождений: первый разрыв ловится НА породившей его операции.
      */
-    private static final int FULL_VALIDATION_INTERVAL = 25;
+    private static final int FULL_VALIDATION_INTERVAL =
+            Math.max(1, Integer.getInteger("xdstorage.validation.interval", 25));
     private static final java.util.concurrent.atomic.AtomicLong VALIDATION_SAMPLER =
             new java.util.concurrent.atomic.AtomicLong();
 
@@ -55,7 +58,24 @@ public final class XdStorageBTreeInvariants {
      * Полная структурная валидация дерева индекса после мутации.
      * Выполняется под write-локом дерева: мутаторы держат этот лок на всю операцию,
      * поэтому валидатор не может наблюдать промежуточные состояния ребалансировки.
+     *
+     * R-56: ВАЛИДАЦИЯ СЭМПЛ-СОГЛАСОВАННА. Сторожевой Exception
+     * (ConcurrentStructureChangeSignal) сигнализирует, что пара (structureVersion,
+     * activeMutations) дерева изменилась ВО ВРЕМЯ двух обходов, — наблюдение не атомарно,
+     * результат недействителен. Валидация повторяется до {@code VALIDATION_RETRY_LIMIT}
+     * раз; после этого ДИАГНОСТИКА ПРОПУСКАЕТСЯ с WARN (полную гарантию целостности несут
+     * tripwire-ы на каждой мутации). РЕАЛЬНОЕ нарушение (расхождение множеств листьев
+     * при стабильной версии) по-прежнему громко роняет операцию.
      */
+    private static final int VALIDATION_RETRY_LIMIT = 3;
+
+    /** Внутренний маркер «наблюдение не атомарно» — не уходит наружу валидатора. */
+    private static final class ConcurrentStructureChangeSignal extends XdStorageException {
+        ConcurrentStructureChangeSignal(final String message) {
+            super(message);
+        }
+    }
+
     public static void validateLeafChain(final XdStorageBTree tree, final IXdStorage storage,
                                          final XdStorageTransaction transaction, final String context)
             throws XdStorageException, XdStorageConnectionException {
@@ -65,7 +85,7 @@ public final class XdStorageBTreeInvariants {
 
         tree.lockWrite(transaction);
         try {
-            validateUnderTreeLock(tree, storage, transaction, context);
+            validateWithConsistencySampling(tree, storage, transaction, context);
         } catch (final XdStorageException e) {
             // Нарушение инварианта — всегда громко: исключение уйдет в откат транзакции,
             // но сам факт структурного повреждения обязан остаться в логе ERROR навсегда.
@@ -76,6 +96,26 @@ public final class XdStorageBTreeInvariants {
         }
     }
 
+    private static void validateWithConsistencySampling(final XdStorageBTree tree, final IXdStorage storage,
+                                                        final XdStorageTransaction transaction, final String context)
+            throws XdStorageException, XdStorageConnectionException {
+        ConcurrentStructureChangeSignal signal = null;
+        for (int attempt = 1; attempt <= VALIDATION_RETRY_LIMIT; ++attempt) {
+            try {
+                validateUnderTreeLock(tree, storage, transaction, context);
+                return;
+            } catch (final ConcurrentStructureChangeSignal e) {
+                signal = e;
+                log.warn("B+Tree validation of {} observed concurrent structure change (attempt {}/{}): {}",
+                        context, attempt, VALIDATION_RETRY_LIMIT, e.getMessage());
+            }
+        }
+        // Диагностика не смогла получить атомарный срез — пропуск вместо громкого отказа:
+        // параллельные мутации продолжаются, структурные гарантии несут tripwire-ы мутаций.
+        log.warn("B+Tree validation of {} skipped after {} attempts: structure never quiesced ({})",
+                context, VALIDATION_RETRY_LIMIT, signal != null ? signal.getMessage() : "unknown");
+    }
+
     private static void validateUnderTreeLock(final XdStorageBTree tree, final IXdStorage storage,
                                               final XdStorageTransaction transaction, final String context)
             throws XdStorageException, XdStorageConnectionException {
@@ -83,11 +123,27 @@ public final class XdStorageBTreeInvariants {
             return;
         }
 
+        // R-56: сэмпл согласованности (до обхода из корня)
+        final long versionBefore = tree.currentStructureVersion();
+        final int activeBefore = tree.activeMutationCount();
+        if (activeBefore != 0) {
+            throw new ConcurrentStructureChangeSignal(context + ": мутация уже в полете (activeMutations="
+                    + activeBefore + ", mutators=" + tree.describeActiveMutators()
+                    + ", writeLocked=" + tree.isWriteLocked() + ") — наблюдение отложено");
+        }
+
         // ИНВАРИАНТ 1 + сбор множества листьев, достижимых из корня
         final Set<Object> leavesViaRoot = new HashSet<>();
         if (tree.getRoot() != null) {
             descendCollectingLeaves(tree.getRoot(), storage, transaction, leavesViaRoot, context, new HashSet<>(),
                     tree.isMultiple());
+        }
+
+        // R-56: сэмпл между обходами — версия сменилась = корневой обход видел другой каркас
+        final long versionBetween = tree.currentStructureVersion();
+        if (versionBetween != versionBefore) {
+            throw new ConcurrentStructureChangeSignal(context + ": structureVersion изменился во время корневого обхода ("
+                    + versionBefore + " -> " + versionBetween + ")");
         }
 
         if (tree.getFirstLeaf() == null) {
@@ -119,11 +175,22 @@ public final class XdStorageBTreeInvariants {
             if (!leavesViaChain.add(current.getId())) {
                 throw new XdStorageException(context + ": цикл в цепочке листьев — лист " + current.getId() + " встречается повторно");
             }
-            if (current.getKeys().size() != current.getObjects().size()) {
-                throw new XdStorageException(context + ": лист " + current.getId() + " имеет keys=" + current.getKeys().size()
-                        + " при objects=" + current.getObjects().size() + " — списки разошлись");
+            // R-56: parity и обход ключей — под монитором коллекций (дисциплина R-43),
+            // чтобы даже гипотетический параллельный мутатор не дал валидатору рваный срез
+            final int keysCount, objectsCount;
+            final List<Comparable> leafKeys;
+            synchronized (current.getKeys()) {
+                keysCount = current.getKeys().size();
+                leafKeys = new ArrayList<>(current.getKeys());
             }
-            for (final Comparable key : current.getKeys()) {
+            synchronized (current.getObjects()) {
+                objectsCount = current.getObjects().size();
+            }
+            if (keysCount != objectsCount) {
+                throw new XdStorageException(context + ": лист " + current.getId() + " имеет keys=" + keysCount
+                        + " при objects=" + objectsCount + " — списки разошлись");
+            }
+            for (final Comparable key : leafKeys) {
                 if (key == null) {
                     throw new XdStorageException(context + ": лист " + current.getId() + " содержит null-ключ");
                 }
@@ -152,6 +219,14 @@ public final class XdStorageBTreeInvariants {
             }
         }
 
+        // R-56: сэмпл после обхода цепочки — оба обхода атомарны только при неизменной версии
+        final long versionAfter = tree.currentStructureVersion();
+        final int activeAfter = tree.activeMutationCount();
+        if (versionAfter != versionBefore || activeAfter != 0) {
+            throw new ConcurrentStructureChangeSignal(context + ": структура изменилась во время валидации (version "
+                    + versionBefore + " -> " + versionAfter + ", activeMutations " + activeBefore + " -> " + activeAfter + ")");
+        }
+
         // ИНВАРИАНТ 3: множество листьев из корня == множество листьев цепочки
         if (!leavesViaRoot.equals(leavesViaChain)) {
             final Set<Object> onlyViaRoot = new HashSet<>(leavesViaRoot);
@@ -166,6 +241,21 @@ public final class XdStorageBTreeInvariants {
                     cur = cur.getNextTreeNodeOnThisLevel();
                 }
                 System.out.println(dump);
+                // R-56: корневая сторона расхождения — какие ИНСТАНЦИИ обошел descend
+                // (id@identityHash): сравнение с [CHAIN] REGISTER-строками выявляет дуальность
+                // инстанций (спуск шел через не-каноническую копию) против потери связи
+                // (лист в цепочке, но недостижим из корня при канонных инстанциях).
+                try {
+                    final StringBuilder rootDump = new StringBuilder("[CHAIN] root-descent dump: tree@")
+                            .append(System.identityHashCode(tree))
+                            .append(" root@").append(tree.getRoot() == null ? "null" : System.identityHashCode(tree.getRoot()))
+                            .append(" firstLeaf@").append(tree.getFirstLeaf() == null ? "null" : System.identityHashCode(tree.getFirstLeaf()))
+                            .append(" : ");
+                    dumpRootDescent(tree.getRoot(), storage, transaction, rootDump, new HashSet<>());
+                    System.out.println(rootDump);
+                } catch (final Throwable t) {
+                    System.out.println("[CHAIN] root-descent diagnostics failed: " + t);
+                }
             }
             throw new XdStorageException(context + ": рассинхрон структуры: листьев только из корня: " + onlyViaRoot
                     + ", листьев только из цепочки: " + onlyViaChain
@@ -207,6 +297,30 @@ public final class XdStorageBTreeInvariants {
         }
     }
 
+    /**
+     * R-56: диагностический обход из корня для дампа расхождения — только id@identityHash,
+     * без бросков (диагностика не имеет права маскировать исходное нарушение).
+     */
+    private static void dumpRootDescent(final XdStorageBTreeNode node, final IXdStorage storage,
+                                        final XdStorageTransaction transaction,
+                                        final StringBuilder sb, final Set<Object> visited)
+            throws XdStorageException, XdStorageConnectionException {
+        if (node == null || !visited.add(node.getId())) {
+            return;
+        }
+        XdStorageBTreeNode resolved = node;
+        if (XdStorageObjectUtils.isReference(node)) {
+            resolved = XdStorageBTreeNode.materialize(node, storage, transaction, null, null);
+        }
+        sb.append(resolved.getId()).append('@').append(System.identityHashCode(resolved)).append(' ');
+        final List<XdStorageBTreeNode> children = new ArrayList<>(resolved.getChildren());
+        for (final XdStorageBTreeNode child : children) {
+            if (child != null) {
+                dumpRootDescent(child, storage, transaction, sb, visited);
+            }
+        }
+    }
+
     private static void descendCollectingLeaves(final XdStorageBTreeNode node, final IXdStorage storage,
                                                 final XdStorageTransaction transaction, final Set<Object> leaves,
                                                 final String context, final Set<Object> visited,
@@ -228,7 +342,15 @@ public final class XdStorageBTreeInvariants {
         // ровно на единицу больше числа ключей. Дубль/убывание разделителя — первый
         // симптом каскадного сбоя join/borrow (сдвиг пары keys/children), из которого
         // растут промахи спуска ("does not exists") и сироты цепочки листьев.
-        final List<Comparable> nodeKeys = node.getKeys();
+        // R-56: срезы под мониторами коллекций (дисциплина R-43).
+        final List<Comparable> nodeKeys;
+        final List<XdStorageBTreeNode> childrenSnapshot;
+        synchronized (node.getKeys()) {
+            nodeKeys = new ArrayList<>(node.getKeys());
+        }
+        synchronized (node.getChildren()) {
+            childrenSnapshot = new ArrayList<>(node.getChildren());
+        }
         for (int i = 1; i < nodeKeys.size(); ++i) {
             final int cmp = nodeKeys.get(i - 1).compareTo(nodeKeys.get(i));
             if (cmp > 0 || (cmp == 0 && !allowEqualSeparators)) {
@@ -237,13 +359,12 @@ public final class XdStorageBTreeInvariants {
                         + " (сдвиг пары keys/children в join/borrow)");
             }
         }
-        if (node.getChildren().size() != nodeKeys.size() + 1) {
-            throw new XdStorageException(context + ": внутренняя нода " + node.getId() + " имеет children=" + node.getChildren().size()
+        if (childrenSnapshot.size() != nodeKeys.size() + 1) {
+            throw new XdStorageException(context + ": внутренняя нода " + node.getId() + " имеет children=" + childrenSnapshot.size()
                     + " при keys=" + nodeKeys.size() + " (ожидалось children == keys + 1)");
         }
 
-        final List<XdStorageBTreeNode> children = new ArrayList<>(node.getChildren());
-        for (final XdStorageBTreeNode child : children) {
+        for (final XdStorageBTreeNode child : childrenSnapshot) {
             if (child == null) {
                 throw new XdStorageException(context + ": внутренняя нода " + node.getId() + " содержит null-ребенка");
             }

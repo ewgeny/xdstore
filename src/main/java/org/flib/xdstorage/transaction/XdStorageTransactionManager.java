@@ -167,6 +167,9 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
             }
         } catch (final Throwable e) {
             log.warn("commit internal error", e);
+            // R-57: сначала компенсация ин-плейс индексных вставок (деревья не
+            // откатываются record-механизмом), затем штатный откат зафиксированных ресурсов.
+            transaction.rollbackIndexKeyInserts();
             transaction.rollbackFailedCommit(firstPhaseCommittedResources);
         } finally {
             transaction.finishCriticalSection();

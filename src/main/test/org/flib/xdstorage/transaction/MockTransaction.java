@@ -59,4 +59,14 @@ public class MockTransaction implements IXdStorageTransaction {
     public boolean isRollbackOnly() {
         return false;
     }
+
+    @Override
+    public void registerIndexKeyForRollback(final Object tree, final Comparable key) {
+        // no-op in mock
+    }
+
+    @Override
+    public void rollbackIndexKeyInserts() {
+        // no-op in mock
+    }
 }

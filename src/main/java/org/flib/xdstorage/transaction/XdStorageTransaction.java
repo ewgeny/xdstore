@@ -56,6 +56,13 @@ public class XdStorageTransaction implements IXdStorageTransaction {
 
     protected final List<IXdStorageResourceObject> lockedResources;
 
+    // R-57: индексные ключи, успешно вставленные в живые Б+Деревья этой транзакцией, —
+    // подлежат КОМПЕНСИРУЮЩЕМУ удалению при откате (деревья мутируются ин-плейс и
+    // не откатываются record-механизмом; без компенсации индекс вечно указывает на
+    // несуществующие записи — "cannot load by reference" у читателей сканов).
+    private final java.util.List<Object[]> indexKeysForRollback =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
     private final AtomicReference<TransactionState> transactionState = new AtomicReference<>(TransactionState.InProcess);
 
     private final XdStorageTransaction globalTransaction;
@@ -405,6 +412,37 @@ public class XdStorageTransaction implements IXdStorageTransaction {
         });
     }
 
+    @Override
+    public void registerIndexKeyForRollback(final Object tree, final Comparable key) {
+        if (tree != null && key != null) {
+            indexKeysForRollback.add(new Object[]{tree, key});
+        }
+    }
+
+    @Override
+    public void rollbackIndexKeyInserts() {
+        final java.util.List<Object[]> pending;
+        synchronized (indexKeysForRollback) {
+            if (indexKeysForRollback.isEmpty()) {
+                return;
+            }
+            pending = new java.util.ArrayList<>(indexKeysForRollback);
+            indexKeysForRollback.clear();
+        }
+        // Обратный порядок регистрации: последний вставленный ключ удаляется первым.
+        for (int i = pending.size() - 1; i >= 0; --i) {
+            final Object[] pair = pending.get(i);
+            try {
+                ((org.flib.xdstorage.btree.XdStorageBTree) pair[0])
+                        .delete((Comparable) pair[1], getStorage(), this);
+            } catch (final Throwable t) {
+                // Ключа может уже не быть (параллельная компенсация/удаление) — штатно.
+                org.apache.logging.log4j.LogManager.getLogger(XdStorageTransaction.class)
+                        .debug("rollback index-key compensation skipped for {}: {}", pair[1], t.getMessage());
+            }
+        }
+    }
+
     public boolean rollbackFailedCommit(final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources) {
         final List<XdStorageRuntimeException> exceptions = Collections.synchronizedList(new ArrayList<>());
 
@@ -430,6 +468,10 @@ public class XdStorageTransaction implements IXdStorageTransaction {
     }
 
     public void rollbackInternal() {
+        // R-57: компенсация ин-плейс индексных мутаций ДО отката record-состояний —
+        // компенсирующие delete сами регистрируют свои изменения в этой транзакции
+        // и убираются общим откатом ниже.
+        rollbackIndexKeyInserts();
         for (final IXdStorageResourceObject resource : resources.values()) {
             try {
                 resource.rollback(this);

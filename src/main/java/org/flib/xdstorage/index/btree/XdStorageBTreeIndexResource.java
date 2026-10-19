@@ -487,6 +487,8 @@ public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObjec
         resource.insert(object, transaction);
 
         tree.insert((Comparable) objectId, resource.getResourceId(), storage, transaction);
+        // R-57: ключ успешно в живом дереве — при откате транзакции будет удален компенсирующе
+        transaction.registerIndexKeyForRollback(tree, (Comparable) objectId);
 
         // =========================================================================
         // БАРЬЕР СТРУКТУРНОЙ ЦЕЛОСТНОСТИ ИНДEКСА: мутации id_index обязаны завершаться

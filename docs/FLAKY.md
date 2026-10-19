@@ -2,16 +2,27 @@
 
 The full suite is the default gate (`mvn clean test`). The families below are **documented,
 rare flakes under peak load** — each has been A/B-verified as pre-existing and characterized in
-[OPTIMIZATION-PLAN.md](OPTIMIZATION-PLAN.md) (R-45 residual / R-50). They are NOT quarantined from
+[OPTIMIZATION-PLAN.md](OPTIMIZATION-PLAN.md) (R-54..R-58 session, 2026-10-19). They are NOT quarantined from
 the default run; `-Pquick-gate` excludes them for a fast low-noise gate, and the nightly CI job
 tracks their flake rate (full suite ×3).
 
+## Session 2026-10-19 (Track A): the facade-storm family is FIXED
+
+The `XdStorageFacadeStressTest` "рассинхрон структуры" family (formerly ~1/2 isolated, A/B-proven
+pre-existing) is **closed**: the R-32 validator was made sample-consistent (structureVersion /
+activeMutations sampling, R-56), the resource-eviction parse churn was eliminated (R-55), the
+find retry budget became time-based (R-54), the YAML writer got the missing CME snapshots, and
+the rollback paths got compensating index-key deletion (R-57) plus the committed-record rollback
+guard (R-58). Verified: 13+ consecutive isolated greens, and a 10/10 green gate of ALL stress
+tests (20 classes × 10 consecutive surefire passes, 2026-10-19 night).
+
 | Test class | Family / signature | Rate | Evidence | Status |
 |------------|--------------------|------|----------|--------|
-| `XdStorageGraphPhantomReadStressTest` | tearDown "Разрушен вложенный спутник" — R-44 fixed the read-path null-satellite; rare residual of the same concurrent purge-vs-rollback family | ~1/11 isolated | R-45, R-44 | open residual, needs dumps (R-45 next-session note) |
-| `XdStorageFacadeStressTest` | "рассинхрон структуры" — the R-32 validator's two traversals are not atomic under 25 workers; false-positive suspicion | rare in-suite; **no longer isolated-green** (2026-10-19 A/B ×2 on clean HEAD: fails isolated too, varying load-timing signatures — find retry-budget exhaustion / CME on btree write-out) | R-45, R-46 | open suspicion: validator-side, not engine; isolated-red is NOT evidence of an engine regression |
-| `XdStoragePhantomReadIsolationStressTest` | read-lock contention under full-suite load; stable green isolated since R-13 | flaky in-suite only | R-13, R-18 | known family |
-| `XmlDataStorageMultithreadsTest` | concurrent purge vs rolled-back tx ("cannot load by reference" in afterEach) | flaky ~1/3 in-suite | R-18, R-21, R-31 | known family |
+| `XdStorageGraphPhantomReadStressTest` | readers crashed on references their snapshot legitimately excluded: `readByReferenceInternal` hydrated with `View.SCAN` (live state), so snapshot readers walked collections containing not-yet-visible phantoms | ~1/11 isolated (fixed) | R-45 → R-58 (View.BY_ID hydration + invisible-reference skip in the generated collection hydration and `XdStorage.load(Collection, tx)`) | **FIXED** (5/5 + gate 10/10) |
+| `XdStorageFacadeStressTest` | "рассинхрон структуры" validator divergence / find-budget deaths / CME on write-out | ~1/2 isolated (fixed) | R-54, R-55, R-56, R-57, R-58; OPTIMIZATION-PLAN §5 | **FIXED** (13+ isolated greens; gate 10/10) |
+| `XdStorageBTreeStressTest` | merge/split-storm anomalies under FULL-SUITE load: RW-lock hold-and-wait stalls (writeCount=2 holder starved 5s; R-56 diagnostics also captured a mutator inside the mutation section while another thread held the tree write lock) | ~1 per full-suite run; 0 in isolated 10× gate | R-29 lock family (wait-rescheduling approaches exhausted, see R-26/R-28/R-29); R-56 diagnostics | **open — Track B3** (contention removal); tolerated as backpressure in isolated runs |
+| `XdStoragePhantomReadIsolationStressTest` | read-lock contention under full-suite load | flaky in-suite only | R-13, R-18, R-58c | known family, stable green in the 10× gate |
+| `XmlDataStorageMultithreadsTest` | concurrent purge vs rolled-back tx in afterEach | flaky ~1/3 in-suite (fixed) | R-18, R-21, R-31, R-57, R-58 | **FIXED** (5/5 + gate 10/10) |
 
 ## Conventions
 
@@ -24,3 +35,5 @@ tracks their flake rate (full suite ×3).
 - JMH trials that fail are **silently skipped** — count the rows in the final table
   ([BENCHMARKS.md](BENCHMARKS.md) gotcha #1; the nightly CI job asserts 9 rows).
 - Un-quarantine a family only after its R-entry records a fix with A/B evidence.
+- Track-A gate (2026-10-19): **10/10 green consecutive runs of all 20 stress tests** +
+  the full suite green except the in-suite BTreeStress tail (Track B3).

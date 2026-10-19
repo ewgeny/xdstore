@@ -94,6 +94,16 @@ public class XdStorageClassGenerator {
             // уходил в dummy-обертки без единого следа в логе. Печатаем диагностику компилятора.
             log.error("Wrapper compilation FAILED for {} ({} files): {}", cl.getName(), generatedCode.size(),
                     diagnostics.getDiagnostics());
+            if (Boolean.getBoolean("xdstorage.dump.gencode")) {
+                generatedCode.forEach((name, source) -> {
+                    try {
+                        java.nio.file.Files.write(java.nio.file.Paths.get("/tmp/gencode-dump-" + name.replaceAll("[^A-Za-z0-9.$]", "_") + ".java"),
+                                source.getBytes());
+                    } catch (final Exception dumpError) {
+                        log.error("gencode dump failed for {}", name, dumpError);
+                    }
+                });
+            }
         }
         if (success) {
             try {
