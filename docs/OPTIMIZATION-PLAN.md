@@ -1101,3 +1101,24 @@ phantom-family trio (GraphPhantom / XmlMultithreads / DeleteIsolation / PhantomR
 tests**; the full suite 692 tests green (third run; runs 1-2 each carried one in-suite
 `XdStorageBTreeStress` anomaly of the documented R-29 lock-contention family — different tests,
 self-healing, gate-isolated 10/10).
+
+### R-58 (дополнение, 2026-10-20). Regression coverage of the Track-A fixes — 13 pins
+Each defect fixed by R-54..R-58 is pinned by a dedicated test (all red-by-construction on the
+pre-fix code):
+- `XdStorageFindTimeBudgetTest` (R-54): find survives a 600ms leaf-lock storm inside the time
+  budget — the attempt-budget threw in ~20-40ms;
+- `XdStorageBTreeRebalanceGuardTest` (R-56): real chain divergence at a stable version stays loud;
+  mutation counters return to 0; **SPLIT-ORPHAN** (split whose parent does not contain it) is a
+  loud `XdStorageException` instead of the silent chain-orphan;
+- `XdStorageResourceRetentionTest` (R-55): after the last release the resource object, its record
+  cache and the 3 records survive (old code: the resource vanished from the map);
+- `XdStorageIndexRollbackCompensationTest` (R-57): save+rollback leaves the id-index clean — the
+  full scan sees committed rows, neither rolled-back rows nor "cannot load by reference";
+- `XdStorageCacheRollbackGuardTest` (R-58): rollback refuses committed records (no zombie),
+  still cleans uncommitted inserts; the commit protocol skips an already-committed record
+  (double-commit contour) instead of failing the whole commit; unprepared commit stays loud;
+- `XdStorageInvisibleReferenceTest` (R-58): foreign-uncommitted insert →
+  `XdStorageReferenceInvisibleException`; missing record → hard `XdStorageException`;
+- `XdStorageYamlWriterCmeTest` (R-56): YAML write-out survives concurrent collection mutation
+  without CME.
+Full suite after the pins: **705 tests green**.

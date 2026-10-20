@@ -163,6 +163,7 @@ public final class XdStorageCacheCommitProtocol {
                     log.debug("COMMIT by transaction " + transaction.getTransactionId() + "\r\n OLD OBJECT: " + record.getObject() + "\r\n NEW OBJECT: " + record.getNewObject());
                 }
 
+                boolean committedNow = true;
                 synchronized (record) {
                     try {
                         record.commit(transaction);
@@ -170,18 +171,22 @@ public final class XdStorageCacheCommitProtocol {
                         // R-58: запись УЖЕ ЗАКОММИЧЕНА (повторный commit той же записи —
                         // вложенный/двойной контур коммита: флаги фаз потреблены первым
                         // проходом, state=committed). Пропускаем с WARN: данные уже
-                        // постоянны, повторная фиксация ничего не меняет. Для записей
-                        // в иных состояниях ошибка остается громкой.
+                        // постоянны, повторная фиксация ничего не меняет (и не захватывает
+                        // latch повторно — unlock не нужен). Для записей в иных состояниях
+                        // ошибка остается громкой.
                         if (record.isCommitedState()) {
                             log.warn("commit of tx {}: record {} already committed (double-commit path) — skipped",
                                     transactionId, record.getId());
+                            committedNow = false;
                         } else {
                             throw illegalState;
                         }
                     }
                 }
 
-                record.unlock(transaction);
+                if (committedNow) {
+                    record.unlock(transaction);
+                }
             }
         }
 
