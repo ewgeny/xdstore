@@ -12,7 +12,6 @@ public class XdStorageIOFactory {
     public static IXdStorageIOFactory instanceIOFactory(XdStorageServicesLocator serviceLocator, IXdStorageIdGenerator idGenerator, FilesFormat format) {
         IXdStorageIOFactory ioFactory;
         switch (format) {
-            case JSON:
             case XML:
                 ioFactory = new XdStorageDefaultIOFactory(serviceLocator, idGenerator);
                 break;

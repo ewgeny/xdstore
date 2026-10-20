@@ -63,7 +63,8 @@ current code, stated so embedding surprises are design-time, not production-time
 ## Files and durability
 
 - The storage folder is engine-owned: `structure/*.yaml`, `data/<Class>/*.yaml` (YAML default) plus
-  `.xdstorage.lock`. Do not edit files while the storage is open.
+  `.xdstorage.lock` and the format marker `.xdstorage.meta`. Do not edit files while the storage is
+  open.
 - Default write-out is process-crash-safe (atomic rename), NOT power-loss-safe. Enable
   `XdStorageConfig.builder().durableWrites(true)` for fsync-per-commit power-loss safety.
 - Resource files carry an EOF sentinel; a truncated file fails loudly at open. Pre-sentinel legacy
@@ -89,3 +90,59 @@ current code, stated so embedding surprises are design-time, not production-time
 `daemonWorkerThreads=false`, `registerShutdownHook=false`,
 `workerPoolSize=15`, `defaultTransactionTimeoutMillis=3000`, `isolationLevel=SNAPSHOT`.
 Journal files (`<basefile>.journal.yaml`) are engine-owned like the rest of the folder.
+
+## Compatibility & support statement
+
+E-6: what "supported" means, stated up front so upgrades are design-time decisions.
+
+### JDK matrix
+
+| Artifact | Requirement |
+|---|---|
+| Library bytecode | Java **8** (`release=8`, platform API pinned — H-5) |
+| Runtime | any JRE/JDK 8+ **for the bytecode** — but see the codegen requirement above: wrapper generation needs a **JDK at runtime** until FP-3 (AOT) ships |
+| Building XdStorage itself | JDK **17+**, Maven **3.6.3+** (enforced) |
+| CI / tested runtimes | Temurin 17 (gate + nightly); 21 used in development |
+
+### On-disk format compatibility
+
+The format generation is recorded per storage folder in `.xdstorage.meta`
+(`formatVersion`; see `XdStorageFormatMeta`):
+
+| Folder was written by | 2.0 library behavior |
+|---|---|
+| 2.0+ (marker `formatVersion=2`) | opens normally; startup INFO announces `format v2` |
+| 1.x (no marker, files present) | opens with a legacy INFO; **YAML** content additionally requires `acceptMissingEofSentinel(true)` until the first commit rewrites the files; **XML** content opens as-is |
+| a **newer** library (marker `formatVersion` > 2) | loud `XdStorageRuntimeException` before any engine state is built — upgrade the library |
+| fresh/empty folder | marker `formatVersion=2` written at open |
+
+The folder is single-writer (exclusive lock); a folder may be read concurrently only by the
+owning process. There is no multi-process write access and no down-level writer after a
+format bump — that is what the marker check is for.
+
+### Migrating a 1.x folder that used `FilesFormat.JSON`
+
+The 1.x `JSON` constant actually wrote **XML content** into `.json`-named files. Migrate:
+
+```bash
+# storage shut down, folder at ./data/db:
+find ./data/db -name '*.json' -exec bash -c 'mv "$1" "${1%.json}.xml"' _ {} \;
+```
+
+then open with `FilesFormat.XML`. (For YAML-era folders there is nothing to rename.)
+
+### Support and deprecation policy
+
+- **Semver**: MAJOR = API or on-disk format break; MINOR = features, config-default changes,
+  format additions; PATCH = fixes. Format generation bumps are MINOR events (they are
+  additive); format *removals* are MAJOR.
+- **Deprecation policy**: a deprecated API or format keeps read/write support for at least
+  two MINOR releases before removal, with the removal and its migration recipe in
+  CHANGELOG.md.
+- **Flake transparency**: known rare stress flakes are tracked publicly in
+  [FLAKY.md](FLAKY.md); a release ships either with zero open rows or with the open rows
+  named in its release notes (2.0.0: the BTreeStress full-suite-load contention row, Track B3).
+- **Performance contract**: numbers and baselines live in [BENCHMARKS.md](BENCHMARKS.md);
+  a release that regresses a benchmark scenario >25% vs the recorded baseline is called out
+  in its release notes.
+

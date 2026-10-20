@@ -6,6 +6,8 @@ import org.apache.logging.log4j.Logger;
 import org.flib.xdstorage.serialization.FilesFormat;
 import org.flib.xdstorage.utils.XdStorageAtomicFile;
 import org.flib.xdstorage.utils.XdStorageFolderLock;
+import org.flib.xdstorage.utils.XdStorageFormatMeta;
+import org.flib.xdstorage.utils.XdStorageVersion;
 
 import java.io.File;
 import java.util.Iterator;
@@ -27,6 +29,15 @@ public class XdStorageProvider {
      * Диапазон 128-512 оставляет запас для сущностей крупнее эталонных ~430 байт.
      */
     public static final int DEFAULT_FRAGMENT_SIZE = 128;
+
+    /**
+     * A2: the library version (semver, e.g. "2.0.0") — the same value a storage instance
+     * returns from {@code getVersion()}. Read from the Maven-filtered
+     * {@code /xdstorage.properties} resource; "unknown" without Maven filtering.
+     */
+    public static String getVersion() {
+        return XdStorageVersion.getVersion();
+    }
 
     private static Map<String, XdStorage> storages = new ConcurrentHashMap<>();
 
@@ -76,7 +87,10 @@ public class XdStorageProvider {
                     }
                     boolean created = false;
                     try {
-                        log.info("storage '{}' opened at {} ({})", name, folder, format);
+                        // A2: format marker under the exclusive folder lock, before any engine state
+                        // is built — announces "opened storage X, format vN", initializes the marker
+                        // on a fresh folder, flags a legacy 1.x folder, rejects a newer-format folder.
+                        XdStorageFormatMeta.onOpen(new File(folder), name, format.name());
                         storage = new XdStorage(name, folder, fragmentSize, format, cfg);
                         storage.attachFolderLock(folderLock);
                         created = true;

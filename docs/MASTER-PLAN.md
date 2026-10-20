@@ -36,7 +36,7 @@ R-entries.
 | F-2 | **RW-lock redesign** (R-26/R-28/R-29 wait-rescheduling variants) | 3 variants rejected with evidence; in-source comments forbid blind re-attempts | Contention-removal design (B3), never wait-rescheduling |
 | F-3 | **Record-cache eviction** (the original W-2 half) | Eviction without disk-anchored scans silently drops rows from scans / breaks snapshot prev-versions | W-4 design round (Step 2) ships disk-anchored scans first |
 | F-4 | **D-3 batching** | Superseded by Phase W; fallback design recorded in WRITE-PATH-DESIGN.md §3 | Only if the journal approach stalls |
-| F-5 | **JSON format** | Enum constant with no serializer | Decide at release: remove from the public enum or implement as a feature (Step 0, A2) |
+| F-5 | ~~**JSON format**~~ — **DECIDED at Step 0 (2026-10-20): the enum constant is REMOVED in 2.0.0** — it silently wrote XML content into `.json` files; real JSON support, if demand appears, is a Step-4 feature (SPI implementation, no enum lie) | Closed | Implement JSON as a real format on demand (Step 4); a 1.x `.json` folder is an XML folder — migration recipe in EMBEDDING.md |
 | F-6 | **Test layout rename** (`src/main/test`) | Churn without operational payoff | Never (documented constraint) |
 | F-7 | **JMX/Micrometer adapter** | Deliberately embedder-side (O-phase verdict) | FP-8 (`xdstorage-micrometer` module) — build it only on a concrete demand signal (Step 4) |
 | F-8 | **R-35/R-33 second leak path** (outside B+Tree retry loops) | Unidentified; watchdog + correlation toolkit ready | If leak events re-appear in nightly logs or B3 dumps |
@@ -59,16 +59,25 @@ into Steps 0–2), **E open** (= Step 0), **F new** (the FP feature plan, Steps 
 The release train: Track E in full + the A2 API-freeze decisions. Nothing here waits on
 anything anymore (Track A is done).
 
+**Status 2026-10-20 (release-engineering prep landed):** A2 DONE (JSON removed, format marker
+`.xdstorage.meta` + startup INFO + loud newer-format rejection, `getVersion()`), E-1 DONE
+(LICENSE Apache-2.0, CHANGELOG.md, semver `2.0.0`, pom metadata), E-2 DONE (`release` profile:
+sources/javadoc/GPG/enforcer/reproducible builds), E-4 DONE (`release.yml`, activation = CI
+secrets), E-6 DONE (EMBEDDING.md § Compatibility & support statement), D-3 DONE (Dependabot).
+E-3 is scaffolding-complete (Central Portal plugin, server id `central`) — activation needs the
+namespace registration + secrets; E-5 is documented in [RELEASE-PLAN.md](RELEASE-PLAN.md) and
+executes at RC time. What remains to tag 2.0.0 is the §1 checklist of RELEASE-PLAN.md.
+
 | # | Item | What |
 |---|---|---|
-| A2 | **API surface freeze** | JSON enum constant: remove or implement (F-5 decision); on-disk format version marker + startup INFO ("opened storage X, format vN") + compatibility matrix in EMBEDDING.md; `XdStorage.getVersion()` |
-| E-1 | **Project meta** | LICENSE (**Apache-2.0** — evaluation's recommendation over MIT: patent grant), CHANGELOG.md backfilled from the R-journals, pom `<name>/<description>/<url>/<scm>/<licenses>`; semver `2.0.0` |
-| E-2 | **Build-for-release hygiene** | `release` profile: source + javadoc plugins (facade API), enforcer (JDK 17+ build, dependency bounds), reproducible builds (`project.build.outputTimestamp`) |
-| E-3 | **Distribution channel** | Maven Central via Sonatype OSSRH (recommended; GitHub Packages fallback); `distributionManagement` + CI-secret credentials |
-| E-4 | **Release workflow** | `.github/workflows/release.yml`: tag push `v*` → full gate (BUILD SUCCESS verdict) → JMH smoke row assertion → signed `mvn deploy` → GitHub Release with CHANGELOG section + artifacts |
-| E-5 | **Pre-release verification protocol** | RC: suite ×3 green; kill-9 + torn-journal recovery vs the RC; `durableWrites=true` spot benchmark; 1.x migration walkthrough (`acceptMissingEofSentinel`); JMH vs BENCHMARKS.md baselines; fresh-clone README walkthrough |
-| E-6 | **Compatibility & support statement** | EMBEDDING.md: JDK matrix, storage-folder compatibility, flake-ledger link, 1.x→2.0 upgrade path, on-disk format deprecation policy |
-| D-3 | Dependabot (or weekly dependency-updates job) | log4j 2.11→2.23 history is the argument; pin, don't chase |
+| A2 | **API surface freeze** — **DONE** | JSON enum constant REMOVED (F-5 decision above); on-disk format version marker `.xdstorage.meta` + startup INFO ("created/opened storage X, format vN") + newer-format loud rejection; compatibility matrix in EMBEDDING.md; `getVersion()` on `IXdFileStorage` + `XdStorageProvider.getVersion()` |
+| E-1 | **Project meta** — **DONE** | LICENSE (**Apache-2.0**), CHANGELOG.md backfilled from the R-journals, pom `<name>/<description>/<url>/<scm>/<licenses>`; semver `2.0.0` |
+| E-2 | **Build-for-release hygiene** — **DONE** | `release` profile: source + javadoc plugins (doclint off at 2.0.0, tighten later), GPG signing, enforcer (JDK 17+/Maven 3.6.3+ always-on; no-SNAPSHOT-deps + no-duplicate-versions in release), reproducible builds (`project.build.outputTimestamp`) |
+| E-3 | **Distribution channel** — scaffolding DONE, activation open | Maven Central via the Central Portal (`central-publishing-maven-plugin`, server id `central`; supersedes the legacy OSSRH plan for a first-time publisher); needs namespace verification + CI secrets |
+| E-4 | **Release workflow** — **DONE** | `.github/workflows/release.yml`: tag push `v*` → version/tag sanity → full gate (BUILD SUCCESS verdict) → JMH smoke row assertion → signed `mvn -Prelease deploy` → GitHub Release with the CHANGELOG section + artifacts |
+| E-5 | **Pre-release verification protocol** — documented, executes at RC | See RELEASE-PLAN.md §1/§2: suite ×3 green; kill-9 + torn-journal recovery vs the RC; `durableWrites=true` spot benchmark; 1.x migration walkthrough (`acceptMissingEofSentinel` + the JSON recipe); JMH vs BENCHMARKS.md baselines; fresh-clone README walkthrough |
+| E-6 | **Compatibility & support statement** — **DONE** | EMBEDDING.md § Compatibility: JDK matrix, on-disk format compatibility matrix, JSON migration recipe, semver/deprecation policy, flake-ledger + benchmark-regression disclosure rules |
+| D-3 | Dependabot — **DONE** | `.github/dependabot.yml` (maven + github-actions, weekly); log4j 2.11→2.23 history is the argument; pin, don't chase |
 | D-5 | ~~Commit the staged `XdStore.docx`~~ | **DONE** (historical docs committed) |
 
 *Exit criterion (from the evaluation): a stranger can add the dependency from Central and read
@@ -138,7 +147,7 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 
 | Order | Work | Effort | Unlocks | Release |
 |---|---|---|---|---|
-| 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** | 1–2 sess | Everything public | **2.0.0** |
+| 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** — **prep landed 2026-10-20; remaining = RELEASE-PLAN.md §1 (namespace, secrets, RC, tag)** | 1–2 sess | Everything public | **2.0.0** |
 | 1 | B2 + FP-1 (phase 1) + FP-11 + D-1/D-4 | 1–2 sess | Query expressiveness; read-heavy workloads | 2.0.x / 2.1 |
 | 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | 2.1 |
 | 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.2 |

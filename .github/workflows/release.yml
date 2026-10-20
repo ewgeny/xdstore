@@ -1,0 +1,108 @@
+name: xdstorage release
+
+# E-4: tag push v* → full gate → JMH smoke → signed deploy (Maven Central via the
+# Central Portal) → GitHub Release with the CHANGELOG section + artifacts.
+# Required secrets (see docs/RELEASE-PLAN.md §1):
+#   CENTRAL_USERNAME / CENTRAL_PASSWORD — Central Portal user token (server id "central")
+#   GPG_PRIVATE_KEY — armored signing key (export -a --export-secret-keys)
+#   GPG_PASSPHRASE  — that key's passphrase
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'          # dev/test runtime; library bytecode stays release=8
+          cache: maven
+
+      - name: Full gate (BUILD SUCCESS verdict — never a piped grep's exit code, R-52)
+        run: |
+          mvn clean test > /tmp/mvn-gate.log 2>&1 || { tail -100 /tmp/mvn-gate.log; exit 1; }
+          grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-gate.log
+          grep -q "BUILD SUCCESS" /tmp/mvn-gate.log || { echo "BUILD FAILURE detected"; exit 1; }
+          grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-gate.log | tail -1
+
+      - name: JMH smoke with table-row assertion (JMH silently SKIPS failed trials — the row count is the check)
+        run: |
+          mvn test-compile > /dev/null 2>&1
+          CP="target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test)"
+          java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark quick > /tmp/jmh-smoke.log 2>&1 || { tail -50 /tmp/jmh-smoke.log; exit 1; }
+          ROWS=$(grep -c "^XdStorageSearchEngineBenchmark\." /tmp/jmh-smoke.log || true)
+          echo "JMH table rows: $ROWS"
+          if [ "$ROWS" -lt 9 ]; then echo "EXPECTED 9 benchmark rows, got $ROWS — refusing to release"; exit 1; fi
+
+      - name: Version sanity (pom version must equal the tag)
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          POM_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "tag=$TAG pom=$POM_VERSION"
+          if [ "$TAG" != "$POM_VERSION" ]; then
+            echo "TAG $TAG != POM VERSION $POM_VERSION — bump the pom (and CHANGELOG) before tagging"; exit 1;
+          fi
+
+      - name: Import GPG key
+        run: |
+          echo "$GPG_PRIVATE_KEY" | base64 --decode > /tmp/signing-key.asc 2>/dev/null || printf '%s' "$GPG_PRIVATE_KEY" > /tmp/signing-key.asc
+          gpg --batch --import /tmp/signing-key.asc
+          rm -f /tmp/signing-key.asc
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+
+      - name: Write Central Portal credentials (server id "central")
+        run: |
+          mkdir -p ${HOME}/.m2
+          cat > ${HOME}/.m2/settings.xml <<SETTINGS
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${CENTRAL_USERNAME}</username>
+                <password>${CENTRAL_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          SETTINGS
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+
+      - name: Deploy (signed, release profile → Central Portal → auto-publish)
+        run: mvn -Prelease deploy -Dgpg.passphrase="$GPG_PASSPHRASE"
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Extract this version's CHANGELOG section
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v hdr="## [$VERSION]" 'index($0, hdr)==1 {flag=1; next} /^## \[/ && flag {exit} flag' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "CHANGELOG.md has no '## [$VERSION]' section — curate release notes before tagging"; exit 1;
+          fi
+          head -50 /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/release-notes.md
+          files: |
+            target/xdstorage-*.jar
+          fail_on_unmatched_files: true
+
+      - name: Archive release logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-logs
+          path: |
+            /tmp/mvn-gate.log
+            /tmp/jmh-smoke.log
+          if-no-files-found: ignore

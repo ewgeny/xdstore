@@ -7,15 +7,39 @@
     <groupId>org.flib.xdstorage</groupId>
     <artifactId>xdstorage</artifactId>
     <packaging>jar</packaging>
-    <version>2.0</version>
-    <name>XD Storage</name>
+    <!-- E-1: semver — the single source of truth. It reaches the jar as the Maven-filtered
+         /xdstorage.properties resource (XdStorage.getVersion()). Bump per docs/RELEASE-PLAN.md §2. -->
+    <version>2.0.0</version>
 
+    <name>XdStorage</name>
+    <description>Embedded Java object storage: ACID transactions with MVCC snapshots over human-readable
+        YAML/XML files, B+tree and hash indexes, a criteria search engine, triggers, and pluggable
+        serialization. Zero native dependencies; Java 8 bytecode.</description>
+    <url>https://github.com/ewgeny/xdstore</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <scm>
+        <url>https://github.com/ewgeny/xdstore</url>
+        <connection>scm:git:https://github.com/ewgeny/xdstore.git</connection>
+        <developerConnection>scm:git:git@github.com:ewgeny/xdstore.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
 
     <properties>
         <!-- H-5: library bytecode stays 1.8-compatible; dev/test runtime is JDK 17. -->
         <jdk.version>8</jdk.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <!-- E-2: reproducible builds — fixed timestamp baked into jar entries. Bump it in the
+             release checklist (docs/RELEASE-PLAN.md §2) so every release is byte-distinct. -->
+        <project.build.outputTimestamp>2026-10-20T00:00:00Z</project.build.outputTimestamp>
     </properties>
 
     <dependencies>
@@ -87,6 +111,35 @@
 
         <testSourceDirectory>src/main/test</testSourceDirectory>
 
+        <resources>
+            <!-- A2: the version resource is the only filtered file; everything else is copied verbatim. -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>xdstorage.properties</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>xdstorage.properties</exclude>
+                </excludes>
+            </resource>
+        </resources>
+
+        <pluginManagement>
+            <plugins>
+                <!-- E-2: pinned so jar entries honor project.build.outputTimestamp (reproducible builds). -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.4.2</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -113,6 +166,33 @@
                         <include>**/*Test.java</include>
                     </includes>
                 </configuration>
+            </plugin>
+
+            <!-- E-2: build-environment floor for every build, not just releases — an JDK 8 build
+                 or an ancient Maven must fail loudly instead of producing a second-class jar. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-build-environment</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[17,)</version>
+                                    <message>XdStorage builds on JDK 17+ (bytecode target stays 8, H-5)</message>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>[3.6.3,)</version>
+                                </requireMavenVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
@@ -143,6 +223,116 @@
                                 <exclude>**/XmlDataStorageMultithreadsTest.java</exclude>
                             </excludes>
                         </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- E-2/E-3: the release profile — source/javadoc jars, signing, release-only enforcer
+             rules, publish to Maven Central via the Central Portal (publishingServerId "central").
+             Activated by the tag-triggered release workflow (.github/workflows/release.yml);
+             requires CI secrets — see docs/RELEASE-PLAN.md §1. Local dry run without a GPG key:
+             mvn -Prelease -Dgpg.skip=true verify  (builds binary + sources + javadoc jars). -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.11.2</version>
+                        <configuration>
+                            <!-- The codebase mixes Russian and English javadoc with loose tags;
+                                 doclint stays off for 2.0.0, tightening is a follow-up
+                                 (docs/RELEASE-PLAN.md §3). -->
+                            <doclint>none</doclint>
+                            <failOnError>false</failOnError>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- E-3: Maven Central requires signed artifacts. The key arrives via CI
+                         secrets (GPG_PRIVATE_KEY/GPG_PASSPHRASE); locally export your key to test. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                            </gpgArguments>
+                        </configuration>
+                    </plugin>
+
+                    <!-- E-3: publish to Maven Central via the Central Portal. Requires the
+                         namespace org.flib.xdstorage to be verified and a user token stored as
+                         CI secrets (server id "central") — docs/RELEASE-PLAN.md §1.
+                         Supersedes the legacy OSSRH distributionManagement plan (E-3): new
+                         publishers go through the Portal as of 2025+. -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.6.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                        </configuration>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <version>3.4.1</version>
+                        <executions>
+                            <execution>
+                                <id>enforce-release-hygiene</id>
+                                <goals>
+                                    <goal>enforce</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <requireReleaseDeps>
+                                            <message>no SNAPSHOT dependencies in a release build</message>
+                                        </requireReleaseDeps>
+                                        <banDuplicatePomDependencyVersions/>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
                     </plugin>
                 </plugins>
             </build>

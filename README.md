@@ -2,7 +2,7 @@
 
 **XdStorage** is an embedded, file-backed **object storage for Java**. Plain JavaBeans/POJOs annotated with a
 small set of annotations are persisted into a folder of files with **ACID transactions, MVCC snapshot reads,
-B+tree/hash indexes, a criteria-based search engine, triggers, and pluggable on-disk formats** (YAML, XML, JSON).
+B+tree/hash indexes, a criteria-based search engine, triggers, and pluggable on-disk formats** (YAML, XML).
 There is no server, no native code and no external dependency to operate — the whole database lives next to
 your application.
 
@@ -11,7 +11,7 @@ Your JVM ──► IXdFileStorage facade ──► transactions (MVCC, 2PC commi
                                    ├─► primary id index (Hash / B+tree)
                                    ├─► search engine (criteria queries, child indexes)
                                    ├─► resource cache + triggers + observers
-                                   └─► YAML / XML / JSON file fragments on disk
+                                   └─► YAML / XML file fragments on disk
 ```
 
 ## Table of contents
@@ -54,8 +54,10 @@ Your JVM ──► IXdFileStorage facade ──► transactions (MVCC, 2PC commi
 - **Triggers** — `Insert` / `Update` / `Delete` callbacks executed within the committing transaction.
 - **Identifier generation** — persistent per-class counters for `Long`/`Integer`, UUID for `String`,
   fully pluggable custom generators; deferred-id observers get notified when an id is assigned.
-- **Pluggable serialization** — YAML (default), XML, JSON; the reader/writer pair is an SPI
-  (`IXdStorageIOFactory`) so you can implement your own format.
+- **Pluggable serialization** — YAML (default), XML; the reader/writer pair is an SPI
+  (`IXdStorageIOFactory`) so you can implement your own format. (The 1.x `FilesFormat.JSON`
+  constant was removed in 2.0.0 — it wrote XML content; see
+  [docs/EMBEDDING.md](docs/EMBEDDING.md) § Compatibility.)
 - **Streaming reads** — iterate a class without materializing the whole collection (`watch`), or filter with
   a predicate (`load(Class, IXdStoragePredicate)`).
 - **Structure updates** — registered updaters migrate persisted structures (e.g. rebuild a search index after
@@ -64,11 +66,12 @@ Your JVM ──► IXdFileStorage facade ──► transactions (MVCC, 2PC commi
 
 ## Requirements and installation
 
-- Java 8 or newer to run the library (the bytecode target is 1.8); JDK 17 is used for development and tests.
+- Java 8 or newer to run the library (the bytecode target is 1.8; wrapper codegen needs a JDK at
+  runtime — see [docs/EMBEDDING.md](docs/EMBEDDING.md)); JDK 17 is used for development and tests.
 - Runtime dependencies: `org.apache.logging.log4j:log4j-core` (2.23.1) and
   `org.apache.commons:commons-lang3` (3.8.1).
 
-The library is not published to a Maven repository — build and install it locally:
+Until 2.0.0 is tagged, install from source; after the release the artifact is on Maven Central:
 
 ```bash
 mvn install
@@ -80,7 +83,7 @@ then add to your `pom.xml`:
 <dependency>
     <groupId>org.flib.xdstorage</groupId>
     <artifactId>xdstorage</artifactId>
-    <version>2.0</version>
+    <version>2.0.0</version>
 </dependency>
 ```
 
@@ -277,7 +280,9 @@ IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fra
   same JVM — on the same folder fails loudly with `XdStorageFolderLock.XdStorageInUseException` instead of
   corrupting data. The lock is released by `shutdown()`.
 - `fragmentSize` — number of objects per fragment file for the `StoreAsClassObjects` policy.
-- `FilesFormat` — `YAML` (default), `XML` or `JSON`.
+- `FilesFormat` — `YAML` (default) or `XML`. (The 1.x `JSON` constant was removed in 2.0.0; a
+  1.x folder written through it holds XML content in `.json`-named files — migration recipe in
+  [docs/EMBEDDING.md](docs/EMBEDDING.md) § Compatibility.)
 - `XdStorageConfig` — open-time knobs (all defaults reproduce the pre-config behavior):
   `durableWrites` (fsync file+directory per commit — power-loss safe at fsync cost),
   `acceptMissingEofSentinel` (legacy migration: open pre-sentinel storages instead of failing loudly on
@@ -536,7 +541,6 @@ The on-disk format is chosen when the storage is created:
 ```java
 XdStorageProvider.newOrGetFileStorage("db", "./data/db", 250, FilesFormat.YAML);  // default
 XdStorageProvider.newOrGetFileStorage("db", "./data/db", 250, FilesFormat.XML);
-XdStorageProvider.newOrGetFileStorage("db", "./data/db", 250, FilesFormat.JSON);
 ```
 
 The format is implemented as a pair of streaming reader/writer factories:
@@ -545,7 +549,9 @@ The format is implemented as a pair of streaming reader/writer factories:
 - `IXdStorageObjectsReader` / `IXdStorageObjectsWriter` — the actual (de)serialization SPI.
 
 Built-in implementations: a hand-rolled block-based **YAML** writer/reader (`serialization.yaml.*`, the
-default format) and the default XML/JSON factory (`XdStorageDefaultIOFactory`). To add a custom
+default format, with commit-journal support) and the **XML** factory (`XdStorageDefaultIOFactory`).
+Every storage folder records its on-disk format generation in `.xdstorage.meta`
+(`formatVersion` — see [docs/EMBEDDING.md](docs/EMBEDDING.md) § Compatibility). To add a custom
 format, implement the factory/writer/reader triple and wire it into `XdStorageServicesLocator`.
 
 The physical naming of resource files is handled by `IXdStorageResourceNamingService` (default:
@@ -635,17 +641,21 @@ Worth knowing before production use (details and remediation plan in
 ## Building and testing
 
 ```bash
-mvn test           # full suite (~630 tests, unit + integration + stress), single surefire fork with -Xmx2g
+mvn test           # full suite (~700 tests, unit + integration + stress), single surefire fork with -Xmx2g
 mvn install        # build the jar and install it locally
+mvn -Prelease -Dgpg.skip=true verify   # release-shaped build: binary + sources + javadoc jars
 ```
 
 Notes:
 
-- The build pins `--release 8` — post-JDK-8 API usage fails compilation even on a JDK 17 toolchain.
+- The build pins `--release 8` — post-JDK-8 API usage fails compilation even on a JDK 17 toolchain
+  (the build itself enforces JDK 17+ / Maven 3.6.3+).
 - Test storages are created under `./target/`; stale storage folders from interrupted runs can pollute a
   re-run, so prefer `mvn clean test` when tests misbehave.
-- The full suite is run in a single fork; individual stress tests may show flakiness under extreme machine
-  load (documented in the optimization plan docs).
+- The full suite is run in a single fork; rare stress flakes under extreme machine load are documented
+  in [docs/FLAKY.md](docs/FLAKY.md).
+- Releases are cut by pushing a `v*` tag (`.github/workflows/release.yml`); the procedure is
+  [docs/RELEASE-PLAN.md](docs/RELEASE-PLAN.md).
 
 ## Documentation and project layout
 
@@ -654,6 +664,11 @@ Notes:
 - [docs/SRE-OPTIMIZATION-PLAN.md](docs/SRE-OPTIMIZATION-PLAN.md) — operational hardening plan
   (durability, locking, metrics).
 - [docs/EMBEDDING.md](docs/EMBEDDING.md) — the embedding contract (threads, statics, codegen, lifecycle).
+- [docs/RELEASE-PLAN.md](docs/RELEASE-PLAN.md) — release engineering: first-release checklist,
+  the recurring release procedure, and release-prep recommendations.
+- [docs/MASTER-PLAN.md](docs/MASTER-PLAN.md) — the roadmap (merged 5-step plan, frozen items).
+- [docs/ARCHITECT-EVALUATION.md](docs/ARCHITECT-EVALUATION.md) — outside-architect review and the
+  competitive comparison.
 - [docs/FLAKY.md](docs/FLAKY.md) — known flaky test families and quarantine conventions.
 - [docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md) — journal-based commit design (the write-path roadmap).
 
@@ -667,7 +682,7 @@ Main packages (`org.flib.xdstorage`):
 | `search`, `search.query` | Search engine, indexes, criteria query API |
 | `resource`, `resource.cache` | Resource DAOs, naming, MVCC record/workspace cache, commit protocol |
 | `index`, `index.hash`, `index.btree` | Hash and B+tree id-index resources |
-| `serialization`, `serialization.yaml` | IO factory SPI and the YAML/XML/JSON implementations |
+| `serialization`, `serialization.yaml` | IO factory SPI and the YAML/XML implementations |
 | `trigger`, `observing` | Insert/update/delete triggers, deferred-id observers |
 | `idgeneration` | Id generator SPI, counters, UUID generator |
 | `structure`, `structure.update` | Class/index structure metadata and updaters |

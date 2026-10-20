@@ -1,0 +1,18 @@
+# D-3: dependency freshness — pin, don't chase. Weekly proposals, human-merged;
+# log4j 2.11→2.23 history is the argument (docs/MASTER-PLAN.md Step 0).
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
