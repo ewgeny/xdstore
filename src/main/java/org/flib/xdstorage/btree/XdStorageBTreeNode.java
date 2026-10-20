@@ -1524,48 +1524,68 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
         }
 
         final List<Object> result = new ArrayList<>();
+        // R-59: обход цепочки листьев ИТЕРАЦИОНЕН. Прежняя рекурсия по next давала
+        // по одному кадру стека НА ЛИСТ: multiple-деревья с тысячами листьев
+        // (дубль-ключи + шумовые вставки за 10 секунд шторма) падали
+        // StackOverflowError в find(). Порядок захватов сохранен: сначала
+        // tryLockRead следующего листа, потом release предыдущего.
         try {
-            boolean stop = false;
-            boolean hasMatches = false;
+            while (true) {
+                boolean stop = false;
+                boolean hasMatches = false;
 
-            // На уровне листьев точно так же защищаем чтение через снимок ключей и объектов
-            // (R-56: снимок под монитором — см. комментарий выше)
-            final List<Comparable> leafKeysSnapshot;
-            final List<Object> leafObjectsSnapshot;
-            synchronized (current.getKeys()) {
-                leafKeysSnapshot = new ArrayList<>(current.getKeys());
-            }
-            synchronized (current.getObjects()) {
-                leafObjectsSnapshot = new ArrayList<>(current.getObjects());
-            }
-
-            for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
-                final int compareResult = key.compareTo(leafKeysSnapshot.get(i));
-                if (compareResult == 0) {
-                    if (i < leafObjectsSnapshot.size()) {
-                        result.add(leafObjectsSnapshot.get(i));
-                        hasMatches = true;
-                    }
-                } else if (compareResult < 0) {
-                    stop = true;
-                    break;
+                // На уровне листьев точно так же защищаем чтение через снимок ключей и объектов
+                // (R-56: снимок под монитором — см. комментарий выше)
+                final List<Comparable> leafKeysSnapshot;
+                final List<Object> leafObjectsSnapshot;
+                synchronized (current.getKeys()) {
+                    leafKeysSnapshot = new ArrayList<>(current.getKeys());
                 }
-            }
+                synchronized (current.getObjects()) {
+                    leafObjectsSnapshot = new ArrayList<>(current.getObjects());
+                }
 
-            if (hasMatches && getTree().isMultiple()) {
-                stop = false;
-            }
+                for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
+                    final int compareResult = key.compareTo(leafKeysSnapshot.get(i));
+                    if (compareResult == 0) {
+                        if (i < leafObjectsSnapshot.size()) {
+                            result.add(leafObjectsSnapshot.get(i));
+                            hasMatches = true;
+                        }
+                    } else if (compareResult < 0) {
+                        stop = true;
+                        break;
+                    }
+                }
 
-            if (!stop) {
+                if (hasMatches && getTree().isMultiple()) {
+                    stop = false;
+                }
+
+                if (stop) {
+                    return result;
+                }
+
                 child = current.getNextTreeNodeOnThisLevel();
-                if (child != null) {
-                    final List<Object> tmp = child.find(current, key, storage, transaction, retryFind);
-                    if (!retryFind.get() && tmp != null) {
-                        result.addAll(tmp);
+                if (child == null) {
+                    return result;
+                }
+
+                // lock-coupling: захватываем следующий лист, отпускаем текущий.
+                // Неудача захвата — штатный ретрай всего поиска (retryFind).
+                try {
+                    if (!child.tryLockRead(transaction)) {
+                        retryFind.set(true);
+                        return null;
+                    }
+                } finally {
+                    if (current.isReadLocked()) {
+                        current.unlockRead();
                     }
                 }
+                current = child;
+                child = null;
             }
-            return retryFind.get() ? null : result;
         } finally {
             if (current != null && current.isReadLocked()) {
                 current.unlockRead();
@@ -1574,51 +1594,69 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, org.flib.xdstora
     }
 
     public void read(final IXdStorageBTreeNode toUnlock, final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
-        lockRead(transaction);
+        // R-59: обход цепочки листьев ИТЕРАЦИОНЕН (см. зеркальный комментарий в find):
+        // рекурсия по next давала кадр стека на каждый лист и падала
+        // StackOverflowError на длинных цепях multiple-деревьев.
+        XdStorageBTreeNode current = this;
+        // toUnlock может быть и ДЕРЕВОМ (XdStorageBTree.read передает this) —
+        // релизим полиморфно через интерфейс
+        IXdStorageBTreeNode previous = toUnlock;
         try {
-            // =========================================================================
-            // БАРЬЕР КОНСИСТЕНТНОСТИ ЛИСТА: проверка паритета keys/objects обязана идти
-            // СТРОГО под read-локом ноды. Раньше она выполнялась до захвата лока и ловила
-            // промежуточные состояния писателя (ключ добавлен, объект еще нет), роняя
-            // честных читателей диапазона псевдо-исключением "not leaf node".
-            // =========================================================================
-            if (getKeys().size() != getObjects().size()) {
-                throw new XdStorageException("cannot handle index node, because it is not leaf node");
-            }
+            while (current != null) {
+                current.lockRead(transaction);
+                try {
+                    // =========================================================================
+                    // БАРЬЕР КОНСИСТЕНТНОСТИ ЛИСТА: проверка паритета keys/objects обязана идти
+                    // СТРОГО под read-локом ноды. Раньше она выполнялась до захвата лока и ловила
+                    // промежуточные состояния писателя (ключ добавлен, объект еще нет), роняя
+                    // честных читателей диапазона псевдо-исключением "not leaf node".
+                    // =========================================================================
+                    if (current.getKeys().size() != current.getObjects().size()) {
+                        throw new XdStorageException("cannot handle index node, because it is not leaf node");
+                    }
 
-            if (toUnlock != null) {
-                toUnlock.unlockRead();
-            }
+                    if (previous != null) {
+                        previous.unlockRead();
+                        previous = null;
+                    }
 
-            // =========================================================================
-            // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал IndexOutOfBoundsException!):
-            // Делаем атомарные изолированные снимки (Snapshots) коллекций ключей и объектов
-            // текущей листовой страницы ДО начала итерации цикла viewer.look().
-            // R-56: снимок под монитором коллекции (дисциплина R-43/R-56, см. find).
-            // =========================================================================
-            final List<Comparable> leafKeysSnapshot;
-            final List<Object> leafObjectsSnapshot;
-            synchronized (getKeys()) {
-                leafKeysSnapshot = new ArrayList<>(getKeys());
-            }
-            synchronized (getObjects()) {
-                leafObjectsSnapshot = new ArrayList<>(getObjects());
-            }
+                    // =========================================================================
+                    // АЛГОРИТМИЧЕСКОЕ ИСПРАВЛЕНИЕ СУБД (Истинный финал IndexOutOfBoundsException!):
+                    // Делаем атомарные изолированные снимки (Snapshots) коллекций ключей и объектов
+                    // текущей листовой страницы ДО начала итерации цикла viewer.look().
+                    // R-56: снимок под монитором коллекции (дисциплина R-43/R-56, см. find).
+                    // =========================================================================
+                    final List<Comparable> leafKeysSnapshot;
+                    final List<Object> leafObjectsSnapshot;
+                    synchronized (current.getKeys()) {
+                        leafKeysSnapshot = new ArrayList<>(current.getKeys());
+                    }
+                    synchronized (current.getObjects()) {
+                        leafObjectsSnapshot = new ArrayList<>(current.getObjects());
+                    }
 
-            for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
-                if (i < leafObjectsSnapshot.size()) {
-                    viewer.look(leafKeysSnapshot.get(i), leafObjectsSnapshot.get(i));
+                    for (int i = 0; i < leafKeysSnapshot.size(); ++i) {
+                        if (i < leafObjectsSnapshot.size()) {
+                            viewer.look(leafKeysSnapshot.get(i), leafObjectsSnapshot.get(i));
+                        }
+                    }
+
+                    current.loadThisNode(storage, transaction);
+                } catch (final Throwable unwind) {
+                    // Зеркало прежнего per-frame finally: кадр, поймавший исключение,
+                    // отпускает СВОЙ read-лок (следующий еще не захвачен)
+                    if (current.isReadLocked()) {
+                        current.unlockRead();
+                    }
+                    throw unwind;
                 }
-            }
 
-            loadThisNode(storage, transaction);
-            if (getNextTreeNodeOnThisLevel() == null) {
-                return;
+                previous = current;
+                current = current.getNextTreeNodeOnThisLevel();
             }
-            getNextTreeNodeOnThisLevel().read(this, storage, transaction, viewer);
         } finally {
-            if (isReadLocked()) {
-                unlockRead();
+            if (previous != null) {
+                previous.unlockRead();
             }
         }
     }

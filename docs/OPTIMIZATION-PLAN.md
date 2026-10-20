@@ -1122,3 +1122,21 @@ pre-fix code):
 - `XdStorageYamlWriterCmeTest` (R-56): YAML write-out survives concurrent collection mutation
   without CME.
 Full suite after the pins: **705 tests green**.
+
+### R-59 (2026-10-20). Iterative leaf-chain walk — StackOverflowError family fixed — KEEP
+**Evidence:** the in-suite `XdStorageBTreeStress` tail (1 flake per full-suite run in runs 1-2,
+StackOverflowError in the splits test) — the stress trees are `multiple=true` (t=3/t=2), and both
+`XdStorageBTreeNode.read()` and the multiple-continuation of `node.find()` walked the leaf chain
+RECURSIVELY: one stack frame per leaf. After a 10-second storm the chain holds thousands of
+leaves → a `find` beyond the key range (full chain traversal) blew the 512KB-1MB pool-thread
+stacks. The counted "critical anomaly" in the merges test was the same class (SOE has a null
+message → not classified as backpressure).
+**What:** both chain walks converted to iteration with identical lock order (lock next → parity →
+release previous → process → advance; per-frame finally semantics preserved via the inner
+catch/rethrow and the outer finally). Bonus: the first-frame `lockRead` failure no longer leaks
+the tree read lock (the old first frame's finally never ran — R-35 leak family).
+**Verified:** btree suites 86/86; stress trio (BTreeStress + Nested + LongChain) 6/6; full suite
+706 tests green; new pin `XdStorageLongChainWalkTest` — a multiple tree with >3000 leaves walked
+in a 512KB-stack thread (deterministic SOE on the old code). The R-29 lock-contention stalls
+remain tolerated backpressure (their throws are classified); the unclassified SOE remainder is
+gone.
