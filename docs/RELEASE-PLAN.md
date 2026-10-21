@@ -4,10 +4,19 @@ Prepared 2026-10-20 (release-engineering pass over MASTER-PLAN Step 0). This doc
 operating manual for cutting releases: what is already in place, the exact first-release
 checklist, the recurring release procedure, and standing recommendations.
 
-- **Quality bar** — the same for every release: the full suite (`mvn clean test`) green with a
-  Maven `BUILD SUCCESS` verdict (never a piped grep's exit code — the R-52 gotcha), the JMH
-  smoke row assertion passing, and every open [FLAKY.md](FLAKY.md) row named in the release
-  notes.
+- **Quality bar — split by who runs it:**
+  - **The RC protocol (human, before the tag is cut)** — the FULL suite (`mvn clean test`,
+    stress families included) green ×3 with a Maven `BUILD SUCCESS` verdict (never a piped
+    grep's exit code — the R-52 gotcha), the JMH smoke row assertion passing, and every open
+    [FLAKY.md](FLAKY.md) row named in the release notes.
+  - **The tag pipeline (automated, on tag push)** — the NON-STRESS suite via the `release`
+    profile (`mvn clean deploy -Prelease`: the profile excludes `**/*StressTest.java` +
+    `XmlDataStorageMultithreadsTest` — the slow, load-sensitive part of the run; ~690 of ~714
+    tests, seconds instead of minutes) plus the JMH smoke row assertion. The deploy phase
+    cannot run unless the test phase passed — they share one Maven invocation.
+  - Stress coverage is therefore mandatory twice around every release: nightly ×3 + RC
+    protocol ×3. The pipeline skipping it is a speed choice, never a safety hole — do not
+    tag without the RC protocol.
 - **Versioning** — strict semver from 2.0.0. MAJOR = public API break or on-disk format break;
   MINOR = features, config-default changes, additive format changes; PATCH = fixes only.
 - **Single source of truth for the version** — the pom `<version>`. It reaches the jar as the
@@ -42,7 +51,7 @@ evaluation): **a stranger can add the dependency from Central and read a license
 | E-1 project meta | `LICENSE` (Apache-2.0), `CHANGELOG.md` (backfilled from the R-journals), pom version `2.0.0` + name/description/url/scm/licenses | DONE |
 | E-2 build hygiene | pom `release` profile (source/javadoc jars, GPG, release-only enforcer: no SNAPSHOT deps, no duplicate versions), always-on enforcer (JDK 17+/Maven 3.6.3+), `project.build.outputTimestamp` | DONE |
 | E-3 distribution | `central-publishing-maven-plugin` in the `release` profile, server id `central` (Central Portal — the 2025+ path for first-time publishers; supersedes the legacy-OSSRH plan) | SCAFFOLDED — activation below |
-| E-4 release workflow | `.github/workflows/release.yml`: tag `v*` → version/tag sanity → full gate → JMH smoke rows → signed deploy → GitHub Release with CHANGELOG section | DONE — activation below |
+| E-4 release workflow | `.github/workflows/release.yml`: tag `v*` → version/tag sanity → JMH smoke rows → signed build + NON-STRESS suite + deploy in one Maven invocation (`-Prelease` excludes the stress families — see Quality bar) → GitHub Release with CHANGELOG section | DONE — activation below |
 | E-5 RC protocol | documented in §1.2 step 5 / §2 | DONE (docs) — execution below |
 | E-6 compatibility statement | [EMBEDDING.md](EMBEDDING.md) § Compatibility & support statement: JDK matrix, format matrix, 1.x JSON migration recipe, deprecation policy, flake/benchmark disclosure rules | DONE |
 | D-3 dependency freshness | `.github/dependabot.yml` (maven + github-actions, weekly) | DONE |
@@ -120,15 +129,18 @@ ambition:
 3. **Bump the version** (`2.1.0`), bump `project.build.outputTimestamp`, write the CHANGELOG
    section (`## [2.1.0] — YYYY-MM-DD`, curated — never paste the R-journal). One commit:
    `RELEASE: 2.1.0`.
-4. **Run the gates**: `mvn clean test` (full, not `quick-gate`), the JMH smoke, and — for any
-   engine/write-path change — the nightly ×3. Compare JMH against
-   [BENCHMARKS.md](BENCHMARKS.md); a >25% regression in any scenario is either fixed or
-   disclosed in the release notes, never silent.
+4. **Run the gates**: `mvn clean test` (FULL suite, stress included — not `quick-gate`, not
+   `-Prelease`; the pipeline's non-stress run is not a substitute, it exists for tag-day
+   speed), the JMH smoke, and — for any engine/write-path change — the nightly ×3. Compare
+   JMH against [BENCHMARKS.md](BENCHMARKS.md); a >25% regression in any scenario is either
+   fixed or disclosed in the release notes, never silent.
 5. **RC** (for MINOR/MAJOR): tag `v2.1.0-rc1`, run the §1.2 step-5 protocol scaled to the
    change: recovery tests mandatory if the write path/journal/format touched; migration
    walkthrough mandatory if EMBEDDING.md's compatibility matrix changed. Fix-forward and
    re-RC (`-rc2`) — never mutate an RC tag.
-6. **Final tag** `v2.1.0` → the release workflow ships it. Verify Central + the stranger test.
+6. **Final tag** `v2.1.0` → the release workflow ships it (non-stress suite + deploy in one
+   invocation — the stress families already passed ×3 in this procedure's steps 4–5). Verify
+   Central + the stranger test.
 7. **Post-release housekeeping** (same day): `CHANGELOG.md` link-check; move the working
    version (`2.1.1-SNAPSHOT` mindset — bump the pom at the start of the next train instead of
    carrying SNAPSHOT through the cycle, per this project's no-SNAPSHOT enforcer rule);
@@ -136,8 +148,9 @@ ambition:
    [FLAKY.md](FLAKY.md) if the RC protocol surfaced anything; journal the release in the
    MASTER-PLAN table.
 8. **Hotfix flow** (production bug on the current minor): branch `release/2.1` from
-   `v2.1.0`, cherry-pick/fix, run the full gate + the recovery family if the write path
-   moved, bump to `2.1.1`, CHANGELOG section, tag `v2.1.1`. Merge the fix back to the main
+   `v2.1.0`, cherry-pick/fix, run the FULL gate + the recovery family if the write path
+   moved (hotfixes skip the RC protocol — that is exactly when the stress suite matters
+   most), bump to `2.1.1`, CHANGELOG section, tag `v2.1.1`. Merge the fix back to the main
    line. Two hotfixes on the same tag = the next minor is due, not a third patch.
 
 ---

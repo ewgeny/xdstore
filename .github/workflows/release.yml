@@ -1,7 +1,11 @@
 name: xdstorage release
 
-# E-4: tag push v* → full gate → JMH smoke → signed deploy (Maven Central via the
-# Central Portal) → GitHub Release with the CHANGELOG section + artifacts.
+# E-4: tag push v* → JMH smoke → version sanity → signed build + NON-STRESS test suite +
+# deploy (Maven Central via the Central Portal) → GitHub Release with the CHANGELOG section.
+# The release profile excludes the stress families (*StressTest + the Xml multithread stress,
+# docs/FLAKY.md) — they are the nightly's and the RC protocol's job (docs/RELEASE-PLAN.md §2),
+# run there ×3 BEFORE the tag is cut. Tests and deploy share one Maven invocation: the deploy
+# phase cannot run unless the test phase passed.
 # Required secrets (see docs/RELEASE-PLAN.md §1):
 #   CENTRAL_USERNAME / CENTRAL_PASSWORD — Central Portal user token (server id "central")
 #   GPG_PRIVATE_KEY — armored signing key (export -a --export-secret-keys)
@@ -23,13 +27,6 @@ jobs:
           distribution: temurin
           java-version: '17'          # dev/test runtime; library bytecode stays release=8
           cache: maven
-
-      - name: Full gate (BUILD SUCCESS verdict — never a piped grep's exit code, R-52)
-        run: |
-          mvn clean test > /tmp/mvn-gate.log 2>&1 || { tail -100 /tmp/mvn-gate.log; exit 1; }
-          grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-gate.log
-          grep -q "BUILD SUCCESS" /tmp/mvn-gate.log || { echo "BUILD FAILURE detected"; exit 1; }
-          grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-gate.log | tail -1
 
       - name: JMH smoke with table-row assertion (JMH silently SKIPS failed trials — the row count is the check)
         run: |
@@ -75,8 +72,21 @@ jobs:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
 
-      - name: Deploy (signed, release profile → Central Portal → auto-publish)
-        run: mvn -Prelease deploy -Dgpg.passphrase="$GPG_PASSPHRASE"
+      # One Maven invocation: build → NON-STRESS suite (release profile excludes
+      # *StressTest + XmlDataStorageMultithreadsTest) → sign → deploy. The BUILD SUCCESS
+      # verdict comes from Maven's own line — never from a piped grep's exit code (R-52).
+      - name: Build, test (non-stress), sign and deploy
+        run: |
+          set -o pipefail
+          if mvn clean deploy -Prelease -Dgpg.passphrase="$GPG_PASSPHRASE" > /tmp/mvn-release.log 2>&1; then
+            MAVEN_OK=1
+          else
+            MAVEN_OK=0
+          fi
+          grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-release.log
+          grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-release.log | tail -1
+          if [ "$MAVEN_OK" -ne 1 ]; then echo "release build failed — see archived logs"; tail -100 /tmp/mvn-release.log; exit 1; fi
+          grep -q "BUILD SUCCESS" /tmp/mvn-release.log || { echo "BUILD FAILURE detected"; exit 1; }
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
@@ -103,6 +113,6 @@ jobs:
         with:
           name: release-logs
           path: |
-            /tmp/mvn-gate.log
+            /tmp/mvn-release.log
             /tmp/jmh-smoke.log
           if-no-files-found: ignore

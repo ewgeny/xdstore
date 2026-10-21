@@ -229,7 +229,9 @@
         </profile>
 
         <!-- E-2/E-3: the release profile — source/javadoc jars, signing, release-only enforcer
-             rules, publish to Maven Central via the Central Portal (publishingServerId "central").
+             rules, publish to Maven Central via the Central Portal (publishingServerId "central"),
+             and a NON-STRESS test suite: the stress families (docs/FLAKY.md) run in the nightly
+             and the RC protocol (docs/RELEASE-PLAN.md §2), not in the tag pipeline.
              Activated by the tag-triggered release workflow (.github/workflows/release.yml);
              requires CI secrets — see docs/RELEASE-PLAN.md §1. Local dry run without a GPG key:
              mvn -Prelease -Dgpg.skip=true verify  (builds binary + sources + javadoc jars). -->
@@ -237,6 +239,28 @@
             <id>release</id>
             <build>
                 <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0-M4</version>
+                        <configuration>
+                            <forkCount>1</forkCount>
+                            <argLine>-Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
+                            <includes>
+                                <include>**/*Test.java</include>
+                            </includes>
+                            <excludes>
+                                <!-- Release builds run the correctness suite only: every
+                                     *StressTest family plus the Xml multithread stress
+                                     (the slow, load-sensitive part of the run — the same
+                                     classes the quick-gate profile quarantines). They stay
+                                     mandatory in the nightly and the RC protocol. -->
+                                <exclude>**/*StressTest.java</exclude>
+                                <exclude>**/XmlDataStorageMultithreadsTest.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
