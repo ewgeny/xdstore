@@ -55,7 +55,7 @@ jobs:
         run: |
           mvn test-compile > /dev/null 2>&1
           CP="target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test)"
-          java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark quick > /tmp/jmh-smoke.log 2>&1 || { tail -50 /tmp/jmh-smoke.log; exit 1; }
+          java -cp "$CP" io.github.xdstorage.performance.XdStorageSearchEngineBenchmark quick > /tmp/jmh-smoke.log 2>&1 || { tail -50 /tmp/jmh-smoke.log; exit 1; }
           ROWS=$(grep -c "^XdStorageSearchEngineBenchmark\." /tmp/jmh-smoke.log || true)
           echo "JMH table rows: $ROWS"
           if [ "$ROWS" -lt 9 ]; then echo "EXPECTED 9 benchmark rows, got $ROWS — a trial failed and JMH skipped it silently"; exit 1; fi

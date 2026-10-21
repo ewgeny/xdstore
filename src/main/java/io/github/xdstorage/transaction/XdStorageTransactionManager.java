@@ -1,0 +1,367 @@
+package io.github.xdstorage.transaction;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import io.github.xdstorage.IXdStorage;
+import io.github.xdstorage.exceptions.XdStorageRuntimeException;
+import io.github.xdstorage.metrics.XdStorageMetrics;
+import io.github.xdstorage.resource.IXdStorageResourceObject;
+import io.github.xdstorage.services.XdStorageServicesLocator;
+
+import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Высокопроизводительный транзакционный менеджер ядра СУБД (Поинт Б).
+ * Внедряет пуленепробиваемый счетчик активных потоков (Thread Reference Counter),
+ * полностью блокируя асинхронное затирание живых транзакций фоновым пулом воркеров.
+ */
+public class XdStorageTransactionManager implements IXdStorageTransactionManager<XdStorageTransaction> {
+
+    private static final Logger log = LogManager.getLogger(XdStorageTransactionManager.class);
+
+    protected final XdStorageServicesLocator services;
+
+    private final Map<String, XdStorageTransaction> transactionsById;
+    private final Map<String, String> threadsByTransactionId;
+    private final Map<String, XdStorageTransaction> transactionsByThreadId;
+
+    // АТОМАРНЫЙ ТРЕКЕР ПОТОКОВ: Считает количество параллельных ForkJoin-потоков,
+    // выполняющих операции внутри конкретной транзакции прямо сейчас.
+    private final Map<String, AtomicLong> transactionActiveThreadsCounter = new ConcurrentHashMap<>();
+
+    public XdStorageTransactionManager(final XdStorageServicesLocator provider) {
+        this.services = provider;
+        this.transactionsById = new ConcurrentHashMap<>();
+        this.threadsByTransactionId = new ConcurrentHashMap<>();
+        this.transactionsByThreadId = new ConcurrentHashMap<>();
+    }
+
+    // УПРАВЛЕНИЕ СЧЕТЧИКАМИ ССЫЛОК ПОТОКОВ СУБД
+    public void incrementActiveThreads(final String transactionId) {
+        if (transactionId != null) {
+            transactionActiveThreadsCounter.computeIfAbsent(transactionId, k -> new AtomicLong(0)).incrementAndGet();
+        }
+    }
+
+    public void decrementActiveThreads(final String transactionId) {
+        if (transactionId != null) {
+            AtomicLong counter = transactionActiveThreadsCounter.get(transactionId);
+            if (counter != null) {
+                if (counter.decrementAndGet() <= 0) {
+                    transactionActiveThreadsCounter.remove(transactionId);
+                }
+            }
+        }
+    }
+
+    private XdStorageMetrics metrics() {
+        // mock-локаторы в юнит-тестах возвращают null — счетчики опциональны, работа нет
+        final XdStorageMetrics m = services.getMetrics();
+        return m != null ? m : new XdStorageMetrics();
+    }
+
+    @Override
+    public IXdStorage getStorage() {
+        return services.getStorage();
+    }
+
+    @Override
+    public boolean isTransactionAlive(final XdStorageTransaction transaction) {
+        if (transaction == null) {
+            return false;
+        }
+
+        // 1. Проверяем физическое наличие транзакции в глобальном реестре СУБД
+        boolean exists = this.transactionsById.containsKey(transaction.getTransactionId());
+        if (!exists) {
+            return false;
+        }
+
+        // 2. ИСПРАВЛЕНИЕ АКТИВНОСТИ: Проверяем, обрабатывается ли транзакция параллельными потоками прямо сейчас.
+        // Если счетчик активных потоков > 0 (идет parallelStream), мы удерживаем статус alive = true,
+        // предотвращая "выстрел в спину" активным геттерам. Если 0 (одиночный поток или модульный тест) —
+        // строго возвращаем каноническое правило СУБД: транзакция мертва, если выставлен rollbackOnly!
+        AtomicLong activeThreads = transactionActiveThreadsCounter.get(transaction.getTransactionId());
+        if (activeThreads != null && activeThreads.get() > 0) {
+            return true;
+        }
+
+        // Идеальное сохранение оригинального контракта для модульных тестов в один поток!
+        return !transaction.isRollbackOnly();
+    }
+
+    @Override
+    public XdStorageTransaction beginTransaction(final long timeout) {
+        final String currentThreadId = getCurrentThreadId();
+        final XdStorageTransaction transaction = transactionsByThreadId.get(currentThreadId);
+        return beginTransaction(transaction, timeout);
+    }
+
+    @Override
+    public XdStorageTransaction beginTransaction(final XdStorageTransaction transaction, long timeout) {
+        final String currentThreadId = getCurrentThreadId();
+        final XdStorageTransaction newTransaction;
+        final String newTransactionId = generateTransactionId();
+
+        if (transaction == null) {
+            newTransaction = createTransaction(this, currentThreadId, timeout, newTransactionId);
+        } else if (transaction.isRollbackOnly()) {
+            transaction.waitForFinish();
+            newTransaction = createTransaction(this, currentThreadId, timeout, newTransactionId);
+        } else {
+            newTransaction = createTransaction(this, currentThreadId, transaction, timeout, newTransactionId);
+            transaction.suspend(newTransaction.getTransactionId());
+        }
+
+        threadsByTransactionId.put(newTransactionId, currentThreadId);
+        transactionsByThreadId.put(currentThreadId, newTransaction);
+        transactionsById.put(newTransactionId, newTransaction);
+        transactionActiveThreadsCounter.put(newTransactionId, new AtomicLong(0));
+        metrics().increment(XdStorageMetrics.TRANSACTIONS_BEGUN);
+        metrics().increment(XdStorageMetrics.ACTIVE_TRANSACTIONS);
+
+        log.info(String.format("Started transaction %s (timeout %d ms%s)", newTransactionId, timeout,
+                transaction != null ? ", nested in " + transaction.getTransactionId() : ""));
+        return newTransaction;
+    }
+
+    private XdStorageTransaction createTransaction(final XdStorageTransactionManager manager, final String threadId,
+                                                   final long timeout, final String transactionId) {
+        return createTransaction(manager, threadId, null, timeout, transactionId);
+    }
+
+    protected XdStorageTransaction createTransaction(final XdStorageTransactionManager manager, final String threadId,
+                                                     final XdStorageTransaction globalTransaction, final long timeout, final String transactionId) {
+        return new XdStorageTransaction(manager, threadId, globalTransaction, timeout, transactionId);
+    }
+
+    public void commitTransaction(final XdStorageTransaction transaction) {
+        if (transaction.isRollbackOnly()) {
+            throw new XdStorageRuntimeException("transaction will be rolled back because it is marked as rollback only");
+        }
+
+        final XdStorageTransaction globalTransactionToCheck = transaction.getGlobalTransaction();
+        if (globalTransactionToCheck != null && globalTransactionToCheck.isRollbackOnly()) {
+            transaction.markRollbackOnly();
+            throw new XdStorageRuntimeException("transaction should be rolled back because global transaction is marked as rollback only");
+        }
+
+        final Collection<IXdStorageResourceObject> resources = transaction.getResources();
+        final XdStorageCommitTransactionStateHolder state = new XdStorageCommitTransactionStateHolder();
+        final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources = new ConcurrentHashMap<>();
+
+        transaction.skipOrWaitForInternalTransactions();
+
+        try {
+            // R-45: резервируем ЕДИНЫЙ commit-serial всей транзакции ДО фаз коммита —
+            // атомарная граница видимости для всех ее записей.
+            transaction.assignCommitSerial();
+            transaction.startCriticalSection();
+            transaction.commitInternal(state, firstPhaseCommittedResources);
+            if (state.getState() == XdStorageCommitTransactionState.FINISHED) {
+                fireChanges(firstPhaseCommittedResources, transaction);
+            }
+        } catch (final Throwable e) {
+            log.warn("commit internal error", e);
+            // R-57: сначала компенсация ин-плейс индексных вставок (деревья не
+            // откатываются record-механизмом), затем штатный откат зафиксированных ресурсов.
+            transaction.rollbackIndexKeyInserts();
+            transaction.rollbackFailedCommit(firstPhaseCommittedResources);
+        } finally {
+            transaction.finishCriticalSection();
+        }
+
+        threadsByTransactionId.remove(transaction.getTransactionId());
+        transactionsById.remove(transaction.getTransactionId());
+        transactionActiveThreadsCounter.remove(transaction.getTransactionId());
+
+        final String currentThreadId = transaction.getTransactionThreadId();
+        transactionsByThreadId.remove(currentThreadId);
+
+        resources.stream().forEach(resource -> {
+            resource.release(transaction);
+        });
+
+        services.getCloner().release(transaction);
+
+        final String globalTransactionId = transaction.getGlobalTransactionId();
+        if (globalTransactionId != null) {
+            final XdStorageTransaction globalTransaction = transactionsById.get(globalTransactionId);
+            if (globalTransaction != null && globalTransaction.getTransactionThreadId().equalsIgnoreCase(currentThreadId)) {
+                threadsByTransactionId.put(globalTransactionId, currentThreadId);
+                transactionsByThreadId.put(currentThreadId, globalTransaction);
+            }
+            if (globalTransaction != null) {
+                globalTransaction.resume(transaction.getTransactionId());
+            }
+        }
+
+        transaction.markFinished();
+        metrics().increment(XdStorageMetrics.TRANSACTIONS_COMMITTED);
+        metrics().decrement(XdStorageMetrics.ACTIVE_TRANSACTIONS);
+        log.info(String.format("Committed transaction %s", transaction.getTransactionId()));
+    }
+
+    protected void fireChanges(final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources, final XdStorageTransaction transaction) {
+        final Callable<Boolean> task = () -> {
+            firstPhaseCommittedResources.entrySet().stream().forEach(entry -> {
+                entry.getValue().performTriggers(transaction, services.getTriggersManager());
+            });
+            return true;
+        };
+
+        try {
+            services.getExecutor().submit(task).get();
+        } catch (final InterruptedException | ExecutionException e) {
+            log.warn("performing triggers error", e);
+        }
+    }
+
+    public void rollbackTransaction(final XdStorageTransaction transaction) {
+        if (transaction.isRollbackOnly()) {
+            log.warn("transaction " + transaction.getTransactionId() + " will be rolled back automatically by mark rollback only");
+            return;
+        }
+
+        final String globalTransactionId = transaction.getGlobalTransactionId();
+        if (globalTransactionId != null) {
+            // R-41: ИЗОЛИРОВАННЫЙ откат вложенной транзакции — родитель выживает.
+            // Прежний transaction.markRollbackOnly() делегировал наверх и ядовил parent:
+            // сценарий "nested rollback" ронял следующий commit родителя даже в один поток.
+            transaction.markSelfAndChildrenRollbackOnly();
+            return;
+        }
+
+        final Collection<IXdStorageResourceObject> resources = transaction.getResources();
+        transaction.skipOrWaitForInternalTransactions();
+
+        transaction.startCriticalSection(true);
+        try {
+            transaction.rollbackInternal();
+        } finally {
+            transaction.finishCriticalSection();
+        }
+        metrics().increment(XdStorageMetrics.TRANSACTIONS_ROLLED_BACK);
+        metrics().decrement(XdStorageMetrics.ACTIVE_TRANSACTIONS);
+
+        resources.stream().forEach(resource -> {
+            resource.release(transaction);
+        });
+
+        services.getCloner().release(transaction);
+
+        threadsByTransactionId.remove(transaction.getTransactionId());
+        transactionsById.remove(transaction.getTransactionId());
+
+        transactionActiveThreadsCounter.remove(transaction.getTransactionId());
+
+        final String currentThreadId = transaction.getTransactionThreadId();
+        transactionsByThreadId.remove(currentThreadId);
+
+        transaction.markFinished();
+        log.info(String.format("Rolled back transaction %s", transaction.getTransactionId()));
+    }
+
+    @Override
+    public XdStorageTransaction getCurrentTransaction() {
+        return transactionsByThreadId.get(getCurrentThreadId());
+    }
+
+    /**
+     * R-41: true, если транзакция зарегистрирована на ТЕКУЩЕМ потоке. Такой внутренней tx,
+     * ждущей в skipOrWaitForInternalTransactions своего родителя, никто никогда не завершит:
+     * ее поток — сам родительский, он поймал исключение из nested-области и пытается
+     * завершить родителя. Брошенная tx подлежит немедленному откату.
+     */
+    public boolean isTransactionBoundToCurrentThread(final String transactionId) {
+        final String threadId = threadsByTransactionId.get(transactionId);
+        return threadId != null && threadId.equals(getCurrentThreadId());
+    }
+
+    @Override
+    public XdStorageTransaction getTransaction(final String transactionId) {
+        return transactionsById.get(transactionId);
+    }
+
+    @Override
+    public void registerRollbackOnlyTransaction(final XdStorageTransaction transaction) {
+        services.getExecutor().submit(() -> {
+            synchronized (transaction) {
+                if (transactionsById.containsKey(transaction.getTransactionId()) && transaction.isRollbackOnly()) {
+                    // Аномалия, которую нельзя терять в логах: транзакция не смогла завершиться
+                    // сама (таймаут/конфликт) и откатывается уборщиком — все ее изменения теряются.
+                    metrics().increment(XdStorageMetrics.ROLLBACK_ONLY_MARKS);
+                    metrics().increment(XdStorageMetrics.TIMEOUT_SWEPT_ROLLBACKS);
+                    log.warn("Rollback-only sweep: transaction {} is being rolled back by the timeout sweeper (its changes are discarded)",
+                            transaction.getTransactionId());
+                    // БАРЬЕР ЗАЩИТЫ ПОТОКОВ: Фоновый уборщик выполнит откат ресурсов, но жестко ждет,
+// пока активные ForkJoin-потоки параллельного стрима полностью не выйдут из методов СУБД!
+                    AtomicLong activeThreads = transactionActiveThreadsCounter.get(transaction.getTransactionId());
+                    if (activeThreads != null && activeThreads.get() > 0) {
+                        log.debug("Фоновый откат отложен: транзакция удерживается активными параллельными потоками.");
+                        // R-31: отложенный откат обязан ПЕРЕЗАПЛАНИРОВАТЬСЯ, а не теряться.
+                        // Раньше полагались на "повторный вызов при финальном анлоке" — но если
+                        // последний вызов свалился через lazy-getter (исключение проглочено
+                        // вызывающим кодом), повторного вызова НЕТ: транзакция навсегда
+                        // остается rollback-only с защелкнутыми записями и живыми картами —
+                        // утечка памяти и мертвые блокировки для всех последующих транзакций.
+                        services.getExecutor().submit(() -> {
+                            try {
+                                Thread.sleep(200); // дать активным потокам шанс выйти
+                            } catch (final InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                            }
+                            registerRollbackOnlyTransaction(transaction);
+                        });
+                        return;
+                    }
+
+                    Collection<IXdStorageResourceObject> resources = transaction.getResources();
+                    transaction.skipOrWaitForInternalTransactions();
+                    transaction.rollbackInternal();
+
+                    resources.stream().forEach(resource -> {
+                        resource.release(transaction);
+                    });
+
+                    services.getCloner().release(transaction);
+
+                    threadsByTransactionId.remove(transaction.getTransactionId());
+                    transactionsById.remove(transaction.getTransactionId());
+                    transactionActiveThreadsCounter.remove(transaction.getTransactionId());
+
+                    final String currentThreadId = transaction.getTransactionThreadId();
+                    transactionsByThreadId.remove(currentThreadId);
+
+                    final String globalTransactionId = transaction.getGlobalTransactionId();
+                    if (globalTransactionId != null) {
+                        final XdStorageTransaction globalTransaction = transactionsById.get(globalTransactionId);
+                        if (globalTransaction != null && globalTransaction.getTransactionThreadId().equalsIgnoreCase(currentThreadId)) {
+                            threadsByTransactionId.put(globalTransactionId, currentThreadId);
+                            transactionsByThreadId.put(currentThreadId, globalTransaction);
+                        }
+                        if (globalTransaction != null) {
+                            globalTransaction.resume(transaction.getTransactionId());
+                        }
+                    }
+
+                    transaction.markFinished();
+                    log.info("Rolled back transaction " + transaction.getTransactionId() + " by mark rollback only");
+                }
+            }
+        });
+    }
+
+    private static String generateTransactionId() {
+        return UUID.randomUUID().toString();
+    }
+
+    private static String getCurrentThreadId() {
+        final Thread thread = Thread.currentThread();
+        return thread.getName() + thread.getId();
+    }
+}

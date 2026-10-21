@@ -81,7 +81,7 @@ then add to your `pom.xml`:
 
 ```xml
 <dependency>
-    <groupId>org.flib.xdstorage</groupId>
+    <groupId>io.github.xdstorage</groupId>
     <artifactId>xdstorage</artifactId>
     <version>2.0.0</version>
 </dependency>
@@ -90,10 +90,10 @@ then add to your `pom.xml`:
 ## Quick start
 
 ```java
-import org.flib.xdstorage.IXdFileStorage;
-import org.flib.xdstorage.IXdStorageTransaction;
-import org.flib.xdstorage.XdStorageProvider;
-import org.flib.xdstorage.serialization.FilesFormat;
+import io.github.xdstorage.IXdFileStorage;
+import io.github.xdstorage.IXdStorageTransaction;
+import io.github.xdstorage.XdStorageProvider;
+import io.github.xdstorage.serialization.FilesFormat;
 
 // 1. Open (or get) a named storage in a folder. YAML is the default format.
 IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage("mydb", "./data/mydb", 250, FilesFormat.YAML);
@@ -613,9 +613,9 @@ Run the benchmarks yourself:
 ```bash
 mvn test-compile
 CP="target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test)"
-java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark
-java -cp "$CP" org.flib.xdstorage.performance.XdStorageResourceCacheBenchmark
-java -cp "$CP" org.flib.xdstorage.performance.XdStoragePerformanceBenchmark
+java -cp "$CP" io.github.xdstorage.performance.XdStorageSearchEngineBenchmark
+java -cp "$CP" io.github.xdstorage.performance.XdStorageResourceCacheBenchmark
+java -cp "$CP" io.github.xdstorage.performance.XdStoragePerformanceBenchmark
 ```
 
 ## Current limitations
@@ -672,7 +672,7 @@ Notes:
 - [docs/FLAKY.md](docs/FLAKY.md) — known flaky test families and quarantine conventions.
 - [docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md) — journal-based commit design (the write-path roadmap).
 
-Main packages (`org.flib.xdstorage`):
+Main packages (`io.github.xdstorage`):
 
 | Package | Contents |
 |---|---|

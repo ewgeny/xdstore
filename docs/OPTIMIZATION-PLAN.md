@@ -810,12 +810,12 @@ listed here because ResourceCache transit interacts with it)
   разрешенный флак), **прогон 2 — 471/1: только разрешенный
   testMVCC_GraphRangeScans_UnderHeavyPhantomInsertions**. Критерий приема выполнен.
 - **Итерация 2 (перенос в подпакет + инвариантные тесты):** коллабораторы переехали в
-  `org.flib.xdstorage.resource.cache` (public, подпакет помечен internal в package-info);
+  `io.github.xdstorage.resource.cache` (public, подпакет помечен internal в package-info);
   зависимость от фасада инвертирована через SPI-интерфейс `XdStorageCacheContext`
   (idField/records/workspace/флаги инфраструктуры/entityClass/isTransactionAlive/
   isolation/createReadRecord/createInsertRecord/materializeForCache/insert) — фасад его
   реализует, коллабораторы зависят только от контракта. Новые инвариантные сьюты
-  (test: org.flib.xdstorage.resource.cache, стенд StubCacheContext без фасада):
+  (test: io.github.xdstorage.resource.cache, стенд StubCacheContext без фасада):
   - `XdStorageCacheRecordInvariantTest` (23): фабрики записей, переходы mark/commit/rollback
     (включая таймстамп-барьер холодного старта и ОДНОУРОВНЕВЫЙ undo), контракт 2PC-флагов
     ("Illegal state of record to commit"), глобальный счетчик серий, матрица видимости

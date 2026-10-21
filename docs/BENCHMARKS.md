@@ -5,7 +5,7 @@ Recorded: 2026-10-18. Runner: JDK **17.0.15** (OpenJDK, Ubuntu), JMH **1.37**, 2
 numbers as ballpark for this class of hardware, not as lab-grade absolutes; the relative gaps between
 scenarios are the useful signal.
 
-All three benchmark classes live in `org.flib.xdstorage.performance` (test sources), are driven by the
+All three benchmark classes live in `io.github.xdstorage.performance` (test sources), are driven by the
 JMH annotation processor at `mvn test-compile`, and are **not** picked up by surefire (no `Test` suffix).
 Each has a `main` entry point.
 
@@ -14,9 +14,9 @@ Each has a `main` entry point.
 ```bash
 mvn test-compile
 CP="target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test)"
-java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark          # search engine
-java -cp "$CP" org.flib.xdstorage.performance.XdStorageResourceCacheBenchmark         # resource cache (in-memory)
-java -cp "$CP" org.flib.xdstorage.performance.XdStoragePerformanceBenchmark           # facade write+read flow
+java -cp "$CP" io.github.xdstorage.performance.XdStorageSearchEngineBenchmark          # search engine
+java -cp "$CP" io.github.xdstorage.performance.XdStorageResourceCacheBenchmark         # resource cache (in-memory)
+java -cp "$CP" io.github.xdstorage.performance.XdStoragePerformanceBenchmark           # facade write+read flow
 ```
 
 Append `quick` to the search-engine benchmark for a 1-iteration smoke (~1 min).

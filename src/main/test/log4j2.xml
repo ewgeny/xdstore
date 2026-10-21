@@ -9,7 +9,7 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="org.flib.xdstorage" level="TRACE">
+        <Logger name="io.github.xdstorage" level="TRACE">
             <AppenderRef ref="xdstorage"/>
         </Logger>
         <Root level="TRACE">

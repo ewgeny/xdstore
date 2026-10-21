@@ -31,21 +31,21 @@
     </dataSources>
     <classesPolicies>
         <!-- system's entities -->
-        <class name="org.flib.xdstorage.idgeneration.XdStorageLongIdCounterRecord" dataSource="central" table="XdLongCounter"/>
-        <class name="org.flib.xdstorage.idgeneration.XdStorageIntegerIdCounterRecord" dataSource="central" table="XdIntegerCounter"/>
-        <class name="org.flib.xdstorage.sqlstorage.fkresource.XdStorageSQLCrossDatasourceFk" dataSource="" table="XdForeignKey"/>
+        <class name="io.github.xdstorage.idgeneration.XdStorageLongIdCounterRecord" dataSource="central" table="XdLongCounter"/>
+        <class name="io.github.xdstorage.idgeneration.XdStorageIntegerIdCounterRecord" dataSource="central" table="XdIntegerCounter"/>
+        <class name="io.github.xdstorage.sqlstorage.fkresource.XdStorageSQLCrossDatasourceFk" dataSource="" table="XdForeignKey"/>
         <!-- user's entities -->
-        <class name="org.flib.xdstorage.entities.XdUniverse" dataSource="central" table="XdUniverse"/>
-        <class name="org.flib.xdstorage.entities.XdGalaxy" dataSource="central" table="XdGalaxy"/>
-        <class name="org.flib.xdstorage.entities.XdBlackHole" dataSource="central" table="XdBlackHole"/>
-        <class name="org.flib.xdstorage.entities.XdObject" dataSource="central" table="XdObject"/>
-        <class name="org.flib.xdstorage.entities.XdStarSystem" dataSource="central" table="XdStarSystem"/>
-        <class name="org.flib.xdstorage.entities.XdStar" dataSource="central" table="XdStar"/>
-        <class name="org.flib.xdstorage.entities.XdPlanet" multiple="true" table="XdPlanet">
-            <rule type="ADDITIONAL" class="org.flib.xdstorage.rules.XdDataSourceRule1" dataSource="dsource1"/>
-            <rule type="ADDITIONAL" class="org.flib.xdstorage.rules.XdDataSourceRule2" dataSource="dsource2"/>
+        <class name="io.github.xdstorage.entities.XdUniverse" dataSource="central" table="XdUniverse"/>
+        <class name="io.github.xdstorage.entities.XdGalaxy" dataSource="central" table="XdGalaxy"/>
+        <class name="io.github.xdstorage.entities.XdBlackHole" dataSource="central" table="XdBlackHole"/>
+        <class name="io.github.xdstorage.entities.XdObject" dataSource="central" table="XdObject"/>
+        <class name="io.github.xdstorage.entities.XdStarSystem" dataSource="central" table="XdStarSystem"/>
+        <class name="io.github.xdstorage.entities.XdStar" dataSource="central" table="XdStar"/>
+        <class name="io.github.xdstorage.entities.XdPlanet" multiple="true" table="XdPlanet">
+            <rule type="ADDITIONAL" class="io.github.xdstorage.rules.XdDataSourceRule1" dataSource="dsource1"/>
+            <rule type="ADDITIONAL" class="io.github.xdstorage.rules.XdDataSourceRule2" dataSource="dsource2"/>
             <rule type="DEFAULT" dataSource="central"/>
         </class>
-        <class name="org.flib.xdstorage.entities.XdSatellite" parentDataSource="true" table="XdSatellite"/>
+        <class name="io.github.xdstorage.entities.XdSatellite" parentDataSource="true" table="XdSatellite"/>
     </classesPolicies>
 </configuration>

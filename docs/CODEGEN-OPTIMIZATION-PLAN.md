@@ -1,6 +1,6 @@
 # Codegen optimization plan (generated storage wrappers)
 
-Scope: the runtime wrapper code-generation subsystem — `org.flib.xdstorage.code`
+Scope: the runtime wrapper code-generation subsystem — `io.github.xdstorage.code`
 (`XdStorageClassGenerator`, `*ClassCodeGenerator`, `XdStorageProxyCompilationEngine`)
 and the generated Simple / Unmodifiable / IdObservable wrapper families.
 

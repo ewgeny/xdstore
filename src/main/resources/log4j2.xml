@@ -17,7 +17,7 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="org.flib.xdstorage" level="info">
+        <Logger name="io.github.xdstorage" level="info">
             <AppenderRef ref="xdstorage"/>
         </Logger>
         <Root level="info">

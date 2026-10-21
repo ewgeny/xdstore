@@ -1,7 +1,7 @@
 # XdStorage — Performance Study & Configuration Recommendations (YAML format)
 
 Recorded: 2026-10-19 (**post-fix re-run** — re-measured after the B+Tree re-open fix R-53, commit `cf36f7f`; re-open sanity `SweepReopenRepro` = 0/0/0 before this run) · Branch `xdstorage-2.0` · Runner: OpenJDK **21.0.7**, Ubuntu Linux, 24 cores / 62 GB, quiet load (loadavg < 0.5)
-Harness: `org.flib.xdstorage.performance.sweep.XdStorageConfigSweep` (test sources), raw results in [`docs/perf/`](perf/)
+Harness: `io.github.xdstorage.performance.sweep.XdStorageConfigSweep` (test sources), raw results in [`docs/perf/`](perf/)
 
 **Study scope:** how the two storage-engine structural knobs — the **B+Tree fill factor `t`** and the
 **fragment size** (objects per fragment file) — plus the id-index type (**Hash vs B+Tree**) and the
@@ -236,7 +236,7 @@ shutdown → re-open → read/write).
    (`reference`, default `true`; real nodes `false` in the constructor; round-trips through the
    generic writer/reader as property `reference` — the getter/setter pair is deliberately named
    `isReference()`/`setReference()` so the property scanner binds it to the field). New marker
-   interface `org.flib.xdstorage.code.IXdStorageReferenceMarked`; `XdStorageObjectUtils.isReference`
+   interface `io.github.xdstorage.code.IXdStorageReferenceMarked`; `XdStorageObjectUtils.isReference`
    now recognizes it, so every existing R-38 gate (root/children/next, 20 sites in
    tree/node/invariants) fires for parser stubs. Note: the tree's own legacy `isReference` field is
    NOT persisted (its getter derives property name `reference`, which has no backing field — the
@@ -259,7 +259,7 @@ shutdown → re-open → read/write).
 **Verification performed for this re-run** (before sweeping):
 
 ```
-java -cp <test classpath> org.flib.xdstorage.performance.sweep.SweepReopenRepro
+java -cp <test classpath> io.github.xdstorage.performance.sweep.SweepReopenRepro
 [btree]  load id-0..4 -> ok ×5          (NULLS=0 of 5)
 [hash]   load id-0..4 -> ok ×5          (NULLS=0 of 5)
 [search] load by id -> ok; EQUALS Ship-3 -> 1 result(s); full scan -> 5 result(s)   (BAD=0)
@@ -367,10 +367,10 @@ mvn -q dependency:build-classpath -Dmdep.outputFile=target/sweep-cp.txt -Dmdep.i
 CP="target/test-classes:target/classes:$(cat target/sweep-cp.txt)"
 # full sweep (~4 min on a quiet 24-core box):
 java -Xmx6g -Dlog4j2.configurationFile=file:$PWD/target/sweep-log4j2.xml \
-     -cp "$CP" org.flib.xdstorage.performance.sweep.XdStorageConfigSweep all 5000
+     -cp "$CP" io.github.xdstorage.performance.sweep.XdStorageConfigSweep all 5000
 # suites individually: tsweep | fragsweep | search ; smoke first: smoke 300
 # re-open sanity (must print NULLS=0 / BAD=0):
-java -cp "$CP" org.flib.xdstorage.performance.sweep.SweepReopenRepro
+java -cp "$CP" io.github.xdstorage.performance.sweep.SweepReopenRepro
 # charts + tables from target/sweep/*.json:
 python3 scripts/render-sweep-charts.py
 ```
@@ -395,7 +395,7 @@ alerting surface:
 
 * Raw results: [`perf/tsweep.json`](perf/tsweep.json) · [`perf/fragsweep.json`](perf/fragsweep.json) ·
   [`perf/search.json`](perf/search.json) (+ `.csv` twins) · [`perf/full-run-console.log`](perf/full-run-console.log)
-* Harness & entities: `src/main/test/org/flib/xdstorage/performance/sweep/` —
+* Harness & entities: `src/main/test/io/github/xdstorage/performance/sweep/` —
   `XdStorageConfigSweep`, `SweepReopenRepro` (re-open sanity — must stay green), `SweepFindTxVerify`
   (read-tx write-out check), `SweepHashEntity`, `SweepBTreeT{2,4,8,16,32,64,128,500}Entity`,
   `SweepSearchShipT{8,64,500}`, `SweepSearchCrewMember`

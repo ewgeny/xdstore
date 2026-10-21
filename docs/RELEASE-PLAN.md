@@ -52,7 +52,7 @@ evaluation): **a stranger can add the dependency from Central and read a license
 Every step is a human/infrastructure action unless marked otherwise; commands assume the repo
 root on branch `xdstorage-2.0`.
 
-1. **Decide the publishing identity.** The groupId is `org.flib.xdstorage` — Central Portal
+1. **Decide the publishing identity.** The groupId is `io.github.xdstorage` — Central Portal
    namespaces are verified per domain (`flib.org`…?) or reverse-GitHub (`io.github.ewgeny`).
    If the `org.flib` domain is not yours to verify, this is the last cheap moment to switch
    the groupId (it is part of the 2.0.0 breaking surface; after 2.0.0 it is frozen).
@@ -88,11 +88,11 @@ root on branch `xdstorage-2.0`.
    ```
    The `release.yml` pipeline then runs the gate, the JMH smoke, deploys to Central and
    creates the GitHub Release. Watch the Actions run.
-8. **Verify the exit criterion**: `https://central.sonatype.com` shows `org.flib.xdstorage:xdstorage:2.0.0`
+8. **Verify the exit criterion**: `https://central.sonatype.com` shows `io.github.xdstorage:xdstorage:2.0.0`
    (autoPublish may take ~10–30 min after validation), then the stranger test from a scratch
    project:
    ```bash
-   mvn dependency:get -Dartifact=org.flib.xdstorage:xdstorage:2.0.0
+   mvn dependency:get -Dartifact=io.github.xdstorage:xdstorage:2.0.0
    ```
 9. **Post-release**: add the LICENSE copyright holder / NOTICE if step 1 established a legal
    entity; announce with the CHANGELOG link; move the working branch to `2.0.1-SNAPSHOT`
