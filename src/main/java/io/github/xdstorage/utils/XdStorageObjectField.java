@@ -1,7 +1,7 @@
 package io.github.xdstorage.utils;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.annotations.XdStorageObjectFieldProperties;
 import io.github.xdstorage.annotations.XdStorageObjectId;
 import io.github.xdstorage.annotations.XdStorageParentObject;
@@ -15,7 +15,7 @@ import java.util.Map;
 
 public class XdStorageObjectField {
 
-    private static final Logger log = LogManager.getLogger(XdStorageObjectField.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageObjectField.class);
 
     public final Field field;
 

@@ -1,7 +1,7 @@
 package io.github.xdstorage.serialization.yaml;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageIOException;
 import io.github.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 import io.github.xdstorage.idgeneration.IXdStorageIdGenerator;
@@ -55,7 +55,7 @@ import java.util.List;
  */
 public final class XdStorageYamlCommitJournal {
 
-    private static final Logger log = LogManager.getLogger(XdStorageYamlCommitJournal.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageYamlCommitJournal.class);
 
     public static final String JOURNAL_SUFFIX = ".journal.yaml";
 

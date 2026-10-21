@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XdStorage example: QUIET log4j2 setup for a consumer application.
+     Engine lifecycle events (storage open/shutdown, journal checkpoint) go at INFO to a
+     rolling file; the console shows warnings and errors only.
+     Requires log4j2 as your SLF4J backend: org.apache.logging.log4j:log4j-core +
+     org.apache.logging.log4j:log4j-slf4j2-impl. Activate by renaming to log4j2.xml at the
+     classpath root or via -Dlog4j.configurationFile=path/to/log4j2-quiet.xml. -->
+<Configuration>
+    <Appenders>
+        <RollingFile name="file" fileName="xdstorage.log"
+                     filePattern="xdstorage.log.%i" append="true">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+            <SizeBasedTriggeringPolicy size="50 MB"/>
+            <DefaultRolloverStrategy max="3"/>
+        </RollingFile>
+        <Console name="STDOUT" target="SYSTEM_OUT">
+            <!-- physical gate: nothing below WARN reaches stdout, whichever logger routes
+                 to this appender (AppenderRef level= alone is not reliably applied) -->
+            <ThresholdFilter level="warn" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Logger name="io.github.xdstorage" level="info" additive="false">
+            <AppenderRef ref="file"/>
+            <AppenderRef ref="STDOUT"/>
+        </Logger>
+        <Root level="warn">
+            <AppenderRef ref="STDOUT"/>
+        </Root>
+    </Loggers>
+</Configuration>

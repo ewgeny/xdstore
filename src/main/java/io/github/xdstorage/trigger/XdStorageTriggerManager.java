@@ -1,7 +1,7 @@
 package io.github.xdstorage.trigger;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.resource.XdStorageObjectChange;
 import io.github.xdstorage.resource.XdStorageObjectOperationType;
 import io.github.xdstorage.transaction.XdStorageTransaction;
@@ -15,7 +15,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 public class XdStorageTriggerManager {
 
-    private static final Logger log = LogManager.getLogger(XdStorageTriggerManager.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageTriggerManager.class);
 
     // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ ЯДРА: Переводим списки триггеров на CopyOnWriteArrayList.
     // Это открывает дорогу к абсолютно LOCK-FREE параллельному чтению и выполнению триггеров

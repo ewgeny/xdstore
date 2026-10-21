@@ -1,7 +1,7 @@
 package io.github.xdstorage.index.hash;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
 import io.github.xdstorage.exceptions.XdStorageException;
@@ -31,7 +31,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResource {
 
-    private static final Logger log = LogManager.getLogger(XdStorageHashIndexResource.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageHashIndexResource.class);
 
     private final IXdStorageObjectsReader reader;
 

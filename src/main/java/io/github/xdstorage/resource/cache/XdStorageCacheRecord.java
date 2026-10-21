@@ -1,7 +1,7 @@
 package io.github.xdstorage.resource.cache;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 import io.github.xdstorage.resource.XdStorageIsolationLevel;
@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class XdStorageCacheRecord {
 
-    private static final Logger log = LogManager.getLogger(XdStorageCacheRecord.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageCacheRecord.class);
 
     /** Режим вычисления видимой версии: различия сайтов чтения сосредоточены здесь. */
     public enum View {

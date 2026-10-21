@@ -1,7 +1,7 @@
 package io.github.xdstorage.serialization.yaml;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageIOException;
 import io.github.xdstorage.helpers.IXdStorageSimpleTypeHelper;
@@ -27,7 +27,7 @@ import java.util.Collection;
  */
 public class XdStorageYamlObjectsReader implements IXdStorageObjectsReader {
 
-    private static final Logger log = LogManager.getLogger(XdStorageYamlObjectsReader.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageYamlObjectsReader.class);
 
     private final IXdStorageSimpleTypeHelper simpleTypeHelper;
     private final boolean strictEof;

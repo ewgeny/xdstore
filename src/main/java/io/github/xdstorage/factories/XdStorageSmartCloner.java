@@ -1,7 +1,7 @@
 package io.github.xdstorage.factories;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.XdStoragePolicy;
@@ -21,7 +21,7 @@ import io.github.xdstorage.utils.XdStorageObjectUtils;
  */
 public class XdStorageSmartCloner implements IXdStorageCloner {
 
-    private static final Logger log = LogManager.getLogger(XdStorageSmartCloner.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageSmartCloner.class);
 
     private final IXdStorageReferenceProvider referencesProvider;
 

@@ -1,7 +1,7 @@
 package io.github.xdstorage.search;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.IXdStorageWatcher;
@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class XdStorageSearchManager implements IXdStorageSearchManager {
 
-    private static final Logger log = LogManager.getLogger(XdStorageSearchManager.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageSearchManager.class);
 
     protected final XdStorageServicesLocator services;
 

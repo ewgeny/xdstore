@@ -1,7 +1,7 @@
 package io.github.xdstorage.code;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.annotations.XdStorageLoadByGetMethod;
 import io.github.xdstorage.annotations.XdStorageObjectId;
 import io.github.xdstorage.annotations.XdStorageParentObject;
@@ -18,7 +18,7 @@ import java.util.Map;
  */
 public abstract class XdStorageAbstractClassCodeGenerator {
 
-    protected static final Logger log = LogManager.getLogger(XdStorageAbstractClassCodeGenerator.class);
+    protected static final Logger log = LoggerFactory.getLogger(XdStorageAbstractClassCodeGenerator.class);
     protected final boolean generateLoadByGet;
 
     /**

@@ -1,7 +1,7 @@
 package io.github.xdstorage.utils;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 
 import java.io.File;
@@ -27,7 +27,7 @@ import java.util.Properties;
  */
 public final class XdStorageFormatMeta {
 
-    private static final Logger log = LogManager.getLogger(XdStorageFormatMeta.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageFormatMeta.class);
 
     public static final String META_FILE_NAME = ".xdstorage.meta";
 

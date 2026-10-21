@@ -10,8 +10,8 @@ import java.util.Date;
 import java.util.Map;
 
 public final class XdStorageMvccGraphCloner {
-    private static final org.apache.logging.log4j.Logger log =
-            org.apache.logging.log4j.LogManager.getLogger(XdStorageMvccGraphCloner.class);
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(XdStorageMvccGraphCloner.class);
 
     private XdStorageMvccGraphCloner() {}
 

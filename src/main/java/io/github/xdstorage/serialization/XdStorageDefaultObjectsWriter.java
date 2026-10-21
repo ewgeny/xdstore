@@ -1,7 +1,7 @@
 package io.github.xdstorage.serialization;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.XdStoragePolicy;
 import io.github.xdstorage.exceptions.XdStorageException;
@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
 
-    private static final Logger log = LogManager.getLogger(XdStorageDefaultObjectsWriter.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageDefaultObjectsWriter.class);
 
     private final XdStorageServicesLocator services;
 

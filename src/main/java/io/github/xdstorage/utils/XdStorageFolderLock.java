@@ -1,7 +1,7 @@
 package io.github.xdstorage.utils;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class XdStorageFolderLock implements AutoCloseable {
 
-    private static final Logger log = LogManager.getLogger(XdStorageFolderLock.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageFolderLock.class);
 
     public static final String LOCK_FILE_NAME = ".xdstorage.lock";
 

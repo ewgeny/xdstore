@@ -7,8 +7,8 @@ import io.github.xdstorage.btree.XdStorageBTree;
 import io.github.xdstorage.btree.XdStorageBTreeId;
 import io.github.xdstorage.code.IXdStorageSimpleWrapper;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.index.IXdStorageChangeIndexRollback;
 import io.github.xdstorage.resource.XdStorageAbstractResourcesManager;
@@ -34,7 +34,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResourceObject, IXdStorageSearchIndexDaoResource {
 
-    private static final Logger log = LogManager.getLogger(XdStorageSearchIndexResource.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageSearchIndexResource.class);
 
     protected final XdStorageServicesLocator services;
 

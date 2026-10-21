@@ -1,7 +1,7 @@
 package io.github.xdstorage.resource;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
@@ -28,7 +28,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageResource extends XdStorageAbstractResource {
 
-    private static final Logger log = LogManager.getLogger(XdStorageResource.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageResource.class);
 
     private final IXdStorageObjectsReader reader;
 
@@ -213,7 +213,7 @@ public class XdStorageResource extends XdStorageAbstractResource {
             }
 
             Collection<Object> objects = readAsObjects();
-            log.info("resource {} prepared from disk: {} objects", getFileName(), objects != null ? objects.size() : 0);
+            log.debug("resource {} prepared from disk: {} objects", getFileName(), objects != null ? objects.size() : 0);
             if (objects != null)
                 cache.fillCache(objects);
             if (journalWrites) {
@@ -241,7 +241,7 @@ public class XdStorageResource extends XdStorageAbstractResource {
                 cache.applyCommittedJournalDelete(id);
             }
             if (!replay.upserts.isEmpty() || !replay.deletes.isEmpty()) {
-                log.info("resource {} replayed commit journal: {} upsert(s), {} delete(s), {} discarded tail record(s)",
+                log.debug("resource {} replayed commit journal: {} upsert(s), {} delete(s), {} discarded tail record(s)",
                         getFileName(), replay.upserts.size(), replay.deletes.size(), replay.discardedTailRecords);
             }
         } catch (final Throwable e) {

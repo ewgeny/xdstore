@@ -1,7 +1,7 @@
 package io.github.xdstorage.resource.cache;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.observing.IXdStorageIdObservableWrapper;
 import io.github.xdstorage.transaction.XdStorageTransaction;
 
@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class XdStorageTransactionWorkspace {
 
-    private static final Logger log = LogManager.getLogger(XdStorageTransactionWorkspace.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageTransactionWorkspace.class);
 
     private final Map<String, Map<Object, XdStorageCacheRecord>> changes = new ConcurrentHashMap<>();
 

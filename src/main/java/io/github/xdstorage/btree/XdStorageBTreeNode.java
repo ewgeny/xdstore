@@ -1,7 +1,7 @@
 package io.github.xdstorage.btree;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.XdStoragePolicy;
@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstorage.serialization.IXdStorageSerializationGuard,
         io.github.xdstorage.code.IXdStorageReferenceMarked {
 
-    private static final Logger log = LogManager.getLogger(XdStorageBTreeNode.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageBTreeNode.class);
 
     @XdStorageObjectId
     @XdStorageObjectFieldProperties(idGeneratorType = XdStorageIdGeneratorType.DATABASE_GENERATOR)

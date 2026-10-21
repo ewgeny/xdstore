@@ -1,7 +1,7 @@
 package io.github.xdstorage.resource;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.IXdStoragePredicate;
 import io.github.xdstorage.IXdStorageWatcher;
 import io.github.xdstorage.XdStorageConfig;
@@ -43,7 +43,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class XdStorageResourceCache implements XdStorageCacheContext {
 
-    private static final Logger log = LogManager.getLogger(XdStorageResourceCache.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageResourceCache.class);
 
     private final XdStorageServicesLocator services;
 

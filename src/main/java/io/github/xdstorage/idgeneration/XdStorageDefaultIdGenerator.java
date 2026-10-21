@@ -1,7 +1,7 @@
 package io.github.xdstorage.idgeneration;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.services.XdStorageServicesLocator;
@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class XdStorageDefaultIdGenerator implements IXdStorageIdGenerator {
 
-    private static final Logger log = LogManager.getLogger(XdStorageDefaultIdGenerator.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageDefaultIdGenerator.class);
     private final XdStorageServicesLocator services;
     private final Map<Class<?>, IXdStorageIdGenerator> generatorsByIdClassName = new HashMap<>();
     private final Map<Class<? extends IXdStorageIdGenerator>, IXdStorageIdGenerator> generatorsByClassName = new ConcurrentHashMap<>();

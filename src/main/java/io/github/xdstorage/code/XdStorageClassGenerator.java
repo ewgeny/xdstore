@@ -1,7 +1,7 @@
 package io.github.xdstorage.code;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.object.XdStorageIdentifiableObject;
 
 import javax.tools.*;
@@ -15,7 +15,7 @@ import java.util.Map;
 
 public class XdStorageClassGenerator {
 
-    private static final Logger log = LogManager.getLogger(XdStorageClassGenerator.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageClassGenerator.class);
     private static final String CODE_DIRECTORY = "gencode";
     private static final String CLASSES_PACKAGE = "io.github.xdstorage.code";
 

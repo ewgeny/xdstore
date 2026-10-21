@@ -1,7 +1,7 @@
 package io.github.xdstorage;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 class XdStorage implements IXdFileStorage {
 
-    private static final Logger log = LogManager.getLogger(XdStorage.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorage.class);
 
     private final String name;
 
@@ -296,7 +296,7 @@ class XdStorage implements IXdFileStorage {
                         + XdStoragePolicy.StoreAsSingleObject);
             }
 
-            log.info("saved {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
+            log.debug("saved {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
@@ -402,7 +402,7 @@ class XdStorage implements IXdFileStorage {
             if (conExceptions[0] != null)
                 throw conExceptions[0];
 
-            log.info("saved collection of {} ({} objects) by tx {}", objects.iterator().hasNext() ? objects.iterator().next().getClass().getSimpleName() : "?", objects.size(), transaction.getTransactionId());
+            log.debug("saved collection of {} ({} objects) by tx {}", objects.iterator().hasNext() ? objects.iterator().next().getClass().getSimpleName() : "?", objects.size(), transaction.getTransactionId());
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
@@ -1242,7 +1242,7 @@ class XdStorage implements IXdFileStorage {
                         + XdStoragePolicy.StoreAsSingleObject);
             }
 
-            log.info("deleted {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
+            log.debug("deleted {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }

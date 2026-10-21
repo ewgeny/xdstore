@@ -1,7 +1,7 @@
 package io.github.xdstorage.object;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.XdStoragePolicy;
 import io.github.xdstorage.utils.XdStorageClassInfo;
 import io.github.xdstorage.utils.XdStorageObjectField;
@@ -15,7 +15,7 @@ import java.util.Map;
 
 public class XdStorageObjectConverter {
 
-    private static final Logger log = LogManager.getLogger(XdStorageObjectConverter.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageObjectConverter.class);
 
     public static <T> XdStorageIdentifiableObject convertTo(final T object) {
         final Class<?> cl = object.getClass();

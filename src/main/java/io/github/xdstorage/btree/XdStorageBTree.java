@@ -5,8 +5,8 @@ import io.github.xdstorage.XdStoragePolicy;
 import io.github.xdstorage.annotations.XdStorageObjectId;
 import io.github.xdstorage.annotations.XdStorageObjectPolicy;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 import io.github.xdstorage.lock.XdStorageReadWriteLock;
@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
 public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.serialization.IXdStorageSerializationGuard {
 
-    private static final Logger log = LogManager.getLogger(XdStorageBTree.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageBTree.class);
 
     /** R-36→R-54: бюджет ретраев спуска поиска — по ВРЕМЕНИ (см. find), не по попыткам.
      *  Верхняя граница дедлайна: даже при большом таймауте транзакции читатель не hangs дольше 10с. */
@@ -284,7 +284,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
     }
 
     private void createRoot(final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
-        log.info("B+Tree {} created root (first key stored)", id);
+        log.debug("B+Tree {} created root (first key stored)", id);
         firstLeaf = root = new XdStorageBTreeNode(this, null);
         this.wasInitialized = true; // Фиксируем факт рождения структуры Б+ Дерева
         storage.save(root, transaction);
@@ -362,7 +362,7 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
                 }
 
                 if (root == null) {
-                    log.info("B+Tree {} is empty after delete of key {} (root purged)", id, key);
+                    log.debug("B+Tree {} is empty after delete of key {} (root purged)", id, key);
                     return;
                 }
                 structureVersion.incrementAndGet();

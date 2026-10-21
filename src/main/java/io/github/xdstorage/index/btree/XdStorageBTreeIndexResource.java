@@ -1,7 +1,7 @@
 package io.github.xdstorage.index.btree;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.IXdStoragePredicate;
 import io.github.xdstorage.IXdStorageWatcher;
@@ -42,7 +42,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageBTreeIndexResource implements IXdStorageIndexResourceObject, IXdStorageIndexDaoResource {
 
-    private static final Logger log = LogManager.getLogger(XdStorageBTreeIndexResource.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageBTreeIndexResource.class);
 
     protected final XdStorageServicesLocator services;
 

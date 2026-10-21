@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][L-0/L-1] Migrate main sources to the SLF4J API; log4j2 becomes test-only"
 labels: [2.1.0-train, P0, logging, refactor]
-status: open
+status: done
 ---
 
 ## Summary
@@ -49,16 +49,16 @@ facade) — lives in [MASTER-PLAN.md](../../MASTER-PLAN.md) § Track L; read it 
 
 ## Acceptance criteria
 
-- [ ] `grep -r "org.apache.logging.log4j" src/main/java` returns nothing.
-- [ ] `mvn clean test` green — verdict from Maven's own `BUILD SUCCESS` line (the R-52 rule).
-- [ ] On a fresh consumer pom: `mvn dependency:tree` shows exactly **one** logging artifact in
+- [x] `grep -r "org.apache.logging.log4j" src/main/java` returns nothing.
+- [x] `mvn clean test` green — verdict from Maven's own `BUILD SUCCESS` line (the R-52 rule).
+- [x] On a fresh consumer pom: `mvn dependency:tree` shows exactly **one** logging artifact in
       compile scope (`slf4j-api`), none in runtime scope.
-- [ ] `unzip -l target/xdstorage-*.jar` contains no `log4j2.xml` and no
+- [x] `unzip -l target/xdstorage-*.jar` contains no `log4j2.xml` and no
       `META-INF/services/org.slf4j.spi.SLF4JServiceProvider`.
-- [ ] The suite still writes its log file (CI diagnosability preserved).
-- [ ] `CHANGELOG.md` `[Unreleased]` "Changed" entries reflect the final state (drafted
+- [x] The suite still writes its log file (CI diagnosability preserved).
+- [x] `CHANGELOG.md` `[Unreleased]` "Changed" entries reflect the final state (drafted
       already — adjust, don't duplicate).
-- [ ] `docs/tasks/2.1.0/README.md` conventions followed (unique storage names, no
+- [x] `docs/tasks/2.1.0/README.md` conventions followed (unique storage names, no
       deleteDir-gated logic in any touched test).
 
 ## Verification

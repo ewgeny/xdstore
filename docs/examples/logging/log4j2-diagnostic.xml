@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XdStorage example: DIAGNOSTIC log4j2 setup — the full per-operation trace.
+     The engine's per-operation flow (save/delete/commit/rollback/prepare, B+tree events)
+     is logged at DEBUG; this config puts all of it on the console. The root stays at WARN
+     so third-party libraries stay quiet. Same backend requirement as log4j2-quiet.xml. -->
+<Configuration>
+    <Appenders>
+        <Console name="STDOUT" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Logger name="io.github.xdstorage" level="debug" additive="false">
+            <AppenderRef ref="STDOUT"/>
+        </Logger>
+        <Root level="warn">
+            <AppenderRef ref="STDOUT"/>
+        </Root>
+    </Loggers>
+</Configuration>

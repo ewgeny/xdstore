@@ -73,9 +73,14 @@ current code, stated so embedding surprises are design-time, not production-time
 
 ## Observability
 
-- Logging: log4j2. The jar bundles a default config (rolling file `xdstorage.log`, 3×50 MB, append;
-  `-Dxdstorage.log.file=` to relocate). Host applications should load their own log4j2 configuration
-  first to keep control.
+- Logging: the library logs through **SLF4J** (`org.slf4j.Logger`). The jar ships **no logging
+  backend and no logging configuration** — the backend and its configuration are the
+  application's choice: logback, log4j2 via `log4j-slf4j2-impl`, `slf4j-jdk14`, or none (a
+  backend-less application sees at most SLF4J's single documented "no provider" notice, never
+  engine output). Level discipline: INFO is reserved for rare lifecycle events (storage
+  open/shutdown, journal checkpoint); the per-operation trace is DEBUG. Ready-made quiet and
+  diagnostic configurations (log4j2 + logback) live in
+  [docs/examples/logging/](examples/logging/README.md).
 - Metrics: `storage.getMetrics()` — per-storage counters (transactions begun/committed/rolled back,
   rollback-only marks, timeout sweeps, resource write-outs with nanos, active gauge). JVM-wide
   anomaly counters (lock-acquisition timeouts, 1s+ lock waits, find-retry budget exhaustions):

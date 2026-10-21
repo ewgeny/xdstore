@@ -1,7 +1,7 @@
 package io.github.xdstorage.utils;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -9,7 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public final class XdStorageReflectionFieldScanner {
-    private static final Logger log = LogManager.getLogger(XdStorageReflectionFieldScanner.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageReflectionFieldScanner.class);
 
     private XdStorageReflectionFieldScanner() {}
 

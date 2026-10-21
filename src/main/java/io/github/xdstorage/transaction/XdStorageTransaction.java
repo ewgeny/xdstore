@@ -1,7 +1,7 @@
 package io.github.xdstorage.transaction;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
 import io.github.xdstorage.exceptions.XdStorageException;
@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 
 public class XdStorageTransaction implements IXdStorageTransaction {
 
-    private static final Logger log = LogManager.getLogger(XdStorageTransaction.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageTransaction.class);
 
     private final IXdStorageTransactionManager manager;
 
@@ -437,7 +437,7 @@ public class XdStorageTransaction implements IXdStorageTransaction {
                         .delete((Comparable) pair[1], getStorage(), this);
             } catch (final Throwable t) {
                 // Ключа может уже не быть (параллельная компенсация/удаление) — штатно.
-                org.apache.logging.log4j.LogManager.getLogger(XdStorageTransaction.class)
+                org.slf4j.LoggerFactory.getLogger(XdStorageTransaction.class)
                         .debug("rollback index-key compensation skipped for {}: {}", pair[1], t.getMessage());
             }
         }

@@ -1,7 +1,7 @@
 package io.github.xdstorage.index.hash;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.IXdStoragePredicate;
 import io.github.xdstorage.IXdStorageWatcher;
@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class XdStorageAbstractHashIndexResource implements IXdStorageIndexResourceObject, IXdStorageIndexDaoResource {
 
-    private static final Logger log = LogManager.getLogger(XdStorageAbstractHashIndexResource.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageAbstractHashIndexResource.class);
 
     protected final XdStorageServicesLocator services;
 

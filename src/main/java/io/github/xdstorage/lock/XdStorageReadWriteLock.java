@@ -1,7 +1,7 @@
 package io.github.xdstorage.lock;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 
@@ -17,7 +17,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class XdStorageReadWriteLock {
 
-    private static final Logger log = LogManager.getLogger(XdStorageReadWriteLock.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageReadWriteLock.class);
 
     // Легковесный лок для защиты атомарности каста состояний
     private final ReentrantLock mainLock = new ReentrantLock();

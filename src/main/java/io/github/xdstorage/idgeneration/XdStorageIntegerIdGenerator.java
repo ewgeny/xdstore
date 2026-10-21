@@ -1,7 +1,7 @@
 package io.github.xdstorage.idgeneration;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
@@ -23,7 +23,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
 
-    private static final Logger log = LogManager.getLogger(XdStorageIntegerIdGenerator.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageIntegerIdGenerator.class);
 
     private final int PART_OF_IDENTIFIERS = 100;
     private final XdStorageServicesLocator services;

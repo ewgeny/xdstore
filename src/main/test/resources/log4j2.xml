@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- L-1 (docs/tasks/2.1.0/01): the SUITE's log4j2 config — log4j2 is a test-scope backend,
+     the published jar ships no logging config at all. Engine log goes to the rolling file
+     sink (CI diagnosability, xdstorage.log in the project root, gitignored); the console
+     gets WARN+ only so build logs stay readable. -->
+<Configuration>
+    <Appenders>
+        <RollingFile name="xdstorage-file" fileName="${sys:xdstorage.log.file:-xdstorage.log}"
+                     filePattern="${sys:xdstorage.log.file:-xdstorage.log}.%i" append="true">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+            <SizeBasedTriggeringPolicy size="50 MB"/>
+            <DefaultRolloverStrategy max="3"/>
+        </RollingFile>
+        <Console name="STDOUT" target="SYSTEM_OUT">
+            <!-- physical gate: nothing below WARN reaches stdout, whichever logger routes
+                 to this appender (AppenderRef level= alone is not reliably applied) -->
+            <ThresholdFilter level="warn" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <!-- Engine: INFO+ to the file; the console (shared, ThresholdFilter=warn) shows
+             engine WARN/ERROR only — no per-operation INFO on stdout during builds. -->
+        <Logger name="io.github.xdstorage" level="info" additive="false">
+            <AppenderRef ref="xdstorage-file"/>
+            <AppenderRef ref="STDOUT"/>
+        </Logger>
+        <Root level="warn">
+            <AppenderRef ref="STDOUT"/>
+        </Root>
+    </Loggers>
+</Configuration>

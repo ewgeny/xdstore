@@ -1,7 +1,7 @@
 package io.github.xdstorage.resource.cache;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 import io.github.xdstorage.observing.IXdStorageIdObservableWrapper;
@@ -23,7 +23,7 @@ import java.util.Map.Entry;
  */
 public final class XdStorageCacheCommitProtocol {
 
-    private static final Logger log = LogManager.getLogger(XdStorageCacheCommitProtocol.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageCacheCommitProtocol.class);
 
     private final XdStorageCacheContext cache;
 
@@ -154,7 +154,7 @@ public final class XdStorageCacheCommitProtocol {
         cache.workspace().removeUndoLog(transactionId); // изменения стали постоянными — журнал отката не нужен
         final Map<Object, XdStorageCacheRecord> map = cache.workspace().removeChanges(transactionId);
         if (map != null) {
-            log.info("commit of tx {}: {} record(s) became permanent", transactionId, map.size());
+            log.debug("commit of tx {}: {} record(s) became permanent", transactionId, map.size());
             final Iterator<Entry<Object, XdStorageCacheRecord>> it = map.entrySet().iterator();
             while (it.hasNext()) {
                 final XdStorageCacheRecord record = it.next().getValue();
@@ -256,7 +256,7 @@ public final class XdStorageCacheCommitProtocol {
         }
 
         if (map != null || undoLog != null) {
-            log.info("rollback of tx {}: {} record(s) reverted in reverse mutation order",
+            log.debug("rollback of tx {}: {} record(s) reverted in reverse mutation order",
                     transactionId, map != null ? map.size() : 0);
         }
 
@@ -296,7 +296,7 @@ public final class XdStorageCacheCommitProtocol {
         }
 
         if (map != null) {
-            log.info("rollback-failed-commit of tx {}: {} record(s) restored from the collector's committed changes", transactionId, map.size());
+            log.debug("rollback-failed-commit of tx {}: {} record(s) restored from the collector's committed changes", transactionId, map.size());
         }
 
         cache.workspace().finishTransaction(transactionId);

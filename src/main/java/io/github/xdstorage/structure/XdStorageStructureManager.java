@@ -1,7 +1,7 @@
 package io.github.xdstorage.structure;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
@@ -24,7 +24,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageStructureManager {
 
-    private static final Logger log = LogManager.getLogger(XdStorageStructureManager.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageStructureManager.class);
 
     private final XdStorageServicesLocator services;
 

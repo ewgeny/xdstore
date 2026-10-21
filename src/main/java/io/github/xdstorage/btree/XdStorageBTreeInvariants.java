@@ -29,8 +29,8 @@ import java.util.Set;
  */
 public final class XdStorageBTreeInvariants {
 
-    private static final org.apache.logging.log4j.Logger log =
-            org.apache.logging.log4j.LogManager.getLogger(XdStorageBTreeInvariants.class);
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(XdStorageBTreeInvariants.class);
 
     /**
      * R-32: сэмплирование полной валидации. Полный обход цепочки листьев + descend — O(N);

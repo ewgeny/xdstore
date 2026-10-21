@@ -1,7 +1,7 @@
 package io.github.xdstorage;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import io.github.xdstorage.serialization.FilesFormat;
 import io.github.xdstorage.utils.XdStorageAtomicFile;
@@ -18,7 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class XdStorageProvider {
 
-    private static final Logger log = LogManager.getLogger(XdStorageProvider.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageProvider.class);
 
     /**
      * РАЗМЕР ФРАГМЕНТА ПО УМОЛЧАНИЮ (объектов на файл класса, политика StoreAsClassObjects).
