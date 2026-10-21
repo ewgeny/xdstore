@@ -18,7 +18,7 @@ jobs:
           distribution: temurin
           java-version: '17'          # dev/test runtime; library bytecode stays release=8
           cache: maven
-      - name: Build and run full suite (verify: JaCoCo report needs the verify phase, T-1)
+      - name: Build and run full suite (verify — JaCoCo report needs the verify phase, T-1)
         run: |
           mvn clean verify > /tmp/mvn-gate.log 2>&1 || { tail -100 /tmp/mvn-gate.log; exit 1; }
           grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-gate.log
