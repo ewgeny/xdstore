@@ -52,13 +52,16 @@ evaluation): **a stranger can add the dependency from Central and read a license
 Every step is a human/infrastructure action unless marked otherwise; commands assume the repo
 root on branch `xdstorage-2.0`.
 
-1. **Decide the publishing identity.** The groupId is `io.github.xdstorage` — Central Portal
-   namespaces are verified per domain (`flib.org`…?) or reverse-GitHub (`io.github.ewgeny`).
-   If the `org.flib` domain is not yours to verify, this is the last cheap moment to switch
-   the groupId (it is part of the 2.0.0 breaking surface; after 2.0.0 it is frozen).
-2. **Register the Central Portal namespace** (central.sonatype.com → Register namespace →
-   verify via DNS TXT or repo path) and **create a user token** — these become
-   `CENTRAL_USERNAME` / `CENTRAL_PASSWORD`.
+1. **Decide the publishing identity.** DONE (2026-10-21): publishing as
+   **`io.github.xdstorage`**. The repository moved to the GitHub organization
+   `xdstorage` (github.com/xdstorage/xdstorage, transferred from `ewgeny/xdstore`) and the
+   Central Portal namespace `io.github.xdstorage` is verified. The alternatives were
+   impossible: `org.flib` needs flib.org (third-party since 2014), and `io.github.flib`
+   needs the GitHub account `flib` (third-party). Java packages were migrated to
+   `io.github.xdstorage` in the same release; the groupId is frozen from 2.0.0 on.
+2. **Register the Central Portal namespace and create a user token** — these become
+   `CENTRAL_USERNAME` / `CENTRAL_PASSWORD`. Namespace `io.github.xdstorage`: DONE
+   (verified 2026-10-21). Remaining: create the Portal user token and wire the secrets (step 4).
 3. **Create a signing key**: `gpg --full-generate-key` (RSA 4096, no expiry is fine for a
    project key), publish the public key to a keyserver (Central checks it), keep the private
    key in the CI secret store only.
@@ -141,9 +144,10 @@ ambition:
 
 ## 3. Standing recommendations for future release prep
 
-1. **Legal/identity before first publish** — confirm the groupId namespace decision and the
-   LICENSE copyright holder (`XdStorage contributors` is fine for an unincorporated project;
-   an entity name if one exists). After 2.0.0 the coordinates are frozen forever.
+1. **Legal/identity before first publish** — groupId namespace decided (2026-10-21:
+   `io.github.xdstorage`, verified; see §1.2 step 1); still open: the LICENSE copyright
+   holder (`XdStorage contributors` is fine for an unincorporated project; an entity name
+   if one exists). After 2.0.0 the coordinates are frozen forever.
 2. **Rehearse the pipeline before the real tag.** `release.yml` is tag-triggered; rehearse
    once with a throwaway tag (`v2.0.0-rc0`) against a scratch namespace, or temporarily point
    the deploy step at GitHub Packages, before cutting the real 2.0.0. A pipeline that has

@@ -22,6 +22,12 @@ The 2.0 engineering campaign is journaled in detail in
 
 ### Breaking
 
+- **Package and Maven coordinates renamed**: the library moves from the never-published
+  `org.flib.xdstorage` namespace to **`io.github.xdstorage`** — groupId `io.github.xdstorage`,
+  artifactId `xdstorage`, root Java package `io.github.xdstorage` (subpackages keep their
+  relative structure). Every `import org.flib.xdstorage.…` becomes
+  `import io.github.xdstorage.…`; nothing was ever published under the old coordinates,
+  so there is no dependency-graph migration — only import renames.
 - **`FilesFormat.JSON` removed** (A2/F-5): the constant silently wrote XML content into
   `.json`-named files (the "default" factory is an XML implementation). Code passing
   `FilesFormat.JSON` must switch to `FilesFormat.XML` or `FilesFormat.YAML`. A 1.x folder
@@ -82,4 +88,4 @@ introduction, wrapper codegen (simple/unmodifiable/observable), resource cache, 
 snapshot isolation, PostgreSQL support removed. 1.x folders open in 2.0 per the
 compatibility matrix in [EMBEDDING.md](EMBEDDING.md).
 
-[2.0.0]: https://github.com/ewgeny/xdstore/releases/tag/v2.0.0
+[2.0.0]: https://github.com/xdstorage/xdstorage/releases/tag/v2.0.0

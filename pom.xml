@@ -4,7 +4,7 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.flib.xdstorage</groupId>
+    <groupId>io.github.xdstorage</groupId>
     <artifactId>xdstorage</artifactId>
     <packaging>jar</packaging>
     <!-- E-1: semver — the single source of truth. It reaches the jar as the Maven-filtered
@@ -15,7 +15,7 @@
     <description>Embedded Java object storage: ACID transactions with MVCC snapshots over human-readable
         YAML/XML files, B+tree and hash indexes, a criteria search engine, triggers, and pluggable
         serialization. Zero native dependencies; Java 8 bytecode.</description>
-    <url>https://github.com/ewgeny/xdstore</url>
+    <url>https://github.com/xdstorage/xdstorage</url>
 
     <licenses>
         <license>
@@ -26,9 +26,9 @@
     </licenses>
 
     <scm>
-        <url>https://github.com/ewgeny/xdstore</url>
-        <connection>scm:git:https://github.com/ewgeny/xdstore.git</connection>
-        <developerConnection>scm:git:git@github.com:ewgeny/xdstore.git</developerConnection>
+        <url>https://github.com/xdstorage/xdstorage</url>
+        <connection>scm:git:https://github.com/xdstorage/xdstorage.git</connection>
+        <developerConnection>scm:git:git@github.com:xdstorage/xdstorage.git</developerConnection>
         <tag>HEAD</tag>
     </scm>
 
@@ -297,7 +297,7 @@
                     </plugin>
 
                     <!-- E-3: publish to Maven Central via the Central Portal. Requires the
-                         namespace org.flib.xdstorage to be verified and a user token stored as
+                         namespace io.github.xdstorage to be verified and a user token stored as
                          CI secrets (server id "central") — docs/RELEASE-PLAN.md §1.
                          Supersedes the legacy OSSRH distributionManagement plan (E-3): new
                          publishers go through the Portal as of 2025+. -->
