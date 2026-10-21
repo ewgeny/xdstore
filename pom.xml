@@ -67,10 +67,13 @@
             <version>3.8.1</version>
         </dependency>
 
+        <!-- L-0/L-1 (docs/tasks/2.1.0/01): the ONLY logging artifact in main scope — the
+             library logs through the SLF4J API and ships no backend; the backend and its
+             configuration are the consumer's choice (docs/examples/logging/). -->
         <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-core</artifactId>
-            <version>2.23.1</version>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.20</version>
         </dependency>
 
         <dependency>
@@ -101,6 +104,23 @@
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
             <version>4.2.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- L-1: log4j2 is the TEST-scope SLF4J backend (versions must match). The suite's
+             config lives at src/main/test/resources/log4j2.xml; test sources may also use
+             the log4j2 API directly. The published jar carries neither — L-3's enforcer
+             rule keeps backends out of compile/runtime scope permanently. -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.23.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>2.23.1</version>
             <scope>test</scope>
         </dependency>
 
@@ -206,6 +226,37 @@
                                 <requireMavenVersion>
                                     <version>[3.6.3,)</version>
                                 </requireMavenVersion>
+                                <!-- L-3 (docs/tasks/2.1.0/03): logging BACKENDS and SLF4J bindings
+                                     are banned from compile/runtime scope forever — the jar must ship
+                                     the SLF4J API only; the backend is the consumer's choice. Test
+                                     scope stays legal (the suite binds log4j2 on purpose). Pattern
+                                     format per the enforcer docs: group:artifact:version:type:SCOPE:
+                                     classifier — the scope is the 5th component (a trailing 6th-part
+                                     scope silently matches nothing). slf4j-api in compile scope is
+                                     deliberately NOT on the list: the rule bans backends, not the API. -->
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.apache.logging.log4j:*:*:*:compile</exclude>
+                                        <exclude>org.apache.logging.log4j:*:*:*:runtime</exclude>
+                                        <exclude>ch.qos.logback:logback-classic:*:*:compile</exclude>
+                                        <exclude>ch.qos.logback:logback-classic:*:*:runtime</exclude>
+                                        <exclude>org.slf4j:slf4j-simple:*:*:compile</exclude>
+                                        <exclude>org.slf4j:slf4j-simple:*:*:runtime</exclude>
+                                        <exclude>org.slf4j:slf4j-jdk14:*:*:compile</exclude>
+                                        <exclude>org.slf4j:slf4j-jdk14:*:*:runtime</exclude>
+                                        <exclude>org.slf4j:slf4j-nop:*:*:compile</exclude>
+                                        <exclude>org.slf4j:slf4j-nop:*:*:runtime</exclude>
+                                        <exclude>org.slf4j:slf4j-reload4j:*:*:compile</exclude>
+                                        <exclude>org.slf4j:slf4j-reload4j:*:*:runtime</exclude>
+                                        <exclude>org.slf4j:slf4j-log4j12:*:*:compile</exclude>
+                                        <exclude>org.slf4j:slf4j-log4j12:*:*:runtime</exclude>
+                                    </excludes>
+                                    <message>L-3: a logging backend or an SLF4J binding entered compile/runtime
+                                        scope — the jar must ship org.slf4j:slf4j-api ONLY. Backends are the
+                                        consumer's choice (docs/examples/logging/); rationale:
+                                        docs/tasks/2.1.0/03-logging-build-guards.md, docs/MASTER-PLAN.md § Track L-3.
+                                        Test-scope backends stay legal.</message>
+                                </bannedDependencies>
                             </rules>
                         </configuration>
                     </execution>

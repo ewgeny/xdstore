@@ -1,7 +1,7 @@
 package io.github.xdstorage.transaction;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 import io.github.xdstorage.metrics.XdStorageMetrics;
@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class XdStorageTransactionManager implements IXdStorageTransactionManager<XdStorageTransaction> {
 
-    private static final Logger log = LogManager.getLogger(XdStorageTransactionManager.class);
+    private static final Logger log = LoggerFactory.getLogger(XdStorageTransactionManager.class);
 
     protected final XdStorageServicesLocator services;
 
@@ -263,7 +263,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         transactionsByThreadId.remove(currentThreadId);
 
         transaction.markFinished();
-        log.info(String.format("Rolled back transaction %s", transaction.getTransactionId()));
+        log.debug(String.format("Rolled back transaction %s", transaction.getTransactionId()));
     }
 
     @Override
@@ -350,7 +350,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
                     }
 
                     transaction.markFinished();
-                    log.info("Rolled back transaction " + transaction.getTransactionId() + " by mark rollback only");
+                    log.debug("Rolled back transaction " + transaction.getTransactionId() + " by mark rollback only");
                 }
             }
         });

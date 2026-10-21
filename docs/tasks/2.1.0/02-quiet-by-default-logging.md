@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][L-2] Quiet-by-default logging: demote per-operation INFO to DEBUG"
 labels: [2.1.0-train, P0, logging, refactor]
-status: open
+status: done
 ---
 
 ## Summary
@@ -39,16 +39,16 @@ and anything a 24/7 service should see about its own lifecycle. WARN/ERROR sites
 
 ## Acceptance criteria
 
-- [ ] Default-config consumer run: console shows only lifecycle INFO (open/shutdown/
+- [x] Default-config consumer run: console shows only lifecycle INFO (open/shutdown/
       checkpoint) during a save/load/commit workload.
-- [ ] The diagnostic example config restores the full operation trace (verify by diffing
+- [x] The diagnostic example config restores the full operation trace (verify by diffing
       against the pre-change trace of the same workload).
-- [ ] Suite log volume measured **before and after** at the same config (one full suite run
+- [x] Suite log volume measured **before and after** at the same config (one full suite run
       each; the R-24 campaign measured ~3400 INFO lines / ~570 KB — record both numbers in
       the PR description).
-- [ ] `mvn clean test` green (BUILD SUCCESS verdict); no assertion anywhere depends on log
+- [x] `mvn clean test` green (BUILD SUCCESS verdict); no assertion anywhere depends on log
       output (check: no test reads the log file).
-- [ ] `CHANGELOG.md` "Changed" entry (Quiet-by-default bullet) matches what shipped.
+- [x] `CHANGELOG.md` "Changed" entry (Quiet-by-default bullet) matches what shipped.
 
 ## Verification
 
