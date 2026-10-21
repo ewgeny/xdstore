@@ -18,15 +18,14 @@ jobs:
           distribution: temurin
           java-version: '17'          # dev/test runtime; library bytecode stays release=8
           cache: maven
-      - name: Build and run full suite
+      - name: Build and run full suite (verify: JaCoCo report needs the verify phase, T-1)
         run: |
-          mvn clean test > /tmp/mvn-gate.log 2>&1 || { tail -100 /tmp/mvn-gate.log; exit 1; }
+          mvn clean verify > /tmp/mvn-gate.log 2>&1 || { tail -100 /tmp/mvn-gate.log; exit 1; }
           grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-gate.log
           grep -q "BUILD SUCCESS" /tmp/mvn-gate.log || { echo "BUILD FAILURE detected"; exit 1; }
           grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-gate.log | tail -1
       - name: Artifact check — jar ships no logging backend and no SLF4J binding (L-3)
         run: |
-          mvn -q -DskipTests package > /tmp/mvn-package.log 2>&1 || { tail -50 /tmp/mvn-package.log; exit 1; }
           JAR=$(ls target/xdstorage-*.jar | grep -vE "sources|javadoc" | head -1)
           echo "L-3 artifact check on $JAR"
           if unzip -l "$JAR" | grep -E "org/apache/logging/log4j|META-INF/services/org\.slf4j\.spi\.SLF4JServiceProvider"; then
@@ -40,6 +39,13 @@ jobs:
         with:
           name: surefire-reports
           path: target/surefire-reports/
+          if-no-files-found: ignore
+      - name: Archive JaCoCo coverage report (always, T-1)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
           if-no-files-found: ignore
 
   nightly:

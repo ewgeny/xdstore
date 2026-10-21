@@ -197,12 +197,40 @@
                     <forkCount>1</forkCount>
                     <!-- R-42: 1g не хватает на весь суит в одном форке: ~71 класс стресс-тестов,
                          codegen-обертки и канонические реестры накапливаются до OOM на giant-purge.
-                         2g покрывает кумулятивный след полного прогона. -->
-                    <argLine>-Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
+                         2g покрывает кумулятивный след полного прогона.
+                         @{argLine} — late evaluation so the JaCoCo agent (T-1) is prepended;
+                         without it the literal argLine would silently drop the -javaagent switch. -->
+                    <argLine>@{argLine} -Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
                     <includes>
                         <include>**/*Test.java</include>
                     </includes>
                 </configuration>
+            </plugin>
+
+            <!-- T-1 (docs/tasks/2.1.0/04): JaCoCo coverage baseline — MEASURE AND PUBLISH ONLY.
+                 prepare-agent + report, deliberately NO check goal and no thresholds: coverage
+                 numbers must never be able to fail the build (honest-metrics culture,
+                 MASTER-PLAN § Track T-1). The report lands at target/site/jacoco/ in verify;
+                 CI uploads it as the jacoco-report artifact. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.15</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
 
             <!-- E-2: build-environment floor for every build, not just releases — an JDK 8 build
@@ -279,7 +307,7 @@
                         <version>3.0.0-M4</version>
                         <configuration>
                             <forkCount>1</forkCount>
-                            <argLine>-Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
+                            <argLine>@{argLine} -Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
                             <includes>
                                 <include>**/*Test.java</include>
                             </includes>
@@ -313,7 +341,7 @@
                         <version>3.0.0-M4</version>
                         <configuration>
                             <forkCount>1</forkCount>
-                            <argLine>-Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
+                            <argLine>@{argLine} -Xmx2g -Xlog:gc:file=/tmp/gc-fork.log:time,uptime,level,tags:filecount=2,filesize=50m</argLine>
                             <includes>
                                 <include>**/*Test.java</include>
                             </includes>

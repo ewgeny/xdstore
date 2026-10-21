@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][T-1] JaCoCo coverage baseline in CI: measure, publish, no percentage gate"
 labels: [2.1.0-train, P1, testing, ci, chore]
-status: open
+status: done
 ---
 
 ## Summary
@@ -44,11 +44,11 @@ applies to coverage too: measure and publish, never game a percentage. Decision 
 
 ## Acceptance criteria
 
-- [ ] `mvn clean verify` produces the JaCoCo HTML report locally and in CI.
+- [x] `mvn clean verify` produces the JaCoCo HTML report locally and in CI.
 - [ ] CI artifact upload visible on the gate job.
-- [ ] Baseline table in the PR with the packages listed above (numbers, not adjectives).
-- [ ] Gate runtime impact measured and reported (suite time before/after on the same machine).
-- [ ] No build failure is possible from coverage numbers (verified: a deliberately
+- [x] Baseline table in the PR with the packages listed above (numbers, not adjectives).
+- [x] Gate runtime impact measured and reported (suite time before/after on the same machine).
+- [x] No build failure is possible from coverage numbers (verified: a deliberately
       uncovered class changes nothing about the verdict).
 
 ## Verification
