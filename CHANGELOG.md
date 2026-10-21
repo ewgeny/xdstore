@@ -25,6 +25,29 @@ Planned scope; items land here as they merge:
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
   + runnable example app.
 - **D-1/D-4** — JaCoCo coverage report in CI; JMH regression alert in the nightly.
+- **Track T** (MASTER-PLAN) — formal test groups: JUnit 5 `@Tag("stress")`/`@Tag("integration")`
+  replace the filename-based quick-gate/release excludes (naming contract enforced by a lint
+  test); JaCoCo coverage map drives gap-filling suites for the under-covered packages
+  (`operation`, `updaters`, `structure`, `trigger`, `observing`, `lock`, `object`, `index`)
+  and a full `IXdFileStorage` happy/failure-path audit.
+
+### Changed (planned)
+
+- **Track L (MASTER-PLAN) — logging through the SLF4J API; log4j2 test-only.** The library
+  now logs via `slf4j-api` — the only logging artifact in its dependency tree (65 KB, no
+  dependencies of its own; previously `log4j-core` 2.23.1 (~1.8 MB + CVE surface) arrived
+  transitively with a bundled config that logged the engine's per-operation INFO to the
+  consumer's stdout). **`log4j-core` is no longer provided** — the backend is the
+  application's choice: logback, log4j2 via `log4j-slf4j2-impl`, `slf4j-jdk14`, or none.
+  Example consumer configurations (log4j2 + logback, quiet and diagnostic-verbose) ship in
+  `docs/examples/`; see EMBEDDING.md § Observability. **Migration:** code that relied on
+  log4j2 arriving transitively declares a backend explicitly; an application without any
+  backend sees at most SLF4J's single documented "no provider" notice.
+- **Quiet-by-default level discipline** (Track L-2). The engine's per-operation INFO lines
+  (save/delete/commit/rollback/prepare traces) are demoted to DEBUG; INFO remains for rare
+  lifecycle events (storage open/close, journal checkpoint). This addresses the log spam
+  observed around the 2.0.0 release: a consumer with a backend now sees lifecycle events
+  only, and a consumer without one sees nothing.
 
 ## [2.0.0] — 2026-10-21 (first public release)
 

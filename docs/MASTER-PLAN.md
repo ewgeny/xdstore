@@ -1,9 +1,9 @@
 # XdStorage — Master Roadmap
 
-Compiled 2026-10-19; **updated 2026-10-20** to integrate the architect's evaluation
-([ARCHITECT-EVALUATION.md](ARCHITECT-EVALUATION.md)): Track A is closed (R-54..R-59), the FP
-feature plan (FP-0..FP-12) is adopted as Track F, codegen Track C is superseded by FP-3, and the
-sequencing below is the merged 5-step roadmap. Detailed journals stay authoritative per scope:
+Compiled 2026-10-19; updated 2026-10-20 (architect's evaluation integrated); **updated
+2026-10-21 post-release: the 2.1.0 train is extended with Track T (test coverage & grouping)
+and Track L (log hygiene) — the two things the 2.0.0 release itself surfaced; W-4/B3 move
+explicitly to 2.2.0**. Detailed journals stay authoritative per scope:
 
 | Plan | Scope | State |
 |---|---|---|
@@ -53,9 +53,10 @@ stays as fallback). See ARCHITECT-EVALUATION.md FP-3.
 
 ## 2. The working plan — merged 5-step roadmap
 
-Track statuses: **A done** (A1 fixed R-54..R-58/R-59; A2 folded into Step 0), **B open**
-(absorbed into Steps 1–2), **C superseded** (FP-3, Step 3), **D open** (small items slotted
-into Steps 0–2), **E open** (= Step 0), **F new** (the FP feature plan, Steps 1–4).
+Track statuses: **A done** (A1 fixed R-54..R-58/R-59; A2 folded into Step 0), **B split**
+(B2 → the 2.1.0 train; B1/B3 → 2.2.0), **C superseded** (FP-3, Step 3), **D absorbed**
+(D-1 = T-1, D-4 in the 2.1.0 train, rest done), **E done** (Step 0), **F open** (the FP
+feature plan, Steps 1–4), **L and T new** (the 2.1.0 hardening tracks, defined in Step 1).
 
 ### Step 0 — Make it adoptable at all → **tag 2.0.0** (≈1–2 sessions) — **DONE: 2.0.0 PUBLISHED 2026-10-21**
 
@@ -85,23 +86,92 @@ Compatibility), D-3 DONE (Dependabot). Release lessons recorded in RELEASE-PLAN.
 *Exit criterion (from the evaluation): a stranger can add the dependency from Central and read
 a license.*
 
-### Step 1 — Quick wins on the two biggest axes (≈1–2 sessions)
+### Step 1 — the 2.1.0 train: post-release hardening (corrected/extended 2026-10-21)
 
-1. **B2 — read-only commit path** (PERF study §5.3, FP-4's quick win): skip 2PC record
-   iteration for no-change transactions; ~25 ms → near-zero per read tx at N=5000 on the Hash
-   path. Small, safe, the top read-heavy lever.
-2. **FP-1 — query power pack, phase 1** (`GT/GTE/LT/LTE/BETWEEN/IN` primaries, `ORDER BY`,
+The first train after going public. The release itself surfaced two work streams the old plan
+underweighted — **the released jar spams host stdout** (the bundled log4j2.xml) and **the test
+estate grew to 714 tests with no grouping and no coverage map** — so the train now carries four
+tracks: the original quick wins (B2/FP-1/FP-11/D-1/D-4) plus the new T and L tracks.
+
+#### Track L — logging: SLF4J API in the jar, log4j2 test-only, quiet-by-default (P0, first — every later run benefits) ≈1–1.5 sessions
+
+> **Work packages:** the 2.1.0 train is broken into senior-developer-sized GitHub-ready tasks
+> in [tasks/2.1.0/](tasks/2.1.0/README.md) (publishable via
+> `scripts/publish-issues.sh`); the track sections below remain the decision record.
+
+The released 2.0.0 jar has **log4j-core as a required dependency** (~1.8 MB of logging backend
+nobody asked for — and a CVE surface the consumer didn't sign up for) plus a bundled
+`log4j2.xml` whose **Root-level INFO Console appender** puts the engine's per-operation log
+(saves/commits/rollbacks — the R-24 "show-the-project log") on the consumer's own stdout: the
+log-spam problem seen during the release. **Decision (2026-10-21, user's call): the library
+logs through the SLF4J API — `slf4j-api` is the only main-scope logging dependency, and
+log4j2 (core + binding + config) becomes test-scope only.**
+
+**The transitive-dependency question — decision record (alternatives with reasons):**
+
+| Option | Verdict | Reason |
+|---|---|---|
+| (a) **`slf4j-api` as a normal compile dependency — CHOSEN** (the industry default: Hibernate, HikariCP) | **CHOSEN** | The standard, well-understood library contract: one 65 KB artifact with no dependencies of its own — the honest minimum of the API approach; the backend choice (logback / log4j2 / JUL / none) stays entirely with the consumer |
+| (b) `slf4j-api` marked `<optional>true</optional>` | rejected | Clean tree, but a consumer who forgets to declare it gets a bare `NoClassDefFoundError` at the first log call — a 65 KB saving traded for a support channel |
+| (c) Internal zero-dependency logging facade with runtime detection (the Netty `InternalLoggerFactory` pattern) | rejected | ~150 lines of reflective adapter + hand-rolled JUL `{}` formatting re-implement a solved problem — a permanent maintenance and correctness surface (plus SLF4J-present-without-provider edge cases) to save 65 KB. Dependency-count purism loses to honest simplicity here |
+
+| # | Item | What |
+|---|---|---|
+| L-0 | **Migrate main sources to the SLF4J API** (the train's literal first task) | Replace `org.apache.logging.log4j.Logger`/`LogManager` with `org.slf4j.Logger`/`LoggerFactory` across all main sources (measured: 39 files / ~40 logger sites, fields uniformly `log`, 141 call sites, no `trace`; verified mechanical — no log4j2-specific API anywhere in main: no ThreadContext, Markers, FluentLogger, Supplier overloads, `throwing`/`catching`; both APIs share the `{}` placeholder syntax, so log lines stay verbatim). Pom: **`slf4j-api` 2.0.x (Java 8 bytecode) becomes the ONLY main-scope logging dependency**; `log4j-core` leaves main scope |
+| L-1 | **No config in the jar; log4j2 = test scope** | `log4j2.xml` moves out of `src/main/resources`; `log4j-core` + version-matched `log4j-slf4j2-impl` (2.23.1) become TEST dependencies (the suite keeps log4j2, its file-sink config lives under `src/main/test/resources` for CI diagnosability); a small test asserts main-scope artifacts carry no binding. `docs/examples/`: quiet + diagnostic-verbose consumer configs (log4j2 and logback flavors, with a note that any SLF4J backend works). EMBEDDING.md § Observability rewritten for the new contract |
+| L-2 | **Quiet-by-default level discipline** | Demote the per-operation INFO flow to DEBUG (save/delete/commit/rollback/prepare traces, commit/rollback summaries, BTree root-creation); keep INFO for rare lifecycle only (storage open/close, journal checkpoint). The verbose operation trace remains one config away (L-1's diagnostic examples). This revises the R-24 "show-the-project log" decision — right for a debugging campaign, wrong as a shipped library default |
+| L-3 | **Guards** | enforcer `bannedDependencies` (release profile): org.apache.logging.log4j and every SLF4J binding (log4j-slf4j2-impl, logback, slf4j-simple, slf4j-jdk14, slf4j-nop) **banned from main scope permanently** — the jar can never again ship a backend; the jar contains no `META-INF/services/org.slf4j.spi.SLF4JServiceProvider`; CI/nightly keep their file sink; the `-Prelease` deploy build shows no console spam |
+
+Acceptance: `mvn dependency:tree` on a fresh consumer pom shows **exactly one logging
+artifact** (slf4j-api, 65 KB, no deps of its own); a consumer without any backend sees at
+most SLF4J's single documented "no provider" notice — never engine INFO lines; a consumer
+with any backend gets everything routed through it (suite-verified); EMBEDDING.md documents
+the contract change. **User-facing behavior change — CHANGELOG "Changed", including the
+dependency note (log4j-core no longer provided transitively; declare your own backend — or
+none).**
+
+#### Track T — test coverage & grouping (P0/P1) ≈2–3 sessions
+
+Ground truth (2026-10-21): 160 test classes / 714 tests; **zero `@Tag`/`@Category` usage** —
+all grouping is filename-based (`**/*StressTest.java`, `XmlDataStorageMultithreadsTest`,
+`integration/**`), duplicated across the quick-gate and release profiles; the suite is JUnit 5
+(154 classes; 2 JUnit-4-only + 1 mixed); the `/performance` package mixes stress families,
+real unit tests, diagnostics, and benchmarks; packages `operation`(0), `updaters`(0),
+`structure`(2), `trigger`(1), `observing`(2), `lock`(1), `object`(3), `index`(2) are
+under-covered; `/temp` holds litter (`SpecificTest` + entities).
+
+| # | Item | What |
+|---|---|---|
+| T-1 | **Coverage baseline** (the D-1 instrument, promoted to a track) | JaCoCo in CI, report published as a build artifact; produce the first coverage map and record it (docs or the CI artifact) — **measure and publish, never a percentage gate** (the honest-metrics culture applies to coverage too) |
+| T-2 | **Formal test groups** | JUnit 5 `@Tag("stress")` / `@Tag("integration")` as the single source of grouping; migrate the 3 legacy-vintage classes (tiny); quick-gate and release profiles switch from filename excludes to tag excludes (filename patterns stay as a backstop); **a lint test enforces the pairing** (a class named `*StressTest` without the tag — or vice versa — fails the build) so a misnamed stress test can never silently join the release gate; the contract is codified in FLAKY.md + RELEASE-PLAN § Quality bar |
+| T-3 | **Gap-filling, prioritized by public surface** | (a) suites for the under-covered packages above (`operation`, `updaters`, `structure`, `trigger`, `observing`, `lock`, `object`, `index`); (b) every `IXdFileStorage` facade method gets at least one happy-path + one failure-path test (the audit is part of the T-1 map); (c) FP-1's boundary-semantics suite (nulls, mixed types, empty/degenerate ranges) lands with the feature — one effort, two tracks; (d) litter audit: dissolve `/temp`, resolve the empty packages, decide `/performance`'s mixed content (stress classes tagged, benchmarks stay surefire-invisible by naming, diagnostics documented) |
+
+Explicit non-goals: no coverage-percentage mandate; no directory moves (F-6 stays frozen) —
+grouping is tags, not layout.
+
+#### The engine/docs items (kept from the original Step 1, re-ordered)
+
+1. **Track L first** (≈1–1.5 sess; **L-0 is the train's literal first task**) — the SLF4J
+   API migration + quiet-by-default de-spams every subsequent CI/RC run and reduces the
+   logging footprint to one 65 KB api artifact.
+2. **T-1 + T-2** — instrumentation and grouping land together (JaCoCo + tags).
+3. **B2 — read-only commit path** (PERF study §5.3, FP-4's quick win): skip 2PC record iteration
+   for no-change transactions; ~25 ms → near-zero per read tx at N=5000 on the Hash path. Small,
+   safe, the top read-heavy lever.
+4. **FP-1 — query power pack, phase 1** (`GT/GTE/LT/LTE/BETWEEN/IN` primaries, `ORDER BY`,
    `LIMIT/OFFSET`): the B+tree primary index is already ordered — range scans and ordered
    iteration are nearly free, and today their absence forces O(N) scans. Acceptance: JMH shows
-   range queries scaling sub-linearly vs the scan they replace; boundary-semantics regression
-   tests (nulls, mixed types); README query section updated.
-3. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
-   "when to choose XdStorage"): publish the evaluation's §3/§4 as docs pages; add a runnable
-   example app; state the design point (10⁴–10⁵ objects/class, ≤10²–10³ writes/s) until Step 2
-   ships. Also fixes the README test-count staleness.
-4. **D-1 — JaCoCo coverage report** in CI (artifact, no gate at first) and **D-4 — JMH
-   regression alert** (nightly smoke persists per-scenario numbers; warn on >25% drop) slot in
-   here cheaply.
+   range queries scaling sub-linearly vs the scan they replace; the boundary-semantics suite
+   (T-3c) is part of the feature.
+5. **T-3 gap-filling** — guided by the T-1 map.
+6. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
+   "when to choose XdStorage" + runnable example app): lands LAST so it describes the shipped
+   2.1.0 (including range queries); fixes the README test-count staleness.
+7. **D-4 — JMH regression alert** (nightly smoke persists per-scenario numbers; warn on >25%
+   drop) — nightly-side, lands anywhere in the train.
+
+**2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
+recovery, JMH vs baselines, fresh-clone README walkthrough) → tag `v2.1.0`.
 
 ### Step 2 — The engine's 2.x maturity (3–5 sessions, design round first)
 
@@ -150,14 +220,18 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 | Order | Work | Effort | Unlocks | Release |
 |---|---|---|---|---|
 | 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** — **DONE: shipped 2026-10-21** | 1–2 sess | Everything public | **2.0.0** |
-| 1 | B2 + FP-1 (phase 1) + FP-11 + D-1/D-4 — **NEXT (train started, pom at 2.1.0)** | 1–2 sess | Query expressiveness; read-heavy workloads | 2.1.0 |
-| 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | 2.1 |
-| 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.2 |
+| 1 | **2.1.0 train:** Track L (log hygiene) + Track T (coverage & grouping) + B2 + FP-1 (phase 1) + FP-11 + D-4 — **NEXT (pom at 2.1.0)** | 3–5 sess | Quiet library default; a measured, grouped test estate; query expressiveness; read-heavy workloads | **2.1.0** |
+| 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | **2.2.0** |
+| 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.3.0 |
 | 4 | FP-2/7/8/9/10/12 ecosystem train | 1–2 sess each | Mainstream adoption surface | 2.x→3.0 |
 
-**Release-train decision:** 2.0.0 ships at Step 0 — the correctness bar is already met (suite
-~706 green, Track A closed, one tolerated full-suite-load flake row tracked for B3). Steps 1–3
-are the 2.1/2.2 trains; Step 4 is demand-driven.
+**Release-train decision (corrected 2026-10-21):** 2.1.0 is the post-release hardening train —
+it deliberately carries NO deep engine surgery (W-4's persisted-state semantics change would
+force the testing work and the feature work to share one RC risk window); the engine maturity
+work (W-4 + B3) is 2.2.0, the deployment story is 2.3.0, Step 4 stays demand-driven. 2.1.0
+ships when the RC protocol passes on the extended scope: quiet-by-default logging verified on
+a config-less consumer, tag-driven grouping enforced, coverage map recorded, FP-1 acceptance
+met.
 
 ## 4. Explicitly out of scope (carried over — do not re-propose)
 
