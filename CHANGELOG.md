@@ -12,7 +12,7 @@ see `XdStorageFormatMeta`):
 - **v2** — the 2.0 era: YAML EOF sentinel (S-1), optional per-transaction commit journal
   (W-1, `journalWrites` ON by default since W-3).
 
-## [2.0.0] — planned (first public release)
+## [2.0.0] — 2026-10-21 (first public release)
 
 The 2.0 engineering campaign is journaled in detail in
 [OPTIMIZATION-PLAN.md](OPTIMIZATION-PLAN.md) (engine, R-1..R-59),
