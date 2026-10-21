@@ -9,10 +9,10 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="io.github.xdstorage" level="TRACE">
+        <Logger name="io.github.xdstorage" level="INFO">
             <AppenderRef ref="xdstorage"/>
         </Logger>
-        <Root level="TRACE">
+        <Root level="INFO">
             <AppenderRef ref="STDOUT"/>
         </Root>
     </Loggers>

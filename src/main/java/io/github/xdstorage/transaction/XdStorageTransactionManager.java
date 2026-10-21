@@ -124,7 +124,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         metrics().increment(XdStorageMetrics.TRANSACTIONS_BEGUN);
         metrics().increment(XdStorageMetrics.ACTIVE_TRANSACTIONS);
 
-        log.info(String.format("Started transaction %s (timeout %d ms%s)", newTransactionId, timeout,
+        log.debug(String.format("Started transaction %s (timeout %d ms%s)", newTransactionId, timeout,
                 transaction != null ? ", nested in " + transaction.getTransactionId() : ""));
         return newTransaction;
     }
@@ -203,7 +203,7 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         transaction.markFinished();
         metrics().increment(XdStorageMetrics.TRANSACTIONS_COMMITTED);
         metrics().decrement(XdStorageMetrics.ACTIVE_TRANSACTIONS);
-        log.info(String.format("Committed transaction %s", transaction.getTransactionId()));
+        log.debug(String.format("Committed transaction %s", transaction.getTransactionId()));
     }
 
     protected void fireChanges(final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources, final XdStorageTransaction transaction) {
