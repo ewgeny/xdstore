@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][FP-11] Decision-guide page + runnable example app"
 labels: [2.1.0-train, P1, docs, chore]
+status: open
 ---
 
 ## Summary

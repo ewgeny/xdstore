@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][L-3] Build guards: keep logging backends and bindings out of main scope, forever"
 labels: [2.1.0-train, P0, logging, ci]
+status: open
 ---
 
 ## Summary

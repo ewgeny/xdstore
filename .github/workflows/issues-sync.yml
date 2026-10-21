@@ -1,0 +1,32 @@
+name: issues sync
+
+# Idempotent sync of docs/tasks/2.1.0 work packages to GitHub issues.
+# Source of truth is the task files' frontmatter: a new file (status: open) with no
+# matching issue gets one created; a file a developer marked `status: done` gets its
+# issue closed. Logic in scripts/sync-issues.sh (the same script runs locally).
+# Gated to main on push: feature branches must not publish issues early.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issues-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync task files to GitHub issues
+        env:
+          # Repository secret XDSTORAGE_ISSUES_TOKEN (Settings -> Secrets and variables ->
+          # Actions): a token with issues write access to this repo. The built-in
+          # GITHUB_TOKEN is deliberately not used.
+          GH_TOKEN: ${{ secrets.XDSTORAGE_ISSUES_TOKEN }}
+        run: bash scripts/sync-issues.sh

@@ -96,8 +96,10 @@ tracks: the original quick wins (B2/FP-1/FP-11/D-1/D-4) plus the new T and L tra
 #### Track L — logging: SLF4J API in the jar, log4j2 test-only, quiet-by-default (P0, first — every later run benefits) ≈1–1.5 sessions
 
 > **Work packages:** the 2.1.0 train is broken into senior-developer-sized GitHub-ready tasks
-> in [tasks/2.1.0/](tasks/2.1.0/README.md) (publishable via
-> `scripts/publish-issues.sh`); the track sections below remain the decision record.
+> in [tasks/2.1.0/](tasks/2.1.0/README.md); issue lifecycle is automated — the issues-sync
+> workflow (`.github/workflows/issues-sync.yml`, every push to `main`) runs
+> `scripts/sync-issues.sh` to create new tasks' issues and close the ones a developer has
+> marked `status: done` in the task file; the track sections below remain the decision record.
 
 The released 2.0.0 jar has **log4j-core as a required dependency** (~1.8 MB of logging backend
 nobody asked for — and a CVE surface the consumer didn't sign up for) plus a bundled

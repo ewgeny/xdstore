@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][T-1] JaCoCo coverage baseline in CI: measure, publish, no percentage gate"
 labels: [2.1.0-train, P1, testing, ci, chore]
+status: open
 ---
 
 ## Summary

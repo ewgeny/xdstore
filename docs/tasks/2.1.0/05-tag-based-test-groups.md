@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][T-2] Formal test groups: @Tag(stress/integration) replace filename-based excludes, enforced by a lint test"
 labels: [2.1.0-train, P0, testing, refactor]
+status: open
 ---
 
 ## Summary

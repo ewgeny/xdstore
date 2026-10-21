@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][L-2] Quiet-by-default logging: demote per-operation INFO to DEBUG"
 labels: [2.1.0-train, P0, logging, refactor]
+status: open
 ---
 
 ## Summary

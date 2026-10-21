@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][B2] Read-only transaction commit path: skip 2PC record iteration for no-change transactions"
 labels: [2.1.0-train, P0, engine, performance, feature]
+status: open
 ---
 
 ## Summary

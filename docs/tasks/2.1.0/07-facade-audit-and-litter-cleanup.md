@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][T-3b] Facade API audit (happy+failure matrix) and test-litter cleanup"
 labels: [2.1.0-train, P1, testing, chore]
+status: open
 ---
 
 ## Summary

@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][L-0/L-1] Migrate main sources to the SLF4J API; log4j2 becomes test-only"
 labels: [2.1.0-train, P0, logging, refactor]
+status: open
 ---
 
 ## Summary

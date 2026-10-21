@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][FP-1a] Query power pack I: GT/GTE/LT/LTE/BETWEEN/IN primaries on the ordered index"
 labels: [2.1.0-train, P0, search, engine, feature]
+status: open
 ---
 
 ## Summary

@@ -1,6 +1,7 @@
 ---
 title: "[2.1.0][D-4] JMH regression alert in the nightly: persist smoke scores, warn on drop"
 labels: [2.1.0-train, P2, ci, performance, chore]
+status: open
 ---
 
 ## Summary

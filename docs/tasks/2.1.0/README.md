@@ -52,17 +52,49 @@ there for the full decision record before starting an item.
   [PERFORMANCE-RECOMMENDATIONS.md](../../PERFORMANCE-RECOMMENDATIONS.md) baselines; JMH numbers
   recorded as addenda, honestly (the W-3 precedent: report "unchanged" when it is unchanged).
 
-## Publishing to GitHub
+## Automatic issue sync (GitHub)
 
-Prerequisites: `gh` CLI installed and authenticated (`gh auth login`), pushed branch.
+Issues are managed automatically by the **issues-sync workflow**
+([.github/workflows/issues-sync.yml](../../../.github/workflows/issues-sync.yml)): it runs on
+**every push to `main`** (and on demand via its *Run workflow* button) and executes
+[`scripts/sync-issues.sh`](../../../scripts/sync-issues.sh) — the same script runs locally
+(`gh auth login && bash scripts/sync-issues.sh [--dry-run]`).
+
+**Status marks — the developer's side.** Each task file's frontmatter carries a `status` mark:
+
+- `status: open` *(default)* — the work package is open.
+- `status: done` — set **by the developer** when the task's acceptance criteria are met and
+  merged. The next push then closes the GitHub issue automatically (with a comment naming the
+  file that marked it done).
+
+**The sync's state machine** (idempotent; source of truth = the task files):
+
+| File says | GitHub says | Action |
+|---|---|---|
+| `open`, no issue | — | create the issue (labels + milestone `2.1.0` if it exists) |
+| `open` | issue open | nothing — already in sync |
+| `open` | issue closed | **WARN** — left closed (a machine never reopens; fix file or issue by hand) |
+| `done`, no issue | — | create the issue, then close it (history preserved) |
+| `done` | issue open | close it with an explanatory comment |
+| `done` | issue closed | nothing — already in sync |
+
+**Token setup (one-time).** The workflow authenticates with the repository secret
+**`XDSTORAGE_ISSUES_TOKEN`** — *Settings → Secrets and variables → Actions → New repository
+secret*: a token (fine-grained PAT or classic) with **Issues: read & write** on this
+repository. The built-in `GITHUB_TOKEN` is deliberately not used. Locally the script accepts
+the same name (`GH_TOKEN=…` takes precedence if both are set; `gh auth login` works too):
 
 ```bash
-bash scripts/publish-issues.sh
+export XDSTORAGE_ISSUES_TOKEN=ghp_…   # or: gh auth login
+bash scripts/sync-issues.sh --dry-run
 ```
 
-The script is idempotent (skips exact-title matches), creates the labels if missing, and
-attaches the GitHub milestone `2.1.0` **if it exists** — create it in the repo UI (or
-`gh api repos/:owner/:repo/milestones -f title=2.1.0`) before publishing if you want issues
-pre-assigned. Review each issue after import: cross-links between issues should use `#N`
-numbers, which only exist after creation — replace the file-reference links in the first
-comment if you prefer issue-links.
+Notes: matching is by **exact title** (fetched once per run, open + closed); feature branches
+never publish or close issues (the workflow is gated to `main`); concurrent runs are
+serialized by a workflow concurrency group; every run writes an action-count table to the job
+summary. To preview locally without touching GitHub: `bash scripts/sync-issues.sh --dry-run`.
+
+The milestone `2.1.0` is optional — create it in the repo UI (or
+`gh api repos/:owner/:repo/milestones -f title=2.1.0`) before the first sync if you want
+issues pre-assigned. Cross-links between issues should use `#N` numbers, which exist only
+after creation — edit the first comment if you prefer issue-links over file links.
