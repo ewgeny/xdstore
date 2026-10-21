@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][L-3] Build guards: keep logging backends and bindings out of main scope, forever"
 labels: [2.1.0-train, P0, logging, ci]
-status: open
+status: done
 ---
 
 ## Summary
@@ -46,12 +46,12 @@ arose historically). Decision record: [MASTER-PLAN.md](../../MASTER-PLAN.md) § 
 
 ## Acceptance criteria
 
-- [ ] Temporary local experiment (add `log4j-core` back to compile scope, run, **revert**):
+- [x] Temporary local experiment (add `log4j-core` back to compile scope, run, **revert**):
       the build fails with the enforcer message. Same for one SLF4J binding.
 - [ ] `mvn clean verify -Pquick-gate` and the CI gate stay green with the rule active.
 - [ ] CI gate + release workflow contain the artifact check; a run proves it executes
       (log line in the job output).
-- [ ] `-Prelease` package build shows no engine INFO on console.
+- [x] `-Prelease` package build shows no engine INFO on console.
 
 ## Verification
 

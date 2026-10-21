@@ -24,6 +24,16 @@ jobs:
           grep -E "BUILD (SUCCESS|FAILURE)" /tmp/mvn-gate.log
           grep -q "BUILD SUCCESS" /tmp/mvn-gate.log || { echo "BUILD FAILURE detected"; exit 1; }
           grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-gate.log | tail -1
+      - name: Artifact check — jar ships no logging backend and no SLF4J binding (L-3)
+        run: |
+          mvn -q -DskipTests package > /tmp/mvn-package.log 2>&1 || { tail -50 /tmp/mvn-package.log; exit 1; }
+          JAR=$(ls target/xdstorage-*.jar | grep -vE "sources|javadoc" | head -1)
+          echo "L-3 artifact check on $JAR"
+          if unzip -l "$JAR" | grep -E "org/apache/logging/log4j|META-INF/services/org\.slf4j\.spi\.SLF4JServiceProvider"; then
+            echo "LOGGING BACKEND OR SLF4J BINDING CONTENT IN THE JAR — see docs/tasks/2.1.0/03-logging-build-guards.md"
+            exit 1
+          fi
+          echo "jar logging check: CLEAN"
       - name: Archive surefire reports (always)
         if: always()
         uses: actions/upload-artifact@v4

@@ -46,6 +46,19 @@ jobs:
             echo "TAG $TAG != POM VERSION $POM_VERSION — bump the pom (and CHANGELOG) before tagging"; exit 1;
           fi
 
+      # L-3: runs BEFORE the deploy step — a jar that somehow carries a backend or a binding
+      # fails the pipeline here, not after publication to Maven Central.
+      - name: Artifact check — jar ships no logging backend and no SLF4J binding (L-3)
+        run: |
+          mvn -q -DskipTests package > /tmp/mvn-package.log 2>&1 || { tail -50 /tmp/mvn-package.log; exit 1; }
+          JAR=$(ls target/xdstorage-*.jar | grep -vE "sources|javadoc" | head -1)
+          echo "L-3 artifact check on $JAR"
+          if unzip -l "$JAR" | grep -E "org/apache/logging/log4j|META-INF/services/org\.slf4j\.spi\.SLF4JServiceProvider"; then
+            echo "LOGGING BACKEND OR SLF4J BINDING CONTENT IN THE JAR — see docs/tasks/2.1.0/03-logging-build-guards.md"
+            exit 1
+          fi
+          echo "jar logging check: CLEAN"
+
       - name: Import GPG key
         run: |
           echo "$GPG_PRIVATE_KEY" | base64 --decode > /tmp/signing-key.asc 2>/dev/null || printf '%s' "$GPG_PRIVATE_KEY" > /tmp/signing-key.asc
