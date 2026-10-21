@@ -325,12 +325,14 @@
                     <!-- E-3: publish to Maven Central via the Central Portal. Requires the
                          namespace io.github.xdstorage to be verified and a user token stored as
                          CI secrets (server id "central") — docs/RELEASE-PLAN.md §1.
-                         Supersedes the legacy OSSRH distributionManagement plan (E-3): new
-                         publishers go through the Portal as of 2025+. -->
+                         0.12.0 MINIMUM: older versions did not strip Maven 3.10's
+                         maven-metadata-local.xml / _remote.repositories from the staging repo,
+                         and Central rejects the bundle with "Bundle has content that does NOT
+                         have a .pom file" (the 2.0.0 first-release pipeline hit exactly this). -->
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.6.0</version>
+                        <version>0.12.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
