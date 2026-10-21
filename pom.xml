@@ -8,8 +8,10 @@
     <artifactId>xdstorage</artifactId>
     <packaging>jar</packaging>
     <!-- E-1: semver — the single source of truth. It reaches the jar as the Maven-filtered
-         /xdstorage.properties resource (XdStorage.getVersion()). Bump per docs/RELEASE-PLAN.md §2. -->
-    <version>2.0.0</version>
+         /xdstorage.properties resource (XdStorage.getVersion()). Bumped at TRAIN START
+         (docs/RELEASE-PLAN.md §2 step 3): the pom carries the version of the release the
+         train is heading toward; the tag at the end matches it (version-sanity check). -->
+    <version>2.1.0</version>
 
     <name>XdStorage</name>
     <description>Embedded Java object storage: ACID transactions with MVCC snapshots over human-readable
