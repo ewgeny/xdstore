@@ -59,6 +59,15 @@ evaluation): **a stranger can add the dependency from Central and read a license
 
 ### 1.2 Step-by-step: what remains before 2.0.0 is public
 
+**EXECUTED — 2.0.0 shipped 2026-10-21** (tag `v2.0.0`, Central Portal + GitHub Release).
+What this section cost in practice, on top of the plan: two Central validation rounds —
+central-publishing-maven-plugin had to move to 0.12.0 (Maven 3.10's `maven-metadata-local.xml` /
+`_remote.repositories` leaking into the bundle → "content that does NOT have a .pom file") and
+the pom needed a `<developers>` section ("Developers information is missing"). Both are now
+standing requirements; the recurring procedure in §2 inherits a working pipeline.
+
+Historical checklist, kept for the record:
+
 Every step is a human/infrastructure action unless marked otherwise; commands assume the repo
 root on branch `xdstorage-2.0`.
 

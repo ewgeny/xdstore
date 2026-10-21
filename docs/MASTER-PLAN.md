@@ -15,10 +15,13 @@ sequencing below is the merged 5-step roadmap. Detailed journals stay authoritat
 | [ARCHITECT-EVALUATION.md](ARCHITECT-EVALUATION.md) | Outside-architect review, competitive comparison, FP-0..FP-12 feature plan | Adopted; FP-0..FP-12 tracked here as Track F |
 | [BENCHMARKS.md](BENCHMARKS.md) / [FLAKY.md](FLAKY.md) | Baselines / flake ledger | Current; **one open row** (BTreeStress contention → B3) |
 
-**Verified state (2026-10-20):** suite ~706 tests green (commits `30c1e90` Track A fixes
-R-54..R-58, `333e864` 13 regression pins, `4313b30` R-59 StackOverflowError fix, `423baf1`
-evaluation); working tree clean; CI gate + nightly live; journal writes default ON (W-3);
-engine defaults t=64 / frag=128. The facade-storm, GraphPhantom, and Xml purge flake families
+**Verified state (2026-10-21, post-release):** **2.0.0 is PUBLISHED on Maven Central**
+(tag `v2.0.0` = `6224066`; namespace `io.github.xdstorage`; Central Portal pipeline after two
+validation fixes — central-publishing-maven-plugin 0.12.0 for the Maven 3.10 bundle bug,
+`<developers>` section for pom metadata). Full suite 714 green (release gate 677 via
+`-Prelease`); CI gate + nightly live; release workflow proven end-to-end (tag → smoke →
+non-stress suite + sign → Central → GitHub Release); journal writes default ON (W-3); engine
+defaults t=64 / frag=128. The facade-storm, GraphPhantom, and Xml purge flake families
 are **FIXED** (10/10 all-stress gate); the single open flake row is the BTreeStress
 contention family (Track B3, full-suite-load only).
 
@@ -54,19 +57,18 @@ Track statuses: **A done** (A1 fixed R-54..R-58/R-59; A2 folded into Step 0), **
 (absorbed into Steps 1–2), **C superseded** (FP-3, Step 3), **D open** (small items slotted
 into Steps 0–2), **E open** (= Step 0), **F new** (the FP feature plan, Steps 1–4).
 
-### Step 0 — Make it adoptable at all → **tag 2.0.0** (≈1–2 sessions) — NEXT
+### Step 0 — Make it adoptable at all → **tag 2.0.0** (≈1–2 sessions) — **DONE: 2.0.0 PUBLISHED 2026-10-21**
 
-The release train: Track E in full + the A2 API-freeze decisions. Nothing here waits on
-anything anymore (Track A is done).
+The release train: Track E in full + the A2 API-freeze decisions. Nothing here waited on
+anything (Track A was done).
 
-**Status 2026-10-20 (release-engineering prep landed):** A2 DONE (JSON removed, format marker
-`.xdstorage.meta` + startup INFO + loud newer-format rejection, `getVersion()`), E-1 DONE
-(LICENSE Apache-2.0, CHANGELOG.md, semver `2.0.0`, pom metadata), E-2 DONE (`release` profile:
-sources/javadoc/GPG/enforcer/reproducible builds), E-4 DONE (`release.yml`, activation = CI
-secrets), E-6 DONE (EMBEDDING.md § Compatibility & support statement), D-3 DONE (Dependabot).
-E-3 is scaffolding-complete (Central Portal plugin, server id `central`) — activation needs the
-namespace registration + secrets; E-5 is documented in [RELEASE-PLAN.md](RELEASE-PLAN.md) and
-executes at RC time. What remains to tag 2.0.0 is the §1 checklist of RELEASE-PLAN.md.
+**CLOSED 2026-10-21.** A2 DONE (JSON removed, format marker `.xdstorage.meta` + startup INFO +
+loud newer-format rejection, `getVersion()`), E-1 DONE (LICENSE Apache-2.0, CHANGELOG.md,
+semver, pom metadata incl. `<developers>` — Central requires it), E-2 DONE (`release` profile:
+sources/javadoc/GPG/enforcer/reproducible builds + non-stress suite), E-3 DONE (Central Portal,
+namespace `io.github.xdstorage` verified, plugin 0.12.0), E-4 DONE (`release.yml` proven
+end-to-end), E-5 executed (RC protocol per RELEASE-PLAN.md), E-6 DONE (EMBEDDING.md §
+Compatibility), D-3 DONE (Dependabot). Release lessons recorded in RELEASE-PLAN.md §3.
 
 | # | Item | What |
 |---|---|---|
@@ -147,8 +149,8 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 
 | Order | Work | Effort | Unlocks | Release |
 |---|---|---|---|---|
-| 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** — **prep landed 2026-10-20; remaining = RELEASE-PLAN.md §1 (namespace, secrets, RC, tag)** | 1–2 sess | Everything public | **2.0.0** |
-| 1 | B2 + FP-1 (phase 1) + FP-11 + D-1/D-4 | 1–2 sess | Query expressiveness; read-heavy workloads | 2.0.x / 2.1 |
+| 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** — **DONE: shipped 2026-10-21** | 1–2 sess | Everything public | **2.0.0** |
+| 1 | B2 + FP-1 (phase 1) + FP-11 + D-1/D-4 — **NEXT (train started, pom at 2.1.0)** | 1–2 sess | Query expressiveness; read-heavy workloads | 2.1.0 |
 | 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | 2.1 |
 | 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.2 |
 | 4 | FP-2/7/8/9/10/12 ecosystem train | 1–2 sess each | Mainstream adoption surface | 2.x→3.0 |

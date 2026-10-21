@@ -12,6 +12,20 @@ see `XdStorageFormatMeta`):
 - **v2** — the 2.0 era: YAML EOF sentinel (S-1), optional per-transaction commit journal
   (W-1, `journalWrites` ON by default since W-3).
 
+## [Unreleased] — the 2.1.0 train (MASTER-PLAN Step 1)
+
+Planned scope; items land here as they merge:
+
+### Added (planned)
+
+- **B2** — read-only commit path: no-change transactions skip the 2PC record iteration
+  (~25 ms → near-zero per read transaction at N=5000 on the Hash path).
+- **FP-1 phase 1** — query power pack: `GT`/`GTE`/`LT`/`LTE`/`BETWEEN`/`IN` primaries,
+  `ORDER BY`, `LIMIT`/`OFFSET` on the ordered B+tree primary index.
+- **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
+  + runnable example app.
+- **D-1/D-4** — JaCoCo coverage report in CI; JMH regression alert in the nightly.
+
 ## [2.0.0] — 2026-10-21 (first public release)
 
 The 2.0 engineering campaign is journaled in detail in
