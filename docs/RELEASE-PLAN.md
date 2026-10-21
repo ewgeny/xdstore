@@ -11,9 +11,10 @@ checklist, the recurring release procedure, and standing recommendations.
     [FLAKY.md](FLAKY.md) row named in the release notes.
   - **The tag pipeline (automated, on tag push)** — the NON-STRESS suite via the `release`
     profile (`mvn clean deploy -Prelease`: the profile excludes `**/*StressTest.java` +
-    `XmlDataStorageMultithreadsTest` — the slow, load-sensitive part of the run; ~690 of ~714
-    tests, seconds instead of minutes) plus the JMH smoke row assertion. The deploy phase
-    cannot run unless the test phase passed — they share one Maven invocation.
+    `XmlDataStorageMultithreadsTest` + the `integration` package — the slow, load-sensitive
+    part of the run; ~677 of ~714 tests, seconds instead of minutes) plus the JMH smoke row
+    assertion. The deploy phase cannot run unless the test phase passed — they share one
+    Maven invocation.
   - Stress coverage is therefore mandatory twice around every release: nightly ×3 + RC
     protocol ×3. The pipeline skipping it is a speed choice, never a safety hole — do not
     tag without the RC protocol.
