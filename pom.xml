@@ -32,6 +32,21 @@
         <tag>HEAD</tag>
     </scm>
 
+    <!-- Mandatory for Maven Central (the first 2.0.0 deployments were rejected:
+         "Developers information is missing"). Identity = the project author. -->
+    <developers>
+        <developer>
+            <id>ewgeny</id>
+            <name>Evgeny Korolev</name>
+            <email>e-korolev@rambler.ru</email>
+            <roles>
+                <role>architect</role>
+                <role>developer</role>
+                <role>maintainer</role>
+            </roles>
+        </developer>
+    </developers>
+
     <properties>
         <!-- H-5: library bytecode stays 1.8-compatible; dev/test runtime is JDK 17. -->
         <jdk.version>8</jdk.version>
