@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][T-3a] Test gap-filling: suites for the under-covered packages"
 labels: [2.1.0-train, P1, testing, tech-debt]
-status: open
+status: done
 ---
 
 ## Summary
@@ -47,19 +47,78 @@ rule; anything load-sensitive gets `@Tag("stress")` and lands in [FLAKY.md](../.
 
 ## Acceptance criteria
 
-- [ ] Every listed package has a dedicated suite; `operation`/`updaters` are no longer zero.
-- [ ] Suite total grows by the map-informed target (order of +40–80 tests; justify the number
-      in the PR — do not pad).
-- [ ] Coverage map delta vs task 04's baseline in the PR description.
-- [ ] Full suite green ×2 consecutive runs (BUILD SUCCESS verdict).
-- [ ] No new FLAKY.md rows without the evidence entry (rate + signature).
+- [x] Every listed package has a dedicated suite; **the `operation`/`updaters` premise was
+      stale** — no such packages exist in `src/main/java` (the updater SPI lives in
+      `structure.update`; verified during the inventory, task text corrected here). Suites
+      landed for `structure` (+`structure.update` contracts via the facade), `trigger`,
+      `idgeneration`, `index`, `object`; `lock` (100%/84%br) and `observing` (96%/100%br)
+      were already at or near full coverage at the task-04 baseline — no new suites needed there, per
+      "prioritized by the map".
+- [x] **+31 executing tests** (743 → 774), plus 5 acceptance-grade `@Disabled` tests pinned
+      on discovered engine defects (below). The +40–80 band assumed `operation`/`updaters`
+      existed; the real remaining dark surface is blocked by the discovered defects, and the
+      task forbids padding — the count is every contract that could be pinned honestly.
+      Justification per suite: trigger ×7, idgeneration ×7 (1 disabled), index ×7,
+      structure ×7 (4 disabled), object ×4, plus the T-2 lint test already counted in 743.
+- [x] **Coverage delta** (quick-gate verify, same HEAD before/after; task-04 numbers in
+      parens where the map differs):
+
+      | Package | before | after | note |
+      |---|---|---|---|
+      | `structure` | 8% lines / 5% br | **54% / 26%** | the schema-evolution suite |
+      | `trigger` | 73% / 60% | **88% / 80%** | the facade contour suite |
+      | `index` | 75% / 50% | **100% / 92%** | the cache contract suite |
+      | `structure.update` | 10% / 0% | 13% / 0% | execution paths blocked by BUG A/B |
+      | `object` | 13% / 7% | 14% / 8% | value contracts; the 8% converter is a god class (out of scope) |
+      | `idgeneration` | 74% / 45% | 74% / 45% | facade contracts; generator internals partly BUG-C-blocked |
+      | TOTAL | 7634/10951 lines | 7815/10995 | +~180 lines covered |
+
+- [x] Full suite green ×2 consecutive (774 tests, 0 failures, BUILD SUCCESS — twice; one
+      intervening run tripped the **documented** `XdStorageBTreeStressTest` flake
+      (FLAKY.md, Track B3, untouched by this task) and was rerun).
+- [x] No new FLAKY.md rows: nothing load-sensitive was added (all suites are deterministic;
+      no sleeps; R-50-unique storages; the one hang risk found — unguarded reentrant triggers
+      — is documented in the trigger suite as a required discipline, not a flake).
+
+## Engine defects discovered by this gap-fill (follow-up issues)
+
+- **BUG A — commit-journal replay NPE on the structure resource**: after any
+  `executeStructureUpdate`, closing and reopening the folder throws
+  `commit journal of .../structure/XdStorageClassStructure.yaml cannot be replayed (NPE)`
+  at open time. Blocks: persisted-structure survival, the updater ledger end-to-end,
+  real schema evolution. Repro: `XdStorageSchemaEvolutionTest` (the two `BUG A` tests).
+- **BUG B — id-addressability after a structure update on a freshly-opened storage**: with a
+  runtime-generated entity, save → reopen → `executeStructureUpdate` → load-by-id returns
+  null; the same sequence with a plain compiled entity works (probed with `RangeOpsEntity`).
+  Blocks: the V1→V2 evolution, migrated-data readability. Repro: the two `BUG B` tests.
+- **BUG C — auto-generated ids are unreachable by id after reopen**: the id is assigned
+  during the write-out phase, after the transaction's index-resource changes snapshot was
+  taken (id still null at save time); the in-memory cache resolves it, the persisted
+  id-index record does not exist. Explicit ids unaffected. Repro:
+  `XdStorageIdGenerationContractTest.generatedIdsSurviveReopen` (`@Disabled`).
+- **Contract surprises pinned as actual behavior** (not bugs, but read before relying on them):
+  the writer auto-generates ids only for `DATABASE`/`CUSTOM` generator types —
+  `UUID_GENERATOR` on a field never auto-generates (null id fails loudly at save);
+  a trigger doing storage work must open its OWN transaction (writes through the committing
+  tx land after the first phase and are lost — the `IXdStorageTrigger` javadoc says exactly
+  this); unguarded reentrant triggers (an auditing trigger without an id-prefix guard
+  recurses on its own commits and deadlocks the bounded commit executor — observed live);
+  `XdStorageObject.getProperty` NPEs before the first `setProperty`.
+
+## T-3 litter found during the source walk (input for task 07)
+
+3 stray sources declaring another directory's FQCN (`index/XdStorageHashIndexRecordTest` →
+`index.hash`, `structure/XdStorageUpdateStructureRecordTest` → `structure.update`,
+`idgeneration/XdStorageSubGeneratorsTest` → `code`), non-test scratch classes matching
+`*Test.java` (`temp/SpecificTest`, `code/SimpleCodeGeneratorTest`,
+`code/IdObservableCodeGeneratorTest`, `code/UnmodifiableCodeGeneratorTest` — `main()`-only),
+and the empty `idgeneration/XdStorageDefaultIdGeneratorTest`.
 
 ## Verification
 
 ```bash
-mvn clean test && mvn clean test    # ×2 consecutive green
-# coverage delta:
-mvn verify && open target/site/jacoco/index.html
+mvn clean test && mvn clean test    # 774 tests, 0 failures — ×2 consecutive BUILD SUCCESS
+mvn clean verify -Pquick-gate       # coverage delta: target/site/jacoco/
 ```
 
 ## References
@@ -67,4 +126,4 @@ mvn verify && open target/site/jacoco/index.html
 - [MASTER-PLAN.md](../../MASTER-PLAN.md) § Track T-3
 - Task 04 (the map scoping this), task 05 (tags for anything slow)
 
-Estimate: ~2 dev-days. Depends on: 04, 05.
+Estimate: ~2 dev-days.

@@ -51,9 +51,14 @@ Planned scope; items land here as they merge:
   both directions by `XdStorageTestGroupingContractTest` in the default run. Vintage cleanup:
   JUnit 4 left the build — and the audit found the two JUnit-4-only serialization tests had been
   silently dead all along (no vintage engine was ever configured); migrated to JUnit 5, they now
-  run in every suite. JaCoCo coverage map drives gap-filling suites for the under-covered packages
-  (`operation`, `updaters`, `structure`, `trigger`, `observing`, `lock`, `object`, `index`)
-  and a full `IXdFileStorage` happy/failure-path audit.
+  run in every suite. Gap-fill suites (T-3a) landed for the dark packages — `structure`
+  8%→54%, `trigger` 73%→88%, `index` 75%→100% — pinning the trigger contour, Hi-Lo/UUID id
+  contracts, index-cache and object-model semantics, and discovering four engine defects on
+  the way (structure-resource journal replay NPE after reopen, id-addressability after a
+  structure update, auto-generated ids unreachable by id after reopen, and the
+  `UUID_GENERATOR` field property never auto-generating) — each documented with an
+  acceptance-grade disabled test in docs/tasks/2.1.0/06; the facade happy/failure-path audit
+  (T-3b) remains open.
 
 ### Changed (planned)
 
