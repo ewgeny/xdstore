@@ -1,16 +1,22 @@
 ---
 title: "[2.1.0][BUG-C] Auto-generated ids are unreachable by id after a reopen"
 labels: [2.1.0-train, P0, engine, bug]
-status: open
+status: done
 ---
 
 ## Summary
 
-An object saved with an **auto-generated id** (`DATABASE_GENERATOR` default, id field left
-null) cannot be found by `load(Class, id, tx)` after the storage is closed and reopened —
-the lookup returns null. The same lookup in the *same* storage instance works: the
-in-memory id-index cache resolves the pointer, but the persisted id-index record does not
-exist. Explicitly assigned ids are not affected.
+An object saved with a numeric id — **auto-generated or explicit** — cannot be found by
+`load(Class, id, tx)` after the storage is closed and reopened: the lookup returns null.
+String-id objects are unaffected (which masked the defect for years).
+
+**Root cause (corrected during the fix — the write-out-timing hypothesis below was wrong):**
+the id is assigned at save time in the id-index resource, and the id-index records DO reach
+disk correctly. The defect is a TYPE LOSS on reopen: the hash id-index resource's `clInfo`
+describes the RECORD class (`XdStorageHashIndexRecord.objectId`, declared `Object`), so when
+the record cache fills from the YAML file the keys stay raw strings/numbers — `Long(9000)`
+never matches the stored `"9000"` and every numeric-id lookup silently misses. The same
+storage instance works because its in-memory cache holds keys of the real type.
 
 ## Why
 
@@ -25,17 +31,16 @@ kind: no error, just a vanishing object).
 
 ## Scope
 
-1. Move generated-id assignment to before the transaction's resource-change snapshot
-   (facade `save`, where the FP-1a-era "facade assigns ids in the index resource before
-   search-insert" note already points) — or persist the index record for write-out-time
-   generated ids during commit; decide per [WRITE-PATH-DESIGN.md](../../WRITE-PATH-DESIGN.md).
-2. Sweep the sibling write paths (the writer has ~4 copies of the generation condition —
-   lines ~133/485/535/582) so collection/child saves are fixed by the same change.
-3. A folder written by the defective version contains stranded objects: document (and
-   ideally provide) a recovery/migration note — the objects exist, only the id-index
-   records are missing.
+1. ~~Move generated-id assignment...~~ (superseded: the assignment point was never the defect)
+2. **Fix (landed)**: `XdStorageHashIndexResource.prepare()` restores each record key to the
+   ENTITY's id-field type (via `objectClInfo` — the resource's own `clInfo`/`idField` describe
+   the record class) using the engine's simple-type conversion, before filling the cache.
+3. A folder written by the defective version needs NO migration: the index records were
+   always correct on disk — only the in-memory key typing was wrong, so the fix alone
+   recovers previously-stranded objects.
 4. Acceptance: `XdStorageIdGenerationContractTest.generatedIdsSurviveReopen` passes
-   un-disabled; full suite green ×2.
+   un-disabled (plus the new `explicitNumericIdsAddressableAfterReopen` regression — the
+   defect was type-wide, not generation-specific); full suite green ×2.
 
 ## Out of scope
 
@@ -45,10 +50,11 @@ kind: no error, just a vanishing object).
 
 ## Acceptance criteria
 
-- [ ] The disabled repro test green (save with generated id → reopen → load-by-id found).
-- [ ] Child/collection save paths covered by the same fix (a test each or an explicit
-      statement why not applicable).
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict).
+- [x] The disabled repro test green (save with generated id → reopen → load-by-id found).
+- [x] The type-wide regression covered: explicit numeric ids get their own reopen test
+      (child/collection saves share the same id-index resource and need no separate fix —
+      the defect was in the reopen-time key typing, not in any save path).
+- [x] Full suite green ×2 (BUILD SUCCESS verdict — final run of the bug-fix session).
 
 ## Verification
 
@@ -59,7 +65,7 @@ mvn clean test && mvn clean test
 
 ## References
 
-- Discovered in docs/tasks/2.1.0/06 (T-3a); the disabled test documents the full repro
-- [WRITE-PATH-DESIGN.md](../../WRITE-PATH-DESIGN.md) (commit/write-out protocol context)
+- Discovered in docs/tasks/2.1.0/06 (T-3a); root cause corrected during the fix (see Summary)
+- Related: docs/tasks/2.1.0/14 (BUG-D — same test class, different defect)
 
 Estimate: 2–3 dev-days.

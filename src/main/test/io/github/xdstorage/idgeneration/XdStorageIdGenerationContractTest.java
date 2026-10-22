@@ -187,18 +187,15 @@ public class XdStorageIdGenerationContractTest {
     }
 
     /**
-     * KNOWN BUG (discovered by this suite, follow-up issue filed in docs/tasks/2.1.0/06):
-     * an object saved with an AUTO-GENERATED id is unreachable by id after a reopen — the
-     * in-memory id-index cache resolves it (same-storage load works, see
-     * {@link #generatedIdsAddressableInStorage()}), but the persisted id-index record is
-     * absent, because the id is assigned during the write-out phase, after the
-     * transaction's index-resource changes snapshot was taken at save() time (id still
-     * null). Repro: save with a null Long id → commit → shutdown → reopen on the same
-     * folder → load-by-id returns null. Explicit ids are not affected. Disabled until the
-     * commit protocol fix lands — enabling it IS the acceptance test of that fix.
+     * BUG-C acceptance (docs/tasks/2.2.0/03): objects with AUTO-GENERATED ids stay
+     * addressable by id after a reopen. Root cause found during the fix: the defect was
+     * never about generation timing — the id-index record keys lose their entity id-field
+     * TYPE in the YAML round-trip ("9000" vs Long 9000), so every numeric-id lookup missed
+     * after a reopen, generated or explicit (String ids round-tripped fine, which masked
+     * the defect for years). The hash id-index resource now restores each record key to
+     * the id-field type when it fills its cache from disk.
      */
     @Test
-    @org.junit.jupiter.api.Disabled("known bug: auto-generated ids unreachable by id after reopen — see docs/tasks/2.1.0/06")
     public void generatedIdsSurviveReopen() throws Exception {
         final IXdFileStorage first = open();
         Long generated = null;
@@ -218,6 +215,31 @@ public class XdStorageIdGenerationContractTest {
             second.commitTransaction(readTx);
             assertNotNull(loaded, "the object is addressable by its generated id after reopen");
             assertEquals("survivor", loaded.getLabel());
+        } finally {
+            second.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("explicit numeric ids are addressable by id after a reopen (the BUG-C regression is type-wide)")
+    public void explicitNumericIdsAddressableAfterReopen() throws Exception {
+        final IXdFileStorage first = open();
+        final IXdStorageTransaction tx = first.beginTransaction(60000L);
+        final AutoIdEntity.LongId e = new AutoIdEntity.LongId();
+        e.setId(4242L);
+        e.setLabel("explicit-numeric");
+        first.save(e, tx);
+        first.commitTransaction(tx);
+        first.shutdown();
+
+        final IXdFileStorage second = XdStorageProvider.newOrGetFileStorage("idgen-explicit-reopen-" + System.nanoTime(),
+                tempDir.resolve(lastName).toString(), 512);
+        try {
+            final IXdStorageTransaction readTx = second.beginTransaction(60000L);
+            final AutoIdEntity.LongId loaded = second.load(AutoIdEntity.LongId.class, 4242L, readTx);
+            second.commitTransaction(readTx);
+            assertNotNull(loaded, "an explicit numeric id resolves after reopen");
+            assertEquals("explicit-numeric", loaded.getLabel());
         } finally {
             second.shutdown();
         }

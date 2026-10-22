@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
+import io.github.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper;
 import io.github.xdstorage.idgeneration.IXdStorageIdGenerator;
 import io.github.xdstorage.idgeneration.XdStorageIdGeneratorType;
 import io.github.xdstorage.object.XdStorageIdentifiableObject;
@@ -172,14 +173,59 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
 
             Collection<Object> objects = readAsObjects();
 
-            if (objects != null)
+            if (objects != null) {
+                // BUG-C (docs/tasks/2.2.0/03): the YAML round-trip does not know the ENTITY's
+                // id-field type, so reopened record keys arrive as raw strings/numbers and a
+                // lookup by the application's real id (Long 9000 vs stored "9000") misses —
+                // every id lookup silently returns null after a reopen for numeric id types.
+                // Restore each record key to the id-field type before filling the cache.
+                for (final Object object : objects) {
+                    if (object instanceof XdStorageHashIndexRecord) {
+                        ((XdStorageHashIndexRecord) object).setObjectId(
+                                restoreKeyValueType(((XdStorageHashIndexRecord) object).getObjectId()));
+                    }
+                }
                 cache.fillCache(objects);
+            }
             postPrepare(transaction);
 
             prepared.set(true);
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * BUG-C: restores a record key to the entity id-field type after the YAML round-trip.
+     * Values that are already of the target type pass through; strings/numbers are parsed
+     * via the engine's simple-type conversion; anything unparseable is returned as-is (the
+     * lookup then misses loudly instead of corrupting the cache with a wrong-typed key).
+     */
+    private Object restoreKeyValueType(final Object key) {
+        if (key == null) {
+            return null;
+        }
+        // BUG-C: the authority is the ENTITY's id-field type — this resource's own
+        // `clInfo`/`idField` describe the RECORD class (XdStorageHashIndexRecord.objectId,
+        // declared Object), which would silently restore nothing
+        Class<?> keyClass = objectClInfo.getIdField().field.getType();
+        if (keyClass == long.class) keyClass = Long.class;
+        if (keyClass == int.class) keyClass = Integer.class;
+        if (keyClass == double.class) keyClass = Double.class;
+        if (keyClass == float.class) keyClass = Float.class;
+        if (keyClass == boolean.class) keyClass = Boolean.class;
+        if (keyClass.isInstance(key)) {
+            return key;
+        }
+        if (key instanceof String || key instanceof Number || key instanceof Boolean) {
+            try {
+                return new XdStorageDefaultSimpleTypeHelper().simpleTypeFromString(keyClass, key.toString());
+            } catch (final RuntimeException e) {
+                log.warn("cannot restore id-index key {} to {} — kept as-is (lookups by the app id will miss)",
+                        key, keyClass.getName(), e);
+            }
+        }
+        return key;
     }
 
     public void performFirstPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
