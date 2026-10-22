@@ -63,6 +63,8 @@ label "feature"     "A2EEEF" "New capability"
 label "chore"       "CCCCCC" "Maintenance"
 label "tech-debt"   "D4C5F9" "Known debt to pay down"
 label "performance" "FEF2C0" "Performance work"
+label "bug"         "EE0701" "Engine defect discovered by the test estate"
+label "2.2.0-train" "3E64B2" "Work package of the 2.2.0 release train (deep engine surgery)"
 
 # --- 2. Milestones (existence cached per name; attached at creation only) -----------------
 MILESTONE_CACHE=" "

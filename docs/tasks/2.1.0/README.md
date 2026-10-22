@@ -1,7 +1,7 @@
 # 2.1.0 train — work packages for Senior Java Developers
 
 One markdown file = one GitHub issue. The frontmatter (`title`, `labels`) is read by
-[`scripts/publish-issues.sh`](../../../scripts/publish-issues.sh); everything below it becomes
+[`scripts/sync-issues.sh`](../../../scripts/sync-issues.sh); everything below it becomes
 the issue body. Scope and priorities derive from
 [MASTER-PLAN.md](../../MASTER-PLAN.md) § Step 1 (the 2.1.0 train) — read Track L / Track T
 there for the full decision record before starting an item.
@@ -23,6 +23,7 @@ there for the full decision record before starting an item.
 | 11 | [jmh-regression-alert](11-jmh-regression-alert.md) | D-4 | P2, ci, performance, chore | 0.5–1 d | 13 (scenario list) |
 | 12 | [decision-guide-and-example-app](12-decision-guide-and-example-app.md) | FP-11 | P1, docs, chore | 1 d | 09, 10 (describes shipped capabilities) |
 | 13 | [benchmark-suite-unification](13-benchmark-suite-unification.md) | BENCH | P0, performance, ci, chore | 2 d | — (**ASAP: before 08–11 record/assert numbers**) |
+| 14 | [uuid-generator-field-property](14-uuid-generator-field-property.md) | BUG-D | P2, engine, bug | 0.5 d | — (decision + small fix; discovered by 06) |
 
 ## Execution lanes (independent — can run in parallel)
 
