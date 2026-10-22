@@ -43,6 +43,13 @@ Planned scope; items land here as they merge:
   follow-up for the `OFFSET` re-walk cost.
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
   + runnable example app.
+- **BENCH** — the benchmark estate unified: `scripts/run-benchmarks.sh [quick|full|sweep]`
+  is the one entry point under a documented conditions protocol (quiet-load gate, WARN-console
+  benchmark logging config, YAML format, JSON results + run manifests); the CORE scenarios
+  (read-only tx, journal on/off, durableWrites on/off, commit-batch scaling, FP-1 shapes)
+  live in `XdStorageCanonicalBenchmark` with machine-readable `@Param` dimensions;
+  `docs/BENCHMARKS.md` is the single canonical baseline (generated, traceable to archived
+  result sets); the nightly smoke asserts the final scenario list.
 - **D-1/D-4** — JaCoCo coverage report in CI; JMH regression alert in the nightly.
 - **Track T** (MASTER-PLAN) — formal test groups: every stress/integration class carries
   JUnit 5 `@Tag("stress")`/`@Tag("integration")`; the `release` profile excludes by tag

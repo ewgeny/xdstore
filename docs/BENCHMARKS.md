@@ -1,4 +1,90 @@
-# XdStorage — JMH Benchmarks
+# XdStorage — Benchmarks
+
+## Canonical baseline (the unified estate — BENCH, docs/tasks/2.1.0/13)
+
+**This is the single source of truth for performance numbers.** Every table below is GENERATED
+from full-run JMH JSON by `scripts/render-bench-baseline.py` — never hand-typed — and binds to
+the archived result set + run manifest in
+[`docs/perf/canonical-baseline-2026-10-22/`](perf/canonical-baseline-2026-10-22/) (git rev,
+JDK, CPU model, loadavg, config flags inside `manifest.json`).
+
+- **Run:** `bash scripts/run-benchmarks.sh [quick|full|sweep]` — the ONE entry point. It owns
+  the conditions protocol: quiet-machine loadavg gate, WARN-console logging with no hot-path
+  file I/O (`docs/perf/benchmark-log4j2.xml`, passed explicitly — immune to the suite's config
+  reshuffles), YAML format, disclosed config flags, JSON results + manifest.
+- **Conditions of the archived baseline:** 2026-10-22, JDK 21.0.7, 24-core box, loadavg 0.91
+  (gate-enforced), WARN-console logging (the pre-2026-10-22 numbers ran under TRACE console
+  logging — see PERF study §9 — and are **superseded**; kept below as labeled history).
+- **Quick-mode budget:** the task's cap is ≤ 15 min for the whole quick suite; the FULL run
+  measured **2m21s** wall clock (2026-10-22, the archived baseline). Quick runs are strictly
+  cheaper (1 iteration per scenario).
+- **Families:** `XdStorageCanonicalBenchmark` (the CORE scenarios this task introduced) and
+  `XdStorageSearchEngineBenchmark` (the search family; the FP-1a/FP-1b per-feature sections
+  below are ABSORBED into the canonical table). The plain-Java config sweep
+  (`performance/sweep/XdStorageConfigSweep`) stays a separate harness by design (PERF §2) —
+  run it via `scripts/run-benchmarks.sh sweep`; its numbers are never merged into JMH tables.
+
+#### Reading the CORE scenarios (honest)
+
+- `readOnlyTx` 63.6k ops/s — begin → load(id) → commit, everything cache-resident: the B2
+  read-only short path as a permanent, re-runnable scenario (B2's original sweep numbers
+  measured N=5000–40000 on the Hash path; this scenario pins the pattern into the suite).
+- `writeDataHeavy` journal on/off: 370 vs 348 ops/s — the journal is ~neutral on this
+  fragment-heavy shape at 1s iterations (the W-3 addendum's index-heavy verdict stands;
+  treat the delta as within quick-run noise, re-measure before quoting).
+- `writeDurable` on/off: 47 vs 367 ops/s — **the fsync costs ~8×** on this shape: the S-2
+  number, finally canonically recorded. `durableWrites` is off by default; turn it on when
+  the durability requirement outweighs write throughput.
+- `commitBatch` 10/100/500/1000: 116/35/15/11 tx/s — but in OBJECTS/s the curve RISES
+  (1.2k → 3.5k → 7.5k → 11k): batching amortizes the commit; the per-tx fixed cost dominates
+  small batches.
+
+#### Canonical tables (generated; full mode; result set 2026-10-22-185216)
+
+#### `XdStorageCanonicalBenchmark`
+
+| Scenario | Params | ops/s ± error |
+|---|---|---|
+| `commitBatch` | batchSize=10 | 116 ± 342 |
+| `commitBatch` | batchSize=100 | 35 ± 111 |
+| `commitBatch` | batchSize=1000 | 11 ± 33 |
+| `commitBatch` | batchSize=500 | 15 ± 47 |
+| `readOnlyTx` | — | 63,574 ± 29,042 |
+| `writeDataHeavy` | journalWrites=false | 348 ± 980 |
+| `writeDataHeavy` | journalWrites=true | 370 ± 1,100 |
+| `writeDurable` | durableWrites=false | 367 ± 1,148 |
+| `writeDurable` | durableWrites=true | 47 ± 62 |
+
+#### `XdStorageSearchEngineBenchmark`
+
+| Scenario | Params | ops/s ± error |
+|---|---|---|
+| `loadById_indexBaseline` | — | 215,095 ± 34,159 |
+| `saveAndDeleteIndexedShipWithCrew` | — | 731 ± 160 |
+| `searchByOrTwoPrimaries` | — | 183,305 ± 32,016 |
+| `searchByPrimaryBetweenPagedLimit50` | — | 15,539 ± 5,289 |
+| `searchByPrimaryBetweenSelective` | — | 23,974 ± 10,520 |
+| `searchByPrimaryBetweenWide` | — | 11,351 ± 6,391 |
+| `searchByPrimaryEquals` | — | 228,154 ± 106,985 |
+| `searchByPrimaryEqualsWithChildCriterion` | — | 223,649 ± 52,541 |
+| `searchByPrimaryEqualsWithFieldCriterion` | — | 220,661 ± 52,125 |
+| `searchByPrimaryGT` | — | 15,054 ± 7,031 |
+| `searchByPrimaryIn` | — | 22,758 ± 8,185 |
+| `searchByScanNotEqualsPrimary` | — | 1,563 ± 366 |
+| `searchByScanNullPrimaryFieldCriterion` | — | 15,537 ± 10,123 |
+| `updateShipRenameSearchKey` | — | 1,858 ± 399 |
+
+
+---
+
+## Historical sections (pre-canonical conditions — kept as labeled history)
+
+> The sections below predate the unified estate: two harness methodologies, two JDKs
+> (17.0.15 here vs 21.0.7 canonical), developer-load machines, and — for the 2026-10-18
+> tables — TRACE console logging on the hot path (PERF §9). Their RELATIVE scenario gaps
+> remain useful; their ABSOLUTE numbers are superseded by the canonical baseline above.
+
+# XdStorage — JMH Benchmarks (historical, recorded 2026-10-18)
 
 Recorded: 2026-10-18. Runner: JDK **17.0.15** (OpenJDK, Ubuntu), JMH **1.37**, 24-core / 62 GB Linux box
 **under normal developer load** (IDE + JPS daemon + Maven servers were running) — treat the absolute
@@ -9,7 +95,7 @@ All three benchmark classes live in `io.github.xdstorage.performance` (test sour
 JMH annotation processor at `mvn test-compile`, and are **not** picked up by surefire (no `Test` suffix).
 Each has a `main` entry point.
 
-## How to run
+## How to run (historical — the canonical entry point is scripts/run-benchmarks.sh)
 
 ```bash
 mvn test-compile

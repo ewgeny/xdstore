@@ -67,14 +67,22 @@ jobs:
             mvn clean test > /tmp/mvn-nightly-$i.log 2>&1 || { tail -100 /tmp/mvn-nightly-$i.log; exit 1; }
             grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-nightly-$i.log | tail -1
           done
-      - name: JMH smoke (search engine, quick mode)
+      - name: JMH smoke (canonical suite, quick mode — BENCH docs/tasks/2.1.0/13)
         run: |
-          mvn test-compile > /dev/null 2>&1
-          CP="target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test)"
-          java -cp "$CP" io.github.xdstorage.performance.XdStorageSearchEngineBenchmark quick > /tmp/jmh-smoke.log 2>&1 || { tail -50 /tmp/jmh-smoke.log; exit 1; }
-          ROWS=$(grep -c "^XdStorageSearchEngineBenchmark\." /tmp/jmh-smoke.log || true)
-          echo "JMH table rows: $ROWS"
-          if [ "$ROWS" -lt 9 ]; then echo "EXPECTED 9 benchmark rows, got $ROWS — a trial failed and JMH skipped it silently"; exit 1; fi
+          # The unified entry point (conditions protocol + manifests). CI runners are
+          # dedicated 2-vCPU boxes: the dev-machine loadavg gate is raised here via the
+          # documented env override (the manifest records it either way).
+          export BENCH_MAX_LOADAVG=8
+          bash scripts/run-benchmarks.sh quick
+          LOG=$(ls -t target/bench-results/*-quick/jmh-quick.log | head -1)
+          CANON=$(grep -c "^XdStorageCanonicalBenchmark\." "$LOG" || true)
+          SEARCH=$(grep -c "^XdStorageSearchEngineBenchmark\." "$LOG" || true)
+          echo "canonical rows: $CANON, search-engine rows: $SEARCH"
+          # the final scenario list (BENCH): 9 canonical CORE rows (commitBatch x4 params,
+          # readOnlyTx, writeDataHeavy x2, writeDurable x2) + 14 search-engine rows
+          # (incl. the FP-1a/FP-1b shapes absorbed into the canonical set).
+          if [ "$CANON" -lt 9 ]; then echo "EXPECTED 9 canonical rows, got $CANON — a trial failed and JMH skipped it silently"; exit 1; fi
+          if [ "$SEARCH" -lt 14 ]; then echo "EXPECTED 14 search-engine rows, got $SEARCH — a trial failed and JMH skipped it silently"; exit 1; fi
       - name: Archive nightly logs
         if: always()
         uses: actions/upload-artifact@v4

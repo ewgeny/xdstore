@@ -1,0 +1,1201 @@
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.commitBatch",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "10"
+        },
+        "primaryMetric" : {
+            "score" : 115.69800487368055,
+            "scoreError" : 341.60973682556215,
+            "scoreConfidence" : [
+                -225.91173195188162,
+                457.3077416992427
+            ],
+            "scorePercentiles" : {
+                "0.0" : 99.33627602945319,
+                "50.0" : 111.6380422274164,
+                "90.0" : 136.11969636417206,
+                "95.0" : 136.11969636417206,
+                "99.0" : 136.11969636417206,
+                "99.9" : 136.11969636417206,
+                "99.99" : 136.11969636417206,
+                "99.999" : 136.11969636417206,
+                "99.9999" : 136.11969636417206,
+                "100.0" : 136.11969636417206
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    136.11969636417206,
+                    111.6380422274164,
+                    99.33627602945319
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.commitBatch",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "100"
+        },
+        "primaryMetric" : {
+            "score" : 34.960571797953094,
+            "scoreError" : 110.66379039389986,
+            "scoreConfidence" : [
+                -75.70321859594677,
+                145.62436219185295
+            ],
+            "scorePercentiles" : {
+                "0.0" : 29.521171760253743,
+                "50.0" : 33.85871432783107,
+                "90.0" : 41.50182930577447,
+                "95.0" : 41.50182930577447,
+                "99.0" : 41.50182930577447,
+                "99.9" : 41.50182930577447,
+                "99.99" : 41.50182930577447,
+                "99.999" : 41.50182930577447,
+                "99.9999" : 41.50182930577447,
+                "100.0" : 41.50182930577447
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    41.50182930577447,
+                    33.85871432783107,
+                    29.521171760253743
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.commitBatch",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "500"
+        },
+        "primaryMetric" : {
+            "score" : 15.123172741362994,
+            "scoreError" : 46.89571606374625,
+            "scoreConfidence" : [
+                -31.772543322383257,
+                62.01888880510924
+            ],
+            "scorePercentiles" : {
+                "0.0" : 12.652726068276232,
+                "50.0" : 14.933543759044476,
+                "90.0" : 17.783248396768283,
+                "95.0" : 17.783248396768283,
+                "99.0" : 17.783248396768283,
+                "99.9" : 17.783248396768283,
+                "99.99" : 17.783248396768283,
+                "99.999" : 17.783248396768283,
+                "99.9999" : 17.783248396768283,
+                "100.0" : 17.783248396768283
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    17.783248396768283,
+                    14.933543759044476,
+                    12.652726068276232
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.commitBatch",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "batchSize" : "1000"
+        },
+        "primaryMetric" : {
+            "score" : 10.60310661316011,
+            "scoreError" : 33.47511259348986,
+            "scoreConfidence" : [
+                -22.872005980329753,
+                44.07821920664997
+            ],
+            "scorePercentiles" : {
+                "0.0" : 9.051478546348475,
+                "50.0" : 10.129466124664596,
+                "90.0" : 12.62837516846726,
+                "95.0" : 12.62837516846726,
+                "99.0" : 12.62837516846726,
+                "99.9" : 12.62837516846726,
+                "99.99" : 12.62837516846726,
+                "99.999" : 12.62837516846726,
+                "99.9999" : 12.62837516846726,
+                "100.0" : 12.62837516846726
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    12.62837516846726,
+                    10.129466124664596,
+                    9.051478546348475
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.readOnlyTx",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 63574.41264322987,
+            "scoreError" : 29041.931308610234,
+            "scoreConfidence" : [
+                34532.48133461964,
+                92616.3439518401
+            ],
+            "scorePercentiles" : {
+                "0.0" : 62136.74820204196,
+                "50.0" : 63301.3060767863,
+                "90.0" : 65285.18365086134,
+                "95.0" : 65285.18365086134,
+                "99.0" : 65285.18365086134,
+                "99.9" : 65285.18365086134,
+                "99.99" : 65285.18365086134,
+                "99.999" : 65285.18365086134,
+                "99.9999" : 65285.18365086134,
+                "100.0" : 65285.18365086134
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    65285.18365086134,
+                    63301.3060767863,
+                    62136.74820204196
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.writeDataHeavy",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "journalWrites" : "true"
+        },
+        "primaryMetric" : {
+            "score" : 370.3081701947065,
+            "scoreError" : 1099.9470920037718,
+            "scoreConfidence" : [
+                -729.6389218090653,
+                1470.2552621984782
+            ],
+            "scorePercentiles" : {
+                "0.0" : 313.9369150048036,
+                "50.0" : 363.112817708989,
+                "90.0" : 433.87477787032685,
+                "95.0" : 433.87477787032685,
+                "99.0" : 433.87477787032685,
+                "99.9" : 433.87477787032685,
+                "99.99" : 433.87477787032685,
+                "99.999" : 433.87477787032685,
+                "99.9999" : 433.87477787032685,
+                "100.0" : 433.87477787032685
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    433.87477787032685,
+                    363.112817708989,
+                    313.9369150048036
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.writeDataHeavy",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "journalWrites" : "false"
+        },
+        "primaryMetric" : {
+            "score" : 348.03432930339596,
+            "scoreError" : 979.7582542429648,
+            "scoreConfidence" : [
+                -631.7239249395689,
+                1327.7925835463607
+            ],
+            "scorePercentiles" : {
+                "0.0" : 295.91019717336184,
+                "50.0" : 345.0032641795828,
+                "90.0" : 403.1895265572433,
+                "95.0" : 403.1895265572433,
+                "99.0" : 403.1895265572433,
+                "99.9" : 403.1895265572433,
+                "99.99" : 403.1895265572433,
+                "99.999" : 403.1895265572433,
+                "99.9999" : 403.1895265572433,
+                "100.0" : 403.1895265572433
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    403.1895265572433,
+                    345.0032641795828,
+                    295.91019717336184
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.writeDurable",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "durableWrites" : "true"
+        },
+        "primaryMetric" : {
+            "score" : 47.42985953697942,
+            "scoreError" : 61.82647586442121,
+            "scoreConfidence" : [
+                -14.39661632744179,
+                109.25633540140063
+            ],
+            "scorePercentiles" : {
+                "0.0" : 43.566149980709106,
+                "50.0" : 48.824522566441736,
+                "90.0" : 49.89890606378742,
+                "95.0" : 49.89890606378742,
+                "99.0" : 49.89890606378742,
+                "99.9" : 49.89890606378742,
+                "99.99" : 49.89890606378742,
+                "99.999" : 49.89890606378742,
+                "99.9999" : 49.89890606378742,
+                "100.0" : 49.89890606378742
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    49.89890606378742,
+                    43.566149980709106,
+                    48.824522566441736
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageCanonicalBenchmark.writeDurable",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "durableWrites" : "false"
+        },
+        "primaryMetric" : {
+            "score" : 366.9629915671366,
+            "scoreError" : 1148.163282126814,
+            "scoreConfidence" : [
+                -781.2002905596773,
+                1515.1262736939507
+            ],
+            "scorePercentiles" : {
+                "0.0" : 308.9484180578293,
+                "50.0" : 358.06897376118536,
+                "90.0" : 433.8715828823952,
+                "95.0" : 433.8715828823952,
+                "99.0" : 433.8715828823952,
+                "99.9" : 433.8715828823952,
+                "99.99" : 433.8715828823952,
+                "99.999" : 433.8715828823952,
+                "99.9999" : 433.8715828823952,
+                "100.0" : 433.8715828823952
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    433.8715828823952,
+                    358.06897376118536,
+                    308.9484180578293
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.loadById_indexBaseline",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 215094.6250360716,
+            "scoreError" : 34159.37020731458,
+            "scoreConfidence" : [
+                180935.25482875702,
+                249253.9952433862
+            ],
+            "scorePercentiles" : {
+                "0.0" : 212954.45791021996,
+                "50.0" : 215898.98484118734,
+                "90.0" : 216430.43235680743,
+                "95.0" : 216430.43235680743,
+                "99.0" : 216430.43235680743,
+                "99.9" : 216430.43235680743,
+                "99.99" : 216430.43235680743,
+                "99.999" : 216430.43235680743,
+                "99.9999" : 216430.43235680743,
+                "100.0" : 216430.43235680743
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    216430.43235680743,
+                    212954.45791021996,
+                    215898.98484118734
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.saveAndDeleteIndexedShipWithCrew",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 730.8678102789136,
+            "scoreError" : 160.2455308938587,
+            "scoreConfidence" : [
+                570.6222793850549,
+                891.1133411727723
+            ],
+            "scorePercentiles" : {
+                "0.0" : 723.2983080589993,
+                "50.0" : 728.8063168060835,
+                "90.0" : 740.4988059716578,
+                "95.0" : 740.4988059716578,
+                "99.0" : 740.4988059716578,
+                "99.9" : 740.4988059716578,
+                "99.99" : 740.4988059716578,
+                "99.999" : 740.4988059716578,
+                "99.9999" : 740.4988059716578,
+                "100.0" : 740.4988059716578
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    723.2983080589993,
+                    728.8063168060835,
+                    740.4988059716578
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByOrTwoPrimaries",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 183304.59213822917,
+            "scoreError" : 32015.672783390746,
+            "scoreConfidence" : [
+                151288.91935483844,
+                215320.2649216199
+            ],
+            "scorePercentiles" : {
+                "0.0" : 181483.24697430446,
+                "50.0" : 183446.07363256183,
+                "90.0" : 184984.45580782118,
+                "95.0" : 184984.45580782118,
+                "99.0" : 184984.45580782118,
+                "99.9" : 184984.45580782118,
+                "99.99" : 184984.45580782118,
+                "99.999" : 184984.45580782118,
+                "99.9999" : 184984.45580782118,
+                "100.0" : 184984.45580782118
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    183446.07363256183,
+                    184984.45580782118,
+                    181483.24697430446
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryBetweenPagedLimit50",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 15538.90301262519,
+            "scoreError" : 5289.0135774427745,
+            "scoreConfidence" : [
+                10249.889435182415,
+                20827.916590067965
+            ],
+            "scorePercentiles" : {
+                "0.0" : 15205.590472277363,
+                "50.0" : 15678.65006049299,
+                "90.0" : 15732.468505105213,
+                "95.0" : 15732.468505105213,
+                "99.0" : 15732.468505105213,
+                "99.9" : 15732.468505105213,
+                "99.99" : 15732.468505105213,
+                "99.999" : 15732.468505105213,
+                "99.9999" : 15732.468505105213,
+                "100.0" : 15732.468505105213
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    15678.65006049299,
+                    15205.590472277363,
+                    15732.468505105213
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryBetweenSelective",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 23973.518174129207,
+            "scoreError" : 10519.511538707877,
+            "scoreConfidence" : [
+                13454.00663542133,
+                34493.02971283709
+            ],
+            "scorePercentiles" : {
+                "0.0" : 23624.392924066593,
+                "50.0" : 23657.099461214973,
+                "90.0" : 24639.062137106048,
+                "95.0" : 24639.062137106048,
+                "99.0" : 24639.062137106048,
+                "99.9" : 24639.062137106048,
+                "99.99" : 24639.062137106048,
+                "99.999" : 24639.062137106048,
+                "99.9999" : 24639.062137106048,
+                "100.0" : 24639.062137106048
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    23624.392924066593,
+                    24639.062137106048,
+                    23657.099461214973
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryBetweenWide",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 11351.144415997014,
+            "scoreError" : 6390.777677432354,
+            "scoreConfidence" : [
+                4960.36673856466,
+                17741.92209342937
+            ],
+            "scorePercentiles" : {
+                "0.0" : 10956.985858323002,
+                "50.0" : 11469.550789318702,
+                "90.0" : 11626.89660034934,
+                "95.0" : 11626.89660034934,
+                "99.0" : 11626.89660034934,
+                "99.9" : 11626.89660034934,
+                "99.99" : 11626.89660034934,
+                "99.999" : 11626.89660034934,
+                "99.9999" : 11626.89660034934,
+                "100.0" : 11626.89660034934
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    10956.985858323002,
+                    11469.550789318702,
+                    11626.89660034934
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryEquals",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 228153.60665699627,
+            "scoreError" : 106984.95349605563,
+            "scoreConfidence" : [
+                121168.65316094064,
+                335138.5601530519
+            ],
+            "scorePercentiles" : {
+                "0.0" : 223484.31429467778,
+                "50.0" : 226241.23067881644,
+                "90.0" : 234735.27499749456,
+                "95.0" : 234735.27499749456,
+                "99.0" : 234735.27499749456,
+                "99.9" : 234735.27499749456,
+                "99.99" : 234735.27499749456,
+                "99.999" : 234735.27499749456,
+                "99.9999" : 234735.27499749456,
+                "100.0" : 234735.27499749456
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    234735.27499749456,
+                    226241.23067881644,
+                    223484.31429467778
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryEqualsWithChildCriterion",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 223649.12532666232,
+            "scoreError" : 52541.37710842856,
+            "scoreConfidence" : [
+                171107.74821823376,
+                276190.5024350909
+            ],
+            "scorePercentiles" : {
+                "0.0" : 221130.9540286657,
+                "50.0" : 223027.16387935914,
+                "90.0" : 226789.25807196222,
+                "95.0" : 226789.25807196222,
+                "99.0" : 226789.25807196222,
+                "99.9" : 226789.25807196222,
+                "99.99" : 226789.25807196222,
+                "99.999" : 226789.25807196222,
+                "99.9999" : 226789.25807196222,
+                "100.0" : 226789.25807196222
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    221130.9540286657,
+                    223027.16387935914,
+                    226789.25807196222
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryEqualsWithFieldCriterion",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 220661.05009212435,
+            "scoreError" : 52124.562791801516,
+            "scoreConfidence" : [
+                168536.48730032283,
+                272785.61288392585
+            ],
+            "scorePercentiles" : {
+                "0.0" : 217988.84326215385,
+                "50.0" : 220321.55336998458,
+                "90.0" : 223672.7536442346,
+                "95.0" : 223672.7536442346,
+                "99.0" : 223672.7536442346,
+                "99.9" : 223672.7536442346,
+                "99.99" : 223672.7536442346,
+                "99.999" : 223672.7536442346,
+                "99.9999" : 223672.7536442346,
+                "100.0" : 223672.7536442346
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    220321.55336998458,
+                    217988.84326215385,
+                    223672.7536442346
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryGT",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 15054.39991801722,
+            "scoreError" : 7031.419239395359,
+            "scoreConfidence" : [
+                8022.9806786218605,
+                22085.819157412578
+            ],
+            "scorePercentiles" : {
+                "0.0" : 14621.557790405783,
+                "50.0" : 15181.204466298484,
+                "90.0" : 15360.437497347391,
+                "95.0" : 15360.437497347391,
+                "99.0" : 15360.437497347391,
+                "99.9" : 15360.437497347391,
+                "99.99" : 15360.437497347391,
+                "99.999" : 15360.437497347391,
+                "99.9999" : 15360.437497347391,
+                "100.0" : 15360.437497347391
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    15181.204466298484,
+                    15360.437497347391,
+                    14621.557790405783
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByPrimaryIn",
+        "mode" : "thrpt",
+        "threads" : 4,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 22757.677756826535,
+            "scoreError" : 8184.9074956011855,
+            "scoreConfidence" : [
+                14572.770261225349,
+                30942.58525242772
+            ],
+            "scorePercentiles" : {
+                "0.0" : 22437.683234476935,
+                "50.0" : 22564.854056263175,
+                "90.0" : 23270.49597973949,
+                "95.0" : 23270.49597973949,
+                "99.0" : 23270.49597973949,
+                "99.9" : 23270.49597973949,
+                "99.99" : 23270.49597973949,
+                "99.999" : 23270.49597973949,
+                "99.9999" : 23270.49597973949,
+                "100.0" : 23270.49597973949
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    22437.683234476935,
+                    22564.854056263175,
+                    23270.49597973949
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByScanNotEqualsPrimary",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 1563.454373926232,
+            "scoreError" : 365.7491746269595,
+            "scoreConfidence" : [
+                1197.7051992992724,
+                1929.2035485531915
+            ],
+            "scorePercentiles" : {
+                "0.0" : 1542.9645041775304,
+                "50.0" : 1564.3695668863927,
+                "90.0" : 1583.0290507147731,
+                "95.0" : 1583.0290507147731,
+                "99.0" : 1583.0290507147731,
+                "99.9" : 1583.0290507147731,
+                "99.99" : 1583.0290507147731,
+                "99.999" : 1583.0290507147731,
+                "99.9999" : 1583.0290507147731,
+                "100.0" : 1583.0290507147731
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    1583.0290507147731,
+                    1542.9645041775304,
+                    1564.3695668863927
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.searchByScanNullPrimaryFieldCriterion",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 15537.148790998413,
+            "scoreError" : 10122.644070435756,
+            "scoreConfidence" : [
+                5414.504720562658,
+                25659.79286143417
+            ],
+            "scorePercentiles" : {
+                "0.0" : 15151.801280393503,
+                "50.0" : 15286.543895547773,
+                "90.0" : 16173.10119705396,
+                "95.0" : 16173.10119705396,
+                "99.0" : 16173.10119705396,
+                "99.9" : 16173.10119705396,
+                "99.99" : 16173.10119705396,
+                "99.999" : 16173.10119705396,
+                "99.9999" : 16173.10119705396,
+                "100.0" : 16173.10119705396
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    16173.10119705396,
+                    15286.543895547773,
+                    15151.801280393503
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    },
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "io.github.xdstorage.performance.XdStorageSearchEngineBenchmark.updateShipRenameSearchKey",
+        "mode" : "thrpt",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+        "jvmArgs" : [
+            "-Dlog4j.configurationFile=file:/home/evgeny/Java/projects/xdstore/docs/perf/benchmark-log4j2.xml",
+            "-Xmx2g"
+        ],
+        "jdkVersion" : "21.0.7",
+        "vmName" : "OpenJDK 64-Bit Server VM",
+        "vmVersion" : "21.0.7+6-Ubuntu-0ubuntu120.04",
+        "warmupIterations" : 2,
+        "warmupTime" : "1 s",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 3,
+        "measurementTime" : "1 s",
+        "measurementBatchSize" : 1,
+        "primaryMetric" : {
+            "score" : 1858.0463450617074,
+            "scoreError" : 399.2906624690209,
+            "scoreConfidence" : [
+                1458.7556825926865,
+                2257.3370075307284
+            ],
+            "scorePercentiles" : {
+                "0.0" : 1833.3531178525438,
+                "50.0" : 1865.7345358273044,
+                "90.0" : 1875.0513815052743,
+                "95.0" : 1875.0513815052743,
+                "99.0" : 1875.0513815052743,
+                "99.9" : 1875.0513815052743,
+                "99.99" : 1875.0513815052743,
+                "99.999" : 1875.0513815052743,
+                "99.9999" : 1875.0513815052743,
+                "100.0" : 1875.0513815052743
+            },
+            "scoreUnit" : "ops/s",
+            "rawData" : [
+                [
+                    1865.7345358273044,
+                    1833.3531178525438,
+                    1875.0513815052743
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+        }
+    }
+]
+
+

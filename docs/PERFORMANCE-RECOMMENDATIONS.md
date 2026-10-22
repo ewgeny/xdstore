@@ -1,5 +1,12 @@
 # XdStorage — Performance Study & Configuration Recommendations (YAML format)
 
+> **BENCH (docs/tasks/2.1.0/13): the numbers in this document are EDITION-SPECIFIC STUDY
+> DATA, not the canonical baseline.** They were measured under this study's own conditions
+> (per-section; see PERF §2 methodology and §9's logging admission). The canonical, current
+> baseline lives in [BENCHMARKS.md](BENCHMARKS.md) § Canonical baseline (generated from
+> `scripts/run-benchmarks.sh full` result sets). Use this document for the reasoning and the
+> studies; use BENCHMARKS.md for the numbers you quote.
+
 Recorded: 2026-10-19 (**post-fix re-run** — re-measured after the B+Tree re-open fix R-53, commit `cf36f7f`; re-open sanity `SweepReopenRepro` = 0/0/0 before this run) · Branch `xdstorage-2.0` · Runner: OpenJDK **21.0.7**, Ubuntu Linux, 24 cores / 62 GB, quiet load (loadavg < 0.5)
 Harness: `io.github.xdstorage.performance.sweep.XdStorageConfigSweep` (test sources), raw results in [`docs/perf/`](perf/)
 

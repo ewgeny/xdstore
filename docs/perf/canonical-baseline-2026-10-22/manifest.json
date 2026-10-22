@@ -1,0 +1,19 @@
+{
+  "mode": "full",
+  "dateUtc": "20261022-185216",
+  "gitRev": "341698b",
+  "gitDirtyFiles": 5,
+  "jdk": "openjdk version "21.0.7" 2025-04-15",
+  "cpuModel": "AMD Ryzen 9 5900X 12-Core Processor",
+  "loadavg1m": 0.91,
+  "maxLoadavg": 2.0,
+  "loadGateForced": false,
+  "loggingConfig": "docs/perf/benchmark-log4j2.xml (WARN console, no hot-path file I/O)",
+  "format": "YAML",
+  "configFlags": {
+    "journalWrites": "default true (writeDataHeavy A/B overrides via @Param)",
+    "durableWrites": "default false (writeDurable A/B overrides via @Param)",
+    "fragmentSize": 25,
+    "note": "canonical CORE scenarios are fragment-heavy by design (disclosed)"
+  }
+}
