@@ -157,12 +157,21 @@ grouping is tags, not layout.
    API migration + quiet-by-default de-spams every subsequent CI/RC run and reduces the
    logging footprint to one 65 KB api artifact.
 2. **T-1 + T-2** — instrumentation and grouping land together (JaCoCo + tags).
-3. **B2 — read-only commit path** (PERF study §5.3, FP-4's quick win): skip 2PC record iteration
+3. **BENCH — benchmark suite unification** (task 13, **ASAP: the next engine-lane item**):
+   the benchmark estate is not unified — two harnesses (JMH classes vs the plain-Java sweep),
+   two JDKs (17 developer-load TRACE-logging vs 21 quiet WARN — the PERF study admits the JMH
+   numbers are logging-polluted), quick-mode rows mixed into full-mode tables, no single
+   baseline, no run manifests. One canonical suite + one baseline (BENCHMARKS.md),
+   machine-readable results with run manifests, and the missing full-picture scenarios
+   (read-only tx, journal on/off on a data-heavy pattern, durableWrites cost, commit-batch
+   scaling, cold start, N-scaling probe); the already-recorded B2/FP-1a/FP-1b addenda get
+   absorbed into the canonical set. Task 11 asserts on this task's scenario list.
+4. **B2 — read-only commit path** (PERF study §5.3, FP-4's quick win): skip 2PC record iteration
    for no-change transactions; ~25 ms → near-zero per read tx at N=5000 on the Hash path. **DONE
    (2.1.0): the no-change skip already shipped with the R-45/R-46 commit-path rework — verified
    0.63–0.74 ms/op flat up to N=40000 with zero write-outs; deliverable = the contract test suite
    + BENCHMARKS.md addendum, no further code change.**
-4. **FP-1 — query power pack, phase 1** (`GT/GTE/LT/LTE/BETWEEN/IN` primaries, `ORDER BY`,
+5. **FP-1 — query power pack, phase 1** (`GT/GTE/LT/LTE/BETWEEN/IN` primaries, `ORDER BY`,
    `LIMIT/OFFSET`): the B+tree primary index is already ordered — range scans and ordered
    iteration are nearly free, and today their absence forces O(N) scans. Acceptance: JMH shows
    range queries scaling sub-linearly vs the scan they replace; the boundary-semantics suite
@@ -175,12 +184,12 @@ grouping is tags, not layout.
    ahead of the unbounded same-window range, BENCHMARKS § FP-1b) and `count()` (record-level,
    snapshot-visible, shaping-agnostic). Composition suite `XdStorageQueryShapingTest` (12 tests,
    both id-index types).
-5. **T-3 gap-filling** — guided by the T-1 map.
-6. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
+6. **T-3 gap-filling** — guided by the T-1 map.
+7. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
    "when to choose XdStorage" + runnable example app): lands LAST so it describes the shipped
    2.1.0 (including range queries); fixes the README test-count staleness.
-7. **D-4 — JMH regression alert** (nightly smoke persists per-scenario numbers; warn on >25%
-   drop) — nightly-side, lands anywhere in the train.
+8. **D-4 — JMH regression alert** (nightly smoke persists per-scenario numbers; warn on >25%
+   drop) — nightly-side, lands anywhere after task 13 fixes the scenario list.
 
 **2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
 recovery, JMH vs baselines, fresh-clone README walkthrough) → tag `v2.1.0`.

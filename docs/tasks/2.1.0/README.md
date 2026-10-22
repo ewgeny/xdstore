@@ -20,14 +20,16 @@ there for the full decision record before starting an item.
 | 08 | [read-only-commit-path](08-read-only-commit-path.md) | B2 | P0, engine, performance, feature | 1 d | — |
 | 09 | [query-range-operators](09-query-range-operators.md) | FP-1a | P0, search, engine, feature | 2 d | — |
 | 10 | [query-order-limit-offset](10-query-order-limit-offset.md) | FP-1b | P1, search, engine, feature | 1–2 d | 09 |
-| 11 | [jmh-regression-alert](11-jmh-regression-alert.md) | D-4 | P2, ci, performance, chore | 0.5–1 d | — |
+| 11 | [jmh-regression-alert](11-jmh-regression-alert.md) | D-4 | P2, ci, performance, chore | 0.5–1 d | 13 (scenario list) |
 | 12 | [decision-guide-and-example-app](12-decision-guide-and-example-app.md) | FP-11 | P1, docs, chore | 1 d | 09, 10 (describes shipped capabilities) |
+| 13 | [benchmark-suite-unification](13-benchmark-suite-unification.md) | BENCH | P0, performance, ci, chore | 2 d | — (**ASAP: before 08–11 record/assert numbers**) |
 
 ## Execution lanes (independent — can run in parallel)
 
 - **Lane A (logging):** 01 → {02, 03}
 - **Lane B (testing):** {04, 05} → {06, 07}
-- **Lane C (engine/search):** 08 ∥ 09 → 10 ∥ 11
+- **Lane C (engine/search):** **13 first (ASAP — the canonical benchmark suite; tasks 08/09/10
+  record their numbers into it, 11 asserts on its scenario list)** → 08 ∥ 09 → 10
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary
@@ -68,6 +70,11 @@ Issues are managed automatically by the **issues-sync workflow**
   file that marked it done).
 
 **The sync's state machine** (idempotent; source of truth = the task files):
+
+- It scans **every** `docs/tasks/<version>/` directory — a new train's directory is picked up
+  automatically; the GitHub milestone = the directory name (attached at creation only if it
+  exists). Task titles MUST carry the `[x.y.z]` train prefix: title matching is global across
+  trains, the prefix is what prevents collisions.
 
 | File says | GitHub says | Action |
 |---|---|---|

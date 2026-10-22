@@ -59,4 +59,4 @@ java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark qui
 - [BENCHMARKS.md](../../BENCHMARKS.md) (gotcha #1 — silent skips; the existing row assertion)
 - [MASTER-PLAN.md](../../MASTER-PLAN.md) § Track D-4
 
-Estimate: ~0.5–1 dev-day.
+Estimate: ~0.5–1 dev-day. Depends on: 13 (the unified scenario list the assertion must match).

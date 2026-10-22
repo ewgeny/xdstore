@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Idempotent GitHub-issue sync for the 2.1.0 train work packages (docs/tasks/2.1.0).
+# Idempotent GitHub-issue sync for ALL train work packages under docs/tasks/<version>/.
 #
-# Source of truth: each task file's frontmatter
-#   title:  issue title (exact-match key, open or closed)
+# Source of truth: each task file's frontmatter (in every docs/tasks/*/ directory)
+#   title:  issue title (exact-match key, open or closed) — MUST carry the "[x.y.z]" train
+#           prefix: matching is GLOBAL across all trains, the prefix is what keeps
+#           titles from colliding
 #   labels: [a, b, c]    applied at creation
 #   status: open | done  <- the DEVELOPER sets 'done' when the task is finished;
-#                          the next sync closes the matching GitHub issue.
+#                          the next sync closes the matching GitHub issue
+# Milestone = the directory name (docs/tasks/2.1.0 -> milestone "2.1.0"), attached at
+# creation only if that milestone exists in the repo.
 #
 # State machine per task file (every case idempotent):
 #   status=open,  no issue      -> CREATE the issue (open)
@@ -19,13 +23,13 @@
 # or locally:  gh auth login && bash scripts/sync-issues.sh [--dry-run]
 set -euo pipefail
 
-DIR="docs/tasks/2.1.0"
-MILESTONE="2.1.0"
+TASKS_ROOT="docs/tasks"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+shopt -s nullglob
 
 command -v gh >/dev/null 2>&1 || { echo "gh CLI not installed - https://cli.github.com"; exit 1; }
-[ -d "$DIR" ] || { echo "$DIR not found (run from the repository root)"; exit 1; }
+[ -d "$TASKS_ROOT" ] || { echo "$TASKS_ROOT not found (run from the repository root)"; exit 1; }
 
 # Token: gh reads GH_TOKEN; XDSTORAGE_ISSUES_TOKEN (the same secret the issues-sync
 # workflow uses) is accepted as a fallback for local runs. Precedence: explicit
@@ -39,7 +43,7 @@ SUMMARY="| action | count |
 |---|---|
 "
 
-# --- 1. Labels (idempotent) ------------------------------------------------------------
+# --- 1. Labels (idempotent, global across trains) ----------------------------------------
 label() {
   [ "$DRY_RUN" = 1 ] && return 0
   gh label create "$1" --color "$2" --description "$3" >/dev/null 2>&1 || true
@@ -60,13 +64,25 @@ label "chore"       "CCCCCC" "Maintenance"
 label "tech-debt"   "D4C5F9" "Known debt to pay down"
 label "performance" "FEF2C0" "Performance work"
 
-# --- 2. Milestone (attached at creation only if it exists) ------------------------------
-MILESTONE_ARG=()
-if [ "$DRY_RUN" != 1 ] && gh api "repos/:owner/:repo/milestones" --jq '.[].title' 2>/dev/null | grep -qx "$MILESTONE"; then
-  MILESTONE_ARG=(--milestone "$MILESTONE")
-fi
+# --- 2. Milestones (existence cached per name; attached at creation only) -----------------
+MILESTONE_CACHE=" "
+milestone_arg() { # $1 = milestone name -> sets MILESTONE_ARG
+  local m="$1"
+  MILESTONE_ARG=()
+  [ "$DRY_RUN" = 1 ] && return 0
+  case "$MILESTONE_CACHE" in
+    *" $m=yes "*) MILESTONE_ARG=(--milestone "$m"); return 0 ;;
+    *" $m=no "*)  return 0 ;;
+  esac
+  if gh api "repos/:owner/:repo/milestones" --jq '.[].title' 2>/dev/null | grep -qx "$m"; then
+    MILESTONE_CACHE="$MILESTONE_CACHE $m=yes "
+    MILESTONE_ARG=(--milestone "$m")
+  else
+    MILESTONE_CACHE="$MILESTONE_CACHE $m=no "
+  fi
+}
 
-# --- 3. Existing issues, fetched ONCE (exact-title key) ---------------------------------
+# --- 3. Existing issues, fetched ONCE globally (exact-title key) --------------------------
 # Each element: "<number>\t<title>\t<STATE>"
 if [ "$DRY_RUN" = 1 ]; then
   ISSUES=()
@@ -100,56 +116,65 @@ close_issue() { # $1 = number, $2 = task file path
     "Automatically closed by the issues-sync workflow: the task file \`$2\` is marked \`status: done\` (the developer's completion mark)."
 }
 
-# --- 4. Per-file sync -------------------------------------------------------------------
-for f in "$DIR"/[0-9][0-9]-*.md; do
-  [ -f "$f" ] || continue
-  title=$(sed -n 's/^title: "\(.*\)"$/\1/p' "$f")
-  labels=$(sed -n 's/^labels: \[\(.*\)\]$/\1/p' "$f" | tr -d ' ')
-  status=$(sed -n 's/^status: \(.*\)$/\1/p' "$f")
-  status=${status:-open}
-  if [ -z "$title" ] || [ -z "$labels" ]; then
-    echo "WARN: $f - missing/invalid frontmatter (title/labels), skipped"
-    warned=$((warned+1)); continue
-  fi
-  case "$status" in open|done) ;; *)
-    echo "WARN: $f - invalid status '$status' (open|done), skipped"
-    warned=$((warned+1)); continue ;;
-  esac
+# --- 4. Per train directory, per task file -------------------------------------------------
+for DIR in "$TASKS_ROOT"/*/; do
+  MILESTONE="$(basename "${DIR%/}")"
+  milestone_arg "$MILESTONE"
+  synced_in_dir=0
 
-  existing=$(issue_lookup "$title" || true)
-  num=${existing%% *}
-  state=${existing#* }
-
-  if [ -z "$num" ]; then
-    if [ "$DRY_RUN" = 1 ]; then
-      echo "PLAN: create '$title' (status: $status)"
-    else
-      newnum=$(create_issue "$f" "$title" "$labels")
-      echo "created #$newnum: $title"
-      if [ "$status" = "done" ]; then
-        close_issue "$newnum" "$f"
-        echo "closed  #$newnum (status: done at creation)"
-        closed=$((closed+1))
-      fi
+  for f in "$DIR"[0-9][0-9]-*.md; do
+    [ -f "$f" ] || continue
+    synced_in_dir=$((synced_in_dir+1))
+    title=$(sed -n 's/^title: "\(.*\)"$/\1/p' "$f")
+    labels=$(sed -n 's/^labels: \[\(.*\)\]$/\1/p' "$f" | tr -d ' ')
+    status=$(sed -n 's/^status: \(.*\)$/\1/p' "$f")
+    status=${status:-open}
+    if [ -z "$title" ] || [ -z "$labels" ]; then
+      echo "WARN: $f - missing/invalid frontmatter (title/labels), skipped"
+      warned=$((warned+1)); continue
     fi
-    created=$((created+1)); continue
-  fi
+    case "$status" in open|done) ;; *)
+      echo "WARN: $f - invalid status '$status' (open|done), skipped"
+      warned=$((warned+1)); continue ;;
+    esac
 
-  case "$state:$status" in
-    OPEN:open|CLOSED:done)
-      insync=$((insync+1)) ;;
-    OPEN:done)
+    existing=$(issue_lookup "$title" || true)
+    num=${existing%% *}
+    state=${existing#* }
+
+    if [ -z "$num" ]; then
       if [ "$DRY_RUN" = 1 ]; then
-        echo "PLAN: close #$num '$title' (status: done)"
+        echo "PLAN: create '$title' (status: $status, milestone: $MILESTONE)"
       else
-        close_issue "$num" "$f"
-        echo "closed  #$num: $title (status: done)"
+        newnum=$(create_issue "$f" "$title" "$labels")
+        echo "created #$newnum: $title"
+        if [ "$status" = "done" ]; then
+          close_issue "$newnum" "$f"
+          echo "closed  #$newnum (status: done at creation)"
+          closed=$((closed+1))
+        fi
       fi
-      closed=$((closed+1)) ;;
-    CLOSED:open)
-      echo "WARN: #$num '$title' is closed on GitHub but the file says status: open - left closed (a machine never reopens; fix the file or the issue by hand)"
-      warned=$((warned+1)) ;;
-  esac
+      created=$((created+1)); continue
+    fi
+
+    case "$state:$status" in
+      OPEN:open|CLOSED:done)
+        insync=$((insync+1)) ;;
+      OPEN:done)
+        if [ "$DRY_RUN" = 1 ]; then
+          echo "PLAN: close #$num '$title' (status: done)"
+        else
+          close_issue "$num" "$f"
+          echo "closed  #$num: $title (status: done)"
+        fi
+        closed=$((closed+1)) ;;
+      CLOSED:open)
+        echo "WARN: #$num '$title' is closed on GitHub but the file says status: open - left closed (a machine never reopens; fix the file or the issue by hand)"
+        warned=$((warned+1)) ;;
+    esac
+  done
+
+  [ "$synced_in_dir" -gt 0 ] && echo "train $MILESTONE: $synced_in_dir task file(s) processed"
 done
 
 echo "sync complete: $created created, $closed closed, $insync already in sync, $warned warnings"
