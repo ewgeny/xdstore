@@ -63,22 +63,19 @@ Your JVM ──► IXdFileStorage facade ──► transactions (MVCC, 2PC commi
   a predicate (`load(Class, IXdStoragePredicate)`).
 - **Structure updates** — registered updaters migrate persisted structures (e.g. rebuild a search index after
   its annotation changed) via `executeStructureUpdate`.
-- **Pure Java** — bytecode stays Java 8 compatible; the development/test runtime is JDK 17; logging via log4j2.
+- **Pure Java** — bytecode stays Java 8 compatible; the development/test runtime is JDK 17; logging via
+  SLF4J — the API jar is the only logging artifact (no backend, no configuration ships in the library).
 
 ## Requirements and installation
 
 - Java 8 or newer to run the library (the bytecode target is 1.8; wrapper codegen needs a JDK at
   runtime — see [docs/EMBEDDING.md](docs/EMBEDDING.md)); JDK 17 is used for development and tests.
-- Runtime dependencies: `org.apache.logging.log4j:log4j-core` (2.23.1) and
-  `org.apache.commons:commons-lang3` (3.8.1).
+- Runtime dependencies: `org.slf4j:slf4j-api` (2.0.20) and `org.apache.commons:commons-lang3`
+  (3.8.1). The library ships **no logging backend and no log configuration** — bind the backend of
+  your choice (log4j2, Logback, ...) to see log output; without one you get a single SLF4J no-op
+  notice.
 
-Until 2.0.0 is tagged, install from source; after the release the artifact is on Maven Central:
-
-```bash
-mvn install
-```
-
-then add to your `pom.xml`:
+The released 2.0.0 artifact is on Maven Central; add it to your `pom.xml`:
 
 ```xml
 <dependency>
@@ -86,6 +83,12 @@ then add to your `pom.xml`:
     <artifactId>xdstorage</artifactId>
     <version>2.0.0</version>
 </dependency>
+```
+
+To run against the current 2.1.0 train, install from source:
+
+```bash
+mvn install
 ```
 
 ## Quick start
@@ -174,12 +177,14 @@ stored objects; `StoreWithParentObject` children live and die with their parent.
 Chooses the physical index type for the id index of the class:
 
 ```java
-@XdStorageObjectIdIndexType(indexType = XdStorageIndexType.BTree, t = 4)  // t = B+tree minimum degree
+@XdStorageObjectIdIndexType(indexType = XdStorageIndexType.BTree, t = 64)  // t = B+tree minimum degree
 public class Ship { ... }
 ```
 
-`XdStorageIndexType.Hash` (default) gives O(1) point lookups; `BTree` adds ordered keys and range-friendly
-structure. `t` is the B+tree minimum degree (default 500).
+`XdStorageIndexType.Hash` (default) gives O(1) point lookups and the best cold reads after restart;
+`BTree` adds ordered keys, native range walks over the id index, and ~2× bulk-insert throughput.
+`t` is the B+tree minimum degree — default 64 (the configuration-study optimum; stay within 32–128,
+never below 8 — see [Performance](#performance)).
 
 ### Search indexes — `@XdStorageObjectSearchIndex`
 
@@ -267,6 +272,8 @@ private String name;
 ## Opening and closing a storage
 
 ```java
+IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder);          // default fragment size (128), YAML
+IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, config);  // default fragment size (128)
 IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize);
 IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML);
 IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fragmentSize, XdStorageConfig.defaults());
@@ -280,7 +287,9 @@ IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(name, folder, fra
   locked** for the storage's lifetime (`.xdstorage.lock`): a second process — or a second instance in the
   same JVM — on the same folder fails loudly with `XdStorageFolderLock.XdStorageInUseException` instead of
   corrupting data. The lock is released by `shutdown()`.
-- `fragmentSize` — number of objects per fragment file for the `StoreAsClassObjects` policy.
+- `fragmentSize` — number of objects per fragment file for the `StoreAsClassObjects` policy. The
+  overloads without this parameter use the engine default `128` (the configuration-study optimum —
+  see [Performance](#performance)).
 - `FilesFormat` — `YAML` (default) or `XML`. (The 1.x `JSON` constant was removed in 2.0.0; a
   1.x folder written through it holds XML content in `.json`-named files — migration recipe in
   [docs/EMBEDDING.md](docs/EMBEDDING.md) § Compatibility.)
@@ -633,15 +642,77 @@ List<IXdStorageStructureUpdater> executed = storage.executeStructureUpdate(MyEnt
 
 ## Performance
 
-JMH benchmarks (JDK 17, recorded 2026-10-18, full numbers and methodology in
+Two measurement sources back this section: JMH facade benchmarks
+([docs/BENCHMARKS.md](docs/BENCHMARKS.md)) and the configuration-tuning study
+([docs/PERFORMANCE-RECOMMENDATIONS.md](docs/PERFORMANCE-RECOMMENDATIONS.md)), which swept the
+structural knobs — B+tree fill factor `t`, fragment size, id-index type, search-index `t` — through the
+full data lifecycle (bulk insert → warm reads → update → cold restart → delete).
+
+Measured cost model (JMH, JDK 17, reference box; full numbers and methodology in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md)):
 
-- Indexed search through the facade costs ≈ a plain id load (~470 vs ~480 ops/s at 4 reader threads on the
-  reference box) — B+tree lookup + record read adds almost nothing.
+- Indexed search through the facade costs ≈ a plain id load (~470 vs ~480 ops/s at 4 reader threads) —
+  the B+tree lookup + record read adds almost nothing; secondary-field and child criteria are evaluated
+  on the already-fetched record and add ~0%.
 - `OR` of two primaries is near-linear in the number of branches (~460 ops/s).
-- Scan paths (`NOT_EQUALS` / no primary) are ~3.5–4× slower (~120–130 ops/s) — O(dataset).
+- Scan paths (`NOT_EQUALS` / no primary criterion) are ~3.5–4× slower (~120–130 ops/s) — O(dataset),
+  and the gap grows linearly with the data.
+- Range primaries walk the ordered index with early termination: a selective upper-bounded range
+  (tight `BETWEEN`, `IN`) runs ~15× the scan it replaces; lower-bound-only (`GT`/`GTE`) and wide
+  ranges degrade toward scan cost by design.
 - Writes are commit-bound (each commit rewrites the touched resource files): rename ~75 ops/s,
   save+delete ~39 ops/s; the facade save+load+commit flow ~127 ops/s.
+- A read-only transaction (begin → load → commit) costs <1 ms/op, flat in dataset size
+  (0.63–0.74 ms/op from N=5000 to N=40000, zero file write-outs) — high-rate per-op read
+  transactions are safe.
+
+### Tuning recommendations
+
+Compiled from [docs/PERFORMANCE-RECOMMENDATIONS.md](docs/PERFORMANCE-RECOMMENDATIONS.md) (measured at
+N=5000 YAML entities; the relative gaps are the signal — re-run the sweep at production volume before
+locking choices, recipe in its § 9). The first three recommendations are **already the engine
+defaults**:
+
+- **Fragment size: 128–512 objects per fragment** — engine default `128` (the `newOrGetFileStorage`
+  overloads without an explicit fragment size). Aim for fragment files of tens to low hundreds of KB.
+  **Above ~1 MB is a red flag**: every commit rewrites each touched fragment file whole (a
+  one-fragment-per-class layout with 4.5 MB files made the update pass +85% slower). **Below ~10 KB is
+  a red flag too**: 626 tiny files cost ~30% insert throughput and doubled the cold scan.
+- **B+tree fill factor `t`: 32–128, default 64** in both annotations. Warm lookups are `t`-insensitive —
+  the penalty of a bad `t` is structural. At N=5000, `t=2` produced ~10 000 node files (12×
+  index-size amplification), 129 ms commits, a 19× slower delete-all and 387 µs cold lookups, versus
+  3.7 ms commits and 87 µs cold lookups at `t=64` (cold reads pay ~35 µs per tree level — deep trees
+  tax every uncached lookup after a restart). **Never ship `t` below 8.**
+- **Search index `t = 64`** (same annotation default): indexed saves ~5× faster than the old `t=500`
+  default and the first cold query lands ~19 ms earlier; warm query latency is `t`-insensitive.
+- **Id index type — choose by workload** (`@XdStorageObjectIdIndexType`):
+  - **Hash** (default): best cold-read latency after restart (52 vs 87 µs/op — one fragment load vs a
+    tree descent), fewest files (12 vs 101 at N=5000), simplest operations; equality-only.
+  - **B+Tree**: insert-heavy pipelines (~2.1× bulk insert) and anything that needs ordered keys or
+    id-range traversal.
+- **Query shapes:** keep the primary criterion selective — `EQUALS`, or a range with a tight upper
+  bound. Treat `NOT_EQUALS`, primary-`CONTAINS` and primary-less queries as reporting-tier operations
+  (full index scan). Index child fields you actually filter on: each indexed child collection adds
+  per-save tree maintenance.
+- **Transactions:** the 3 s default timeout is tight for batch writes — pass explicit timeouts for
+  bulk batches (the study's harness uses 120 s for 500-object batches); raising the default to 10–30 s
+  is reasonable for batch-oriented services.
+- **Durability:** commits are always process-crash-safe (atomic rename, journaled appends); enable
+  `durableWrites(true)` when the machine can lose power — it adds one fsync per written file per
+  commit, modest at the recommended fragment sizes.
+- **Journaling is the default write path** (`journalWrites` on by default): data-class commits append
+  O(delta) journal records instead of rewriting whole files, so its wins are on data-file-heavy write
+  patterns. Id-index/search-index/B+tree infrastructure still rewrites its files per commit by design
+  scope — the remaining write-latency wall for index-heavy workloads
+  ([docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md)).
+- **Entity layout:** `StoreAsClassObjects` (fragmented) for "many small objects of one class" domains;
+  `StoreAsSingleObject` only for genuinely large top-level graphs — one file per object is what makes
+  infrastructure file counts explode at small object sizes.
+- **Monitor** `storage.getMetrics()` and `XdStorageMetrics.engineEvents()`: sustained growth of
+  `resourceWriteOutNanos` per write-out ⇒ fragments too big or the disk saturating;
+  `timeoutSweptRollbacks` / `rollbackOnlyMarks` > 0 ⇒ transaction timeouts too tight; any
+  `lockAcquisitionTimeouts` / `lockWaitsOver1s` / `findRetryBudgetExhaustions` ⇒ sustained write
+  contention. Healthy-range thresholds per counter: the study's § 10.
 
 Run the benchmarks yourself:
 
@@ -695,6 +766,9 @@ Notes:
 ## Documentation and project layout
 
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md) — JMH benchmark methodology and recorded results.
+- [docs/PERFORMANCE-RECOMMENDATIONS.md](docs/PERFORMANCE-RECOMMENDATIONS.md) — configuration-tuning
+  study (B+tree `t`, fragment size, Hash vs B+Tree id index, search-index `t`): measured data, the
+  applied engine defaults, and monitoring thresholds.
 - [docs/OPTIMIZATION-PLAN.md](docs/OPTIMIZATION-PLAN.md) — performance/architecture optimization backlog.
 - [docs/SRE-OPTIMIZATION-PLAN.md](docs/SRE-OPTIMIZATION-PLAN.md) — operational hardening plan
   (durability, locking, metrics).
