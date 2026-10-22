@@ -1,6 +1,6 @@
 ---
-title: "[2.2.0][BUG-A] Commit-journal replay NPE on the structure resource after a structure update + reopen"
-labels: [2.2.0-train, P0, engine, bug]
+title: "[2.1.0][BUG-A] Commit-journal replay NPE on the structure resource after a structure update + reopen"
+labels: [2.1.0-train, P0, engine, bug]
 status: open
 ---
 

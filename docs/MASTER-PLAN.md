@@ -185,10 +185,20 @@ grouping is tags, not layout.
    snapshot-visible, shaping-agnostic). Composition suite `XdStorageQueryShapingTest` (12 tests,
    both id-index types).
 6. **T-3 gap-filling** — guided by the T-1 map.
-7. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
+7. **BUG-A..D — the engine defects T-3a discovered join the train** (tasks 14–17, migrated
+   from the dissolved `docs/tasks/2.2.0/` directory on 2026-10-22). The "2.1.0 carries no
+   deep engine surgery" pinning is revised: **a defect discovered by a train's own test
+   estate ships with the train that discovered it** — these are fixes with acceptance-grade
+   `@Disabled` tests (un-disabling IS the acceptance), not feature surgery: BUG-A (15, P0)
+   structure-journal replay NPE strands a folder after structure update + reopen; BUG-C (17,
+   P0) auto-generated ids unreachable by id after reopen (id assigned at write-out, after the
+   tx index snapshot); BUG-B (16, P1, after BUG-A — the journal crash masks part of its repro)
+   objects unreachable by id after structure update on a fresh open; BUG-D (14, P2) the
+   `UUID_GENERATOR` field property never auto-generated — decide the contract, make it true.
+8. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
    "when to choose XdStorage" + runnable example app): lands LAST so it describes the shipped
    2.1.0 (including range queries); fixes the README test-count staleness.
-8. **D-4 — JMH regression alert** (nightly smoke persists per-scenario numbers; warn on >25%
+9. **D-4 — JMH regression alert** (nightly smoke persists per-scenario numbers; warn on >25%
    drop) — nightly-side, lands anywhere after task 13 fixes the scenario list.
 
 **2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
@@ -241,18 +251,23 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 | Order | Work | Effort | Unlocks | Release |
 |---|---|---|---|---|
 | 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** — **DONE: shipped 2026-10-21** | 1–2 sess | Everything public | **2.0.0** |
-| 1 | **2.1.0 train:** Track L (log hygiene) + Track T (coverage & grouping) + B2 + FP-1 (phase 1) + FP-11 + D-4 — **NEXT (pom at 2.1.0)** | 3–5 sess | Quiet library default; a measured, grouped test estate; query expressiveness; read-heavy workloads | **2.1.0** |
+| 1 | **2.1.0 train:** Track L (log hygiene) + Track T (coverage & grouping) + BENCH (task 13, benchmark unification) + B2 + FP-1 (phase 1) + **BUG-A..D (tasks 14–17, migrated from 2.2.0)** + FP-11 + D-4 — **IN PROGRESS (pom at 2.1.0; L, T-1/T-2, B2, FP-1a/1b done)** | 4–6 sess | Quiet library default; a measured, grouped test estate; query expressiveness; read-heavy workloads; **no data-stranding defects** | **2.1.0** |
 | 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | **2.2.0** |
 | 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.3.0 |
 | 4 | FP-2/7/8/9/10/12 ecosystem train | 1–2 sess each | Mainstream adoption surface | 2.x→3.0 |
 
-**Release-train decision (corrected 2026-10-21):** 2.1.0 is the post-release hardening train —
-it deliberately carries NO deep engine surgery (W-4's persisted-state semantics change would
-force the testing work and the feature work to share one RC risk window); the engine maturity
-work (W-4 + B3) is 2.2.0, the deployment story is 2.3.0, Step 4 stays demand-driven. 2.1.0
-ships when the RC protocol passes on the extended scope: quiet-by-default logging verified on
-a config-less consumer, tag-driven grouping enforced, coverage map recorded, FP-1 acceptance
-met.
+**Release-train decision (corrected 2026-10-21; bug-lane amendment 2026-10-22):** 2.1.0 is
+the post-release hardening train — it deliberately carries no deep engine *feature* surgery
+(W-4's persisted-state semantics change would force the testing work and the feature work to
+share one RC risk window); the engine maturity work (W-4 + B3) is 2.2.0, the deployment story
+is 2.3.0, Step 4 stays demand-driven. **Amendment: a defect discovered by a train's own test
+estate ships with the train that discovered it** — T-3a (task 06) surfaced four engine
+defects (BUG-A..D), each pinned with an acceptance-grade `@Disabled` test; they joined 2.1.0
+as tasks 14–17 and the `docs/tasks/2.2.0/` directory was dissolved (2.2.0 keeps the W-4+B3
+version pinning; its directory gets created when that train starts). 2.1.0 ships when the RC
+protocol passes on the extended scope: quiet-by-default logging verified on a config-less
+consumer, tag-driven grouping enforced, coverage map recorded, FP-1 acceptance met, and all
+four defects fixed with their disabled tests green.
 
 ## 4. Explicitly out of scope (carried over — do not re-propose)
 

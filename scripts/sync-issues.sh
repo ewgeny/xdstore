@@ -48,10 +48,9 @@ label() {
   [ "$DRY_RUN" = 1 ] && return 0
   gh label create "$1" --color "$2" --description "$3" >/dev/null 2>&1 || true
 }
-label "2.1.0-train" "1D76DB" "Work package of the 2.1.0 release train"
-label "P0"          "B60205" "Must land in 2.1.0"
-label "P1"          "D93F0B" "Should land in 2.1.0"
-label "P2"          "0E8A16" "Nice to have in 2.1.0"
+label "P0"          "B60205" "Must land in the current train"
+label "P1"          "D93F0B" "Should land in the current train"
+label "P2"          "0E8A16" "Nice to have in the current train"
 label "logging"     "5319E7" "Logging subsystem"
 label "testing"     "2374CA" "Test estate: coverage, grouping, suites"
 label "engine"      "F9D0C4" "Storage engine internals"
@@ -64,7 +63,6 @@ label "chore"       "CCCCCC" "Maintenance"
 label "tech-debt"   "D4C5F9" "Known debt to pay down"
 label "performance" "FEF2C0" "Performance work"
 label "bug"         "EE0701" "Engine defect discovered by the test estate"
-label "2.2.0-train" "3E64B2" "Work package of the 2.2.0 release train (deep engine surgery)"
 
 # --- 2. Milestones (existence cached per name; attached at creation only) -----------------
 MILESTONE_CACHE=" "
@@ -122,6 +120,8 @@ close_issue() { # $1 = number, $2 = task file path
 for DIR in "$TASKS_ROOT"/*/; do
   MILESTONE="$(basename "${DIR%/}")"
   milestone_arg "$MILESTONE"
+  # train label derived from the directory — a new train needs no script edit
+  label "${MILESTONE}-train" "1D76DB" "Work package of the ${MILESTONE} release train"
   synced_in_dir=0
 
   for f in "$DIR"[0-9][0-9]-*.md; do

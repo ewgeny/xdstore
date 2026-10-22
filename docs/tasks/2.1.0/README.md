@@ -24,6 +24,26 @@ there for the full decision record before starting an item.
 | 12 | [decision-guide-and-example-app](12-decision-guide-and-example-app.md) | FP-11 | P1, docs, chore | 1 d | 09, 10 (describes shipped capabilities) |
 | 13 | [benchmark-suite-unification](13-benchmark-suite-unification.md) | BENCH | P0, performance, ci, chore | 2 d | — (**ASAP: before 08–11 record/assert numbers**) |
 | 14 | [uuid-generator-field-property](14-uuid-generator-field-property.md) | BUG-D | P2, engine, bug | 0.5 d | — (decision + small fix; discovered by 06) |
+| 15 | [commit-journal-replay-npe](15-commit-journal-replay-npe.md) | BUG-A | P0, engine, bug | 2–3 d | — |
+| 16 | [id-addressability-after-structure-update](16-id-addressability-after-structure-update.md) | BUG-B | P1, engine, bug | 1–2 d | 15 (where masked by the journal crash) |
+| 17 | [auto-generated-id-reopen-addressability](17-auto-generated-id-reopen-addressability.md) | BUG-C | P0, engine, bug | 2–3 d | — |
+
+**Bug-lane provenance (migrated 2026-10-22):** BUG-A/B/C were originally filed against a
+2.2.0 train under the "2.1.0 carries no deep engine surgery" pinning. The decision was
+revised: **a defect discovered by a train's own test estate ships with the train that
+discovered it** — T-3a (06) surfaced all four, each with an acceptance-grade `@Disabled`
+test; un-disabling that test IS the fix's acceptance. The `docs/tasks/2.2.0/` directory is
+dissolved (W-4/B3 keep their 2.2.0 version pinning; that train's directory gets created when
+it starts).
+
+### Defect snapshot (evidence in docs/tasks/2.1.0/06)
+
+| Defect | Signature | Strands data? | Acceptance test |
+|---|---|---|---|
+| BUG A (15) | journal replay NPE on `structure/XdStorageClassStructure.yaml` after structure update + reopen | folder unopenable | `XdStorageSchemaEvolutionTest` BUG-A tests |
+| BUG B (16) | load-by-id null after structure update on a freshly-opened storage (non-system-loader classes) | object unreachable | `XdStorageSchemaEvolutionTest` BUG-B tests |
+| BUG C (17) | auto-generated ids unreachable by id after reopen (id assigned at write-out, after the tx index snapshot) | object unreachable | `XdStorageIdGenerationContractTest.generatedIdsSurviveReopen` |
+| BUG D (14) | `UUID_GENERATOR` field property never auto-generates | contract never worked | contract decision + test in task 14 |
 
 ## Execution lanes (independent — can run in parallel)
 
@@ -31,16 +51,19 @@ there for the full decision record before starting an item.
 - **Lane B (testing):** {04, 05} → {06, 07}
 - **Lane C (engine/search):** **13 first (ASAP — the canonical benchmark suite; tasks 08/09/10
   record their numbers into it, 11 asserts on its scenario list)** → 08 ∥ 09 → 10
+- **Lane E (bug fixes, engine):** 15 ∥ 17 ∥ 14 (independent surfaces: structure journal vs
+  write-out id assignment vs the generator contract) → 16 after 15 (the journal crash masks
+  part of its repro)
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary
 
 | Label | Meaning |
 |---|---|
-| `2.1.0-train` | Work package of the 2.1.0 release train (all issues carry it) |
-| `P0` / `P1` / `P2` | Must / should / nice-to-have land in 2.1.0 |
+| `2.1.0-train` | Work package of the 2.1.0 release train (all issues carry it; the sync derives `<version>-train` labels from the directory — a new train needs no script edit) |
+| `P0` / `P1` / `P2` | Must / should / nice-to-have land in the train |
 | `logging` `testing` `engine` `search` `docs` `ci` | Subsystem |
-| `refactor` `feature` `chore` `tech-debt` `performance` | Work type |
+| `refactor` `feature` `chore` `tech-debt` `performance` `bug` | Work type |
 
 ## Working conventions (binding for every task)
 

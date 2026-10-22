@@ -40,7 +40,7 @@ contract is documented where users will find it.
 
 ## Out of scope
 
-- The write-out-time assignment re-order (BUG C, docs/tasks/2.2.0/03) — this item only
+- The write-out-time assignment re-order (BUG C, docs/tasks/2.1.0/17) — this item only
   touches the generator-type condition, not the assignment point.
 
 ## Acceptance criteria
@@ -59,6 +59,6 @@ mvn clean test && mvn clean test
 ## References
 
 - Discovered in docs/tasks/2.1.0/06 (T-3a); the pinned actual behavior is in the contract test
-- docs/tasks/2.2.0/03 (the related write-out-time assignment defect — different fix, same test class)
+- docs/tasks/2.1.0/17 (the related write-out-time assignment defect — different fix, same test class)
 
 Estimate: 0.5 dev-day.

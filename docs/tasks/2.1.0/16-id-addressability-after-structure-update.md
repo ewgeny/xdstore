@@ -1,6 +1,6 @@
 ---
-title: "[2.2.0][BUG-B] Objects unreachable by id after a structure update on a freshly-opened storage"
-labels: [2.2.0-train, P1, engine, bug]
+title: "[2.1.0][BUG-B] Objects unreachable by id after a structure update on a freshly-opened storage"
+labels: [2.1.0-train, P1, engine, bug]
 status: open
 ---
 

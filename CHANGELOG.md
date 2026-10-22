@@ -60,6 +60,28 @@ Planned scope; items land here as they merge:
   acceptance-grade disabled test in docs/tasks/2.1.0/06; the facade happy/failure-path audit
   (T-3b) remains open.
 
+### Fixed (planned)
+
+The four engine defects the T-3a gap-fill surfaced, migrating from the 2.2.0 train into 2.1.0
+(2026-10-22): **a defect discovered by a train's own test estate ships with the train that
+discovered it.** Each ships with an acceptance-grade `@Disabled` test — un-disabling it is the
+fix's acceptance criterion.
+
+- **BUG-A** ([15](docs/tasks/2.1.0/15-commit-journal-replay-npe.md)) — commit-journal replay NPE
+  on the structure resource: after any `executeStructureUpdate(...)` + close/reopen cycle the
+  storage failed to open ("commit journal of resource .../structure/XdStorageClassStructure.yaml
+  cannot be replayed"), stranding the folder's data until the structure journal was cleared
+  manually.
+- **BUG-C** ([17](docs/tasks/2.1.0/17-auto-generated-id-reopen-addressability.md)) —
+  auto-generated ids were unreachable by id after a reopen: the id was assigned at write-out,
+  after the transaction's index snapshot, so the persisted index never learned it.
+- **BUG-B** ([16](docs/tasks/2.1.0/16-id-addressability-after-structure-update.md)) — objects of
+  non-system-loader classes were unreachable by id after a structure update on a freshly-opened
+  storage.
+- **BUG-D** ([14](docs/tasks/2.1.0/14-uuid-generator-field-property.md)) — the
+  `UUID_GENERATOR` field property never auto-generated values; the contract is being decided
+  and made true.
+
 ### Changed (planned)
 
 - **Track L (MASTER-PLAN) — logging through the SLF4J API; log4j2 test-only.** The library
