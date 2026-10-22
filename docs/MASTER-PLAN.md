@@ -11,7 +11,7 @@ explicitly to 2.2.0**. Detailed journals stay authoritative per scope:
 | [SRE-OPTIMIZATION-PLAN.md](SRE-OPTIMIZATION-PLAN.md) | Whole-project SRE plan (Phases 0/S/W/O/C) | 0, S, O, C **DONE**; W-1..W-3 **DONE**; W-4 open |
 | [WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md) | Phase W design (journal + checkpoint) | W-1..W-3 implemented; W-4 = the deferred design round |
 | [CODEGEN-OPTIMIZATION-PLAN.md](CODEGEN-OPTIMIZATION-PLAN.md) | Wrapper codegen | Items 1/2/5 applied; **items 3/4 superseded by FP-3 (AOT)** |
-| [PERFORMANCE-RECOMMENDATIONS.md](PERFORMANCE-RECOMMENDATIONS.md) | Config study (2nd ed, post-R-53) | Recommendations APPLIED (t=64, frag=128); §5.3 open (= B2) |
+| [PERFORMANCE-RECOMMENDATIONS.md](PERFORMANCE-RECOMMENDATIONS.md) | Config study (2nd ed, post-R-53) | Recommendations APPLIED (t=64, frag=128); §5.3 **CLOSED** (2.1.0 B2: verified 0.6–0.7 ms/op flat, BENCHMARKS addendum) |
 | [ARCHITECT-EVALUATION.md](ARCHITECT-EVALUATION.md) | Outside-architect review, competitive comparison, FP-0..FP-12 feature plan | Adopted; FP-0..FP-12 tracked here as Track F |
 | [BENCHMARKS.md](BENCHMARKS.md) / [FLAKY.md](FLAKY.md) | Baselines / flake ledger | Current; **one open row** (BTreeStress contention → B3) |
 
@@ -158,8 +158,10 @@ grouping is tags, not layout.
    logging footprint to one 65 KB api artifact.
 2. **T-1 + T-2** — instrumentation and grouping land together (JaCoCo + tags).
 3. **B2 — read-only commit path** (PERF study §5.3, FP-4's quick win): skip 2PC record iteration
-   for no-change transactions; ~25 ms → near-zero per read tx at N=5000 on the Hash path. Small,
-   safe, the top read-heavy lever.
+   for no-change transactions; ~25 ms → near-zero per read tx at N=5000 on the Hash path. **DONE
+   (2.1.0): the no-change skip already shipped with the R-45/R-46 commit-path rework — verified
+   0.63–0.74 ms/op flat up to N=40000 with zero write-outs; deliverable = the contract test suite
+   + BENCHMARKS.md addendum, no further code change.**
 4. **FP-1 — query power pack, phase 1** (`GT/GTE/LT/LTE/BETWEEN/IN` primaries, `ORDER BY`,
    `LIMIT/OFFSET`): the B+tree primary index is already ordered — range scans and ordered
    iteration are nearly free, and today their absence forces O(N) scans. Acceptance: JMH shows

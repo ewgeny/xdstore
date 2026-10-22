@@ -42,7 +42,8 @@ Your JVM ──► IXdFileStorage facade ──► transactions (MVCC, 2PC commi
   as field types; nested object graphs are stored according to a per-class policy.
 - **ACID transactions** — explicit `beginTransaction / commit / rollback`, atomic multi-resource 2PC commit,
   automatic rollback of a failed commit (the database returns to a valid state), transaction timeouts,
-  `markRollbackOnly`.
+  `markRollbackOnly`; read-only transactions commit through a cheap release path (no 2PC record
+  iteration, zero file write-outs).
 - **MVCC** — writers produce new versions; readers work against a consistent snapshot
   (`SNAPSHOT` / `READ_COMMITTED` read isolation).
 - **Three storage policies** — embed an object inside its parent file, one file per object, or a shared

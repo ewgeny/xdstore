@@ -208,6 +208,14 @@ The Hash number also explains the frag-sweep column collapse at frag=2048/8192 (
   iteration for read-only transactions), or the W-1 journal infra for cheaper commit bookkeeping.
   This is the **top optimization candidate** for read-heavy workloads.
 
+  **UPDATE 2026-10-22 (2.1.0 train, B2) — RESOLVED/VERIFIED:** the figure no longer reproduces at
+  post-R-59 HEAD. `SweepFindTxVerify` (same harness as this study) measures **0.69 ms/op** (Hash,
+  N=5000; BTree 0.70), **0.63–0.74 ms/op flat up to N=40000** — all with zero `resourceWriteOuts`.
+  The no-change skip (the per-resource `hasChanges` filter in
+  `XdStorageTransaction.commitInternal`) shipped with the R-45/R-46 commit-path rework; task B2
+  pinned the contracts with a dedicated test suite. Numbers + honest reading: the BENCHMARKS.md
+  addendum (2026-10-22).
+
 ## 6. B+Tree re-open blocker resolved and verified (R-53)
 
 **Original defect (first edition of this study, 2026-10-19):** after `shutdown()` → re-open, every

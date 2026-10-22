@@ -18,8 +18,12 @@ Planned scope; items land here as they merge:
 
 ### Added (planned)
 
-- **B2** — read-only commit path: no-change transactions skip the 2PC record iteration
-  (~25 ms → near-zero per read transaction at N=5000 on the Hash path).
+- **B2** — read-only transaction commit path, verified and pinned by tests: no-change
+  transactions commit through a cheap release path (no 2PC record iteration, zero file
+  write-outs); measured 0.6–0.7 ms/op per read transaction at N=5000–40000 on the Hash path
+  (the PERF study §5.3 ~25 ms figure no longer reproduces — BENCHMARKS.md addendum).
+  Contract coverage: committed-count metrics, snapshot isolation under a concurrent writer,
+  rollback-only still throws, a parent still waits for an open nested read-only transaction.
 - **FP-1 phase 1** — query power pack: `GT`/`GTE`/`LT`/`LTE`/`BETWEEN`/`IN` primaries,
   `ORDER BY`, `LIMIT`/`OFFSET` on the ordered B+tree primary index.
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)

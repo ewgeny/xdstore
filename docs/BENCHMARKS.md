@@ -115,6 +115,34 @@ patterns (fragment rewrites dominate there) and crash semantics (per-append atom
 sentinel instead of torn multi-file rewrites). The ≥10× write acceptance target requires
 journaling the index paths — the deferred W-4 work (see WRITE-PATH-DESIGN.md).
 
+## Addendum: read-only transaction commit path (2026-10-22, B2)
+
+The PERF study §5.3 (2026-10-19 edition) measured a begin → load → commit read-only cycle at
+~25 ms/op (Hash, N=5000), scaling with the resource cache size, and named it the top
+read-heavy optimization candidate (task B2). **That figure no longer reproduces at the 2.1.0
+HEAD — measured before making any code change for B2** (same harness,
+`performance/sweep/SweepFindTxVerify`, same box, serial, `resourceWriteOuts` delta watched):
+
+```
+hash  N=5000   0.69 ms/op   writeOuts=0
+hash  N=20000  0.63 ms/op   writeOuts=0
+hash  N=40000  0.74 ms/op   writeOuts=0     <- flat: no cache-size scaling
+btree N=5000   0.70 ms/op   writeOuts=0
+```
+
+**Honest reading (the W-3 precedent):** the ≤1 ms/op acceptance target is already met — not by
+a dedicated B2 patch, but as a side effect of the commit-path rework the campaign already
+shipped (R-45 commit atomicity + R-46 `XdStorageResourceCache` collaborator split; the
+per-resource `hasChanges` filter in `XdStorageTransaction.commitInternal` routes no-change
+resources around the 2PC iteration). B2's shipped deliverable is therefore the *contract*:
+a dedicated test suite (`XdStorageReadOnlyCommitPathTest` — committed-count +1 / write-outs +0,
+snapshot isolation under a concurrent writer, rollback-only still throws, a parent still waits
+for an open nested read-only tx, concurrent readers commit clean) plus this evidence. The old
+N=40000 scaling check guards against the cost silently returning with dataset growth.
+
+JMH facade flow (write+read scenario, quick mode, same box): 132.9 ± 27.6 ops/s vs the
+documented 127.3 ± 24.6 — same band, no write-path regression.
+
 ## Gotchas learned while writing these benchmarks
 
 1. **Preload serially, in the shared `@Setup(Level.Trial)`.** Parallel per-thread preload trips the

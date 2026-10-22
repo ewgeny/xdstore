@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][B2] Read-only transaction commit path: skip 2PC record iteration for no-change transactions"
 labels: [2.1.0-train, P0, engine, performance, feature]
-status: open
+status: done
 ---
 
 ## Summary
@@ -40,17 +40,21 @@ the commit protocol (post-R-46: `io.github.xdstorage.resource.cache.XdStorageCac
 
 ## Acceptance criteria
 
-- [ ] Dedicated tests: read-only tx commit releases locks/records identically to today —
+- [x] Dedicated tests: read-only tx commit releases locks/records identically to today —
       concurrent writer visibility unchanged; rollback-only still throws; nested read-only tx
       still waited for; metrics counters verified (committed +1, writeOuts +0).
-- [ ] Benchmark evidence: the `SweepFindTxVerify`-style harness (test sources,
+      (`XdStorageReadOnlyCommitPathTest`, 5 tests green.)
+- [x] Benchmark evidence: the `SweepFindTxVerify`-style harness (test sources,
       `performance/sweep/`) shows the Hash-path read tx at N=5000 dropping from ~25 ms/op to
       ≤1 ms/op; numbers recorded as a BENCHMARKS.md addendum **honestly** (the W-3 precedent —
       if it's less than predicted, say so).
-- [ ] JMH facade flow (`XdStoragePerformanceBenchmark`) unchanged or better; no regression in
-      the write scenarios.
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
-- [ ] `CHANGELOG.md` "Added" B2 entry matches what shipped.
+      (Measured **0.69 ms/op at N=5000, 0.63–0.74 flat to N=40000, writeOuts=0 — the ~25 ms
+      figure no longer reproduces post-R-59: the short path already shipped with the R-45/R-46
+      rework; B2's deliverable = contract tests + the honest addendum, no code change.)
+- [x] JMH facade flow (`XdStoragePerformanceBenchmark`) unchanged or better; no regression in
+      the write scenarios. (quick: 132.9 ± 27.6 ops/s vs documented 127.3 ± 24.6 — same band.)
+- [x] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows. (719 tests, 0 failures — twice.)
+- [x] `CHANGELOG.md` "Added" B2 entry matches what shipped.
 
 ## Verification
 
