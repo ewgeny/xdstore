@@ -365,6 +365,28 @@ public class XdStorageSearchEngineBenchmark {
     }
 
     @Benchmark
+    public java.util.Collection<SearchEngineShip> searchByPrimaryBetweenPagedLimit50(final BenchmarkSharedState shared, final ThreadState ts) throws Exception {
+        // FP-1b (docs/tasks/2.1.0/10): the SAME wide window as searchByPrimaryBetweenWide with
+        // LIMIT 50 — the limit is pushed down into the ordered walk, which terminates as soon
+        // as the page is complete: 50 objects fetched instead of 100, the walk-termination win
+        // of combining a range with pagination
+        final XdStorageSearchQuery query = new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.BETWEEN,
+                        new XdStorageRange("Ship-" + ts.threadIdx + "-0", "Ship-" + ts.threadIdx + "-99")), null)
+                .limit(50);
+        final IXdStorageTransaction tx = shared.storage.beginTransaction(TX_TIMEOUT);
+        try {
+            final java.util.Collection<SearchEngineShip> found =
+                    shared.storage.load(SearchEngineShip.class, ID_INDEX_NAME, query, tx);
+            shared.storage.commitTransaction(tx);
+            return found;
+        } catch (final Exception e) {
+            shared.storage.rollbackTransaction(tx);
+            throw e;
+        }
+    }
+
+    @Benchmark
     public java.util.Collection<SearchEngineShip> searchByPrimaryIn(final BenchmarkSharedState shared, final ThreadState ts) throws Exception {
         // IN = ONE membership-filtered walk (not k point lookups)
         final XdStorageSearchQuery query = new XdStorageSearchQuery(

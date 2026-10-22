@@ -70,6 +70,24 @@ starts at the first leaf because the engine deliberately avoids vertical descent
 duplicate-bearing trees (the R-46 invariant). Quick-mode rows: 9 → 13 (the nightly row assertion is a
 lower bound and stays valid).
 
+### FP-1b: paged range — LIMIT pushed into the walk (added 2026-10-22)
+
+One scenario joined: `searchByPrimaryBetweenPagedLimit50` — the SAME wide window as
+`searchByPrimaryBetweenWide` with `.limit(50)`. The limit is pushed down into the ordered walk
+(`XdStorageBTree.WalkTerminated`): the walk stops the moment the page is complete, fetching 50
+objects instead of 100. Quick mode (single iteration, same box as the FP-1a rows):
+
+```
+XdStorageSearchEngineBenchmark.searchByPrimaryBetweenPagedLimit50   thrpt  15719 ops/s
+XdStorageSearchEngineBenchmark.searchByPrimaryBetweenWide           thrpt  12588 ops/s   (same window, unbounded)
+```
+
+**Reading (honest):** ~25% ahead of the unbounded same-window range — the pagination win grows with
+the page/window ratio and is bounded by the per-object fetch cost (the walk itself is a minor share).
+DESC pages do NOT get this win: the leaf chain is singly linked, so DESC must collect the full match
+set before it can slice from the tail (documented in README § Search engine). Quick-mode rows: 13 → 14
+(the nightly row assertion is a lower bound and stays valid).
+
 **Reading:**
 
 - **Indexed search costs ≈ a plain id load** (~470 vs ~480 ops/s): the B+tree key lookup + record read

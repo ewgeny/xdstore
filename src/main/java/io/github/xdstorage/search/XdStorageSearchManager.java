@@ -31,6 +31,7 @@ import io.github.xdstorage.utils.*;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class XdStorageSearchManager implements IXdStorageSearchManager {
 
@@ -415,12 +416,52 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
 
         final XdStorageBTree tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
         if (tree != null) {
+            // FP-1b: ORDER BY / LIMIT / OFFSET request the shaping-aware evaluation, which
+            // preserves the order of the ordered walk in the returned list; the legacy path
+            // keeps its exact behavior (unordered map values).
+            if (query.hasShaping()) {
+                return evaluateShapedQuery(query, transaction, clInfo, index, policy, storage, tree);
+            }
             handleQuery(query, transaction, clInfo, index, policy, selection, storage, tree);
         }
 
         final List<T> result = new ArrayList<>(selection.size());
         result.addAll(selection.values());
         return result;
+    }
+
+    /**
+     * FP-1b (docs/tasks/2.1.0/10): record-level count of the query's snapshot-visible matches.
+     * Each counted record passes the same visibility read as a load(); the objects are read but
+     * not retained. ORDER BY / LIMIT / OFFSET shaping is ignored (SQL COUNT semantics).
+     */
+    @Override
+    public long count(final Class<?> cl, final String indexName, final XdStorageSearchQuery query,
+                      final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+        final XdStorageSearchIndex index = clInfo.getIndexes().get(indexName);
+        if (index == null) {
+            throw new XdStorageException("requred index '" + indexName + "' for class " + cl.getName() + " doesn't exist");
+        }
+
+        final XdStoragePolicy policy = clInfo.getPolicy();
+        final IXdStorage storage = services.getStorage();
+        final XdStorageBTree tree = storage.load(XdStorageBTree.class, new XdStorageBTreeId(clInfo.getClazz(), indexName), transaction);
+        if (tree == null) {
+            return 0L;
+        }
+
+        final AtomicLong matched = new AtomicLong();
+        evaluateCriterions(query, transaction, clInfo, index, policy, storage, tree,
+                deduppped(new MatchProcessor() {
+                    @Override
+                    public void match(final XdStorageSearchIndexRecord record) throws XdStorageException {
+                        if (fetchVisible(policy, clInfo, record, transaction) != null) {
+                            matched.incrementAndGet();
+                        }
+                    }
+                }));
+        return matched.get();
     }
 
     private <T> void handleQuery(final XdStorageSearchQuery query, final XdStorageTransaction transaction, final XdStorageClassInfo clInfo,
@@ -476,6 +517,299 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
                 || operator == IXdStorageCriterionOperator.LTE
                 || operator == IXdStorageCriterionOperator.BETWEEN
                 || operator == IXdStorageCriterionOperator.IN;
+    }
+
+    // =========================================================================
+    // FP-1b (docs/tasks/2.1.0/10): result shaping — ORDER BY (primary), LIMIT/OFFSET,
+    // COUNT. The shaped evaluation keeps the ordered walk's order in the returned list;
+    // on plans without a native order (scan path) ORDER BY sorts within the transaction
+    // snapshot. LIMIT on a single-criterion ascending range walk is pushed down: the walk
+    // stops as soon as the page is complete (XdStorageBTree.WalkTerminated).
+    // =========================================================================
+
+    /** Per-matched-record processor shared by the shaped load and the count paths. */
+    private interface MatchProcessor {
+        void match(XdStorageSearchIndexRecord record) throws XdStorageException, XdStorageConnectionException;
+    }
+
+    private <T> List<T> evaluateShapedQuery(final XdStorageSearchQuery query, final XdStorageTransaction transaction,
+                                            final XdStorageClassInfo clInfo, final XdStorageSearchIndex index,
+                                            final XdStoragePolicy policy, final IXdStorage storage, final XdStorageBTree tree)
+            throws XdStorageException, XdStorageConnectionException {
+        final List<T> page = new ArrayList<>();
+
+        // LIMIT pushdown: only for a SINGLE range criterion walking ASC — the one plan where
+        // the page prefix IS the result (no union to merge, no tail to reach for DESC).
+        final boolean singleRangeCriterion = query.getCriterions().size() == 1
+                && query.getCriterions().get(0).a != null
+                && isRangeOperator(query.getCriterions().get(0).a.getOperator());
+        final boolean ascWalkWithLimit = singleRangeCriterion && !query.isOrderByPrimaryDescending() && query.getLimit() >= 0;
+
+        if (ascWalkWithLimit) {
+            // Page-exact ascending walk: a record counts toward the page only when its object
+            // is visible in THIS transaction's snapshot; the walk terminates the moment the
+            // page is complete (offset + limit visible matches fetched, no more).
+            final Set<Object> seen = Collections.newSetFromMap(new HashMap<Object, Boolean>());
+            final AtomicLong visible = new AtomicLong();
+            final long stopAfter = query.effectiveOffset() + query.getLimit();
+            try {
+                evaluateCriterions(query, transaction, clInfo, index, policy, storage, tree,
+                        deduppped(seen, new MatchProcessor() {
+                            @Override
+                            public void match(final XdStorageSearchIndexRecord record) throws XdStorageException {
+                                if (stopAfter <= 0) {
+                                    // LIMIT 0: an empty page — stop at the first candidate, nothing is fetched
+                                    throw XdStorageBTree.walkTerminated();
+                                }
+                                final Object object = fetchVisible(policy, clInfo, record, transaction);
+                                if (object == null) {
+                                    return;
+                                }
+                                final long nth = visible.incrementAndGet();
+                                if (nth > query.effectiveOffset()) {
+                                    @SuppressWarnings("unchecked") final T typed = (T) object;
+                                    page.add(typed);
+                                }
+                                if (nth >= stopAfter) {
+                                    throw XdStorageBTree.walkTerminated();
+                                }
+                            }
+                        }));
+            } catch (final XdStorageBTree.WalkTerminated pageComplete) {
+                // normal completion of a paged walk
+            }
+            return page;
+        }
+
+        // Every other plan: collect matched records (cheap — they live in the index tree),
+        // order them when ORDER BY is requested, slice the page, fetch only the page.
+        final List<XdStorageSearchIndexRecord> matches = new ArrayList<>();
+        evaluateCriterions(query, transaction, clInfo, index, policy, storage, tree,
+                deduppped(new MatchProcessor() {
+                    @Override
+                    public void match(final XdStorageSearchIndexRecord record) {
+                        matches.add(record);
+                    }
+                }));
+        return finishShaped(matches, query, policy, clInfo, transaction);
+    }
+
+    /**
+     * ORDER BY + OFFSET/LIMIT over collected matches, then fetch of the page only. Without
+     * ORDER BY the collected order is the engine's evaluation order (index walk order per
+     * criterion, criteria in query order) — deterministic within a snapshot, not an API
+     * contract; with ORDER BY the order is the pinned contract (primary value, nulls are
+     * the greatest value, stable for equal keys).
+     */
+    private <T> List<T> finishShaped(final List<XdStorageSearchIndexRecord> matches, final XdStorageSearchQuery query,
+                                     final XdStoragePolicy policy, final XdStorageClassInfo clInfo,
+                                     final XdStorageTransaction transaction) throws XdStorageException {
+        if (query.isOrderByPrimary()) {
+            sortMatchesByPrimary(matches, query.isOrderByPrimaryDescending(), clInfo);
+        }
+
+        final long offset = query.effectiveOffset();
+        final int from = (int) Math.min(offset, matches.size());
+        final long limit = query.getLimit();
+        final int to = (limit < 0 || offset + limit >= matches.size()) ? matches.size() : (int) (offset + limit);
+
+        final List<T> page = new ArrayList<>(Math.max(0, to - from));
+        for (final XdStorageSearchIndexRecord record : matches.subList(from, to)) {
+            final Object object = fetchVisible(policy, clInfo, record, transaction);
+            if (object != null) {
+                @SuppressWarnings("unchecked") final T typed = (T) object;
+                page.add(typed);
+            }
+        }
+        return page;
+    }
+
+    /**
+     * ORDER BY primary comparator: natural order of the indexed values; nulls are the greatest
+     * value (ASC = last, DESC = first); a stable sort keeps the walk order for equal keys.
+     * A primary value not mutually comparable with the rest fails loudly.
+     */
+    private void sortMatchesByPrimary(final List<XdStorageSearchIndexRecord> matches, final boolean descending,
+                                      final XdStorageClassInfo clInfo) {
+        final Comparator<XdStorageSearchIndexRecord> comparator = new Comparator<XdStorageSearchIndexRecord>() {
+            @SuppressWarnings("unchecked")
+            @Override
+            public int compare(final XdStorageSearchIndexRecord a, final XdStorageSearchIndexRecord b) {
+                final Object left = a.getPrimaryIndexValue();
+                final Object right = b.getPrimaryIndexValue();
+                if (left == null && right == null) return 0;
+                if (left == null) return 1;
+                if (right == null) return -1;
+                return ((Comparable<Object>) left).compareTo(right);
+            }
+        };
+        try {
+            matches.sort(descending ? comparator.reversed() : comparator);
+        } catch (final ClassCastException e) {
+            throw new XdStorageRuntimeException("ORDER BY primary: indexed values of " + clInfo.getClazz().getName()
+                    + " are not mutually comparable — mixed-type ordering fails loudly", e);
+        }
+    }
+
+    /**
+     * Shared criteria dispatch of the shaped/count paths: range operators walk the ordered
+     * tree, EQUALS looks up the key, everything else (incl. a null primary) streams the whole
+     * index as the scan path. Every matched record goes to the processor exactly once per
+     * unique object id (the caller wraps with {@link #deduppped}).
+     */
+    private void evaluateCriterions(final XdStorageSearchQuery query, final XdStorageTransaction transaction,
+                                    final XdStorageClassInfo clInfo, final XdStorageSearchIndex index,
+                                    final XdStoragePolicy policy, final IXdStorage storage, final XdStorageBTree tree,
+                                    final MatchProcessor processor) throws XdStorageException, XdStorageConnectionException {
+        final List<XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion>> equalsPairs = new ArrayList<>();
+        final List<XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion>> rangePairs = new ArrayList<>();
+        final List<XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion>> scanPairs = new ArrayList<>();
+        for (final XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion> pair : query.getCriterions()) {
+            if (pair.a != null && pair.a.getOperator() == IXdStorageCriterionOperator.EQUALS) {
+                equalsPairs.add(pair);
+            } else if (pair.a != null && isRangeOperator(pair.a.getOperator())) {
+                rangePairs.add(pair);
+            } else {
+                scanPairs.add(pair);
+            }
+        }
+
+        for (final XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion> pair : rangePairs) {
+            walkRangeCriterion(transaction, clInfo, policy, storage, tree, pair.a, pair.b, processor);
+        }
+        for (final XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion> pair : equalsPairs) {
+            collectEqualsCriterion(transaction, clInfo, policy, storage, tree, pair.a, pair.b, processor);
+        }
+        if (!scanPairs.isEmpty()) {
+            collectScanCriterions(transaction, clInfo, index, policy, scanPairs, processor);
+        }
+    }
+
+    /**
+     * FP-1a's bounded ordered walk, generalized with a per-match processor. The upper-bound
+     * abort and a {@link XdStorageBTree#WalkTerminated} raised by the processor are both normal
+     * completion of the walk (readRange releases the walk locks on the way out).
+     */
+    private void walkRangeCriterion(final XdStorageTransaction transaction, final XdStorageClassInfo clInfo,
+                                    final XdStoragePolicy policy, final IXdStorage storage, final XdStorageBTree tree,
+                                    final IXdStoragePrimaryCriterion primaryCriterion,
+                                    final IXdStorageCriterion criterion, final MatchProcessor processor)
+            throws XdStorageException, XdStorageConnectionException {
+        final IXdStorageCriterionOperator operator = primaryCriterion.getOperator();
+        final Object value = primaryCriterion.getValue();
+        Comparable fromKey = null;
+        boolean fromInclusive = false;
+        Comparable toKey = null;
+        boolean toInclusive = false;
+
+        if (operator == IXdStorageCriterionOperator.GT) {
+            fromKey = searchBoundKey(value, operator);
+        } else if (operator == IXdStorageCriterionOperator.GTE) {
+            fromKey = searchBoundKey(value, operator);
+            fromInclusive = true;
+        } else if (operator == IXdStorageCriterionOperator.LT) {
+            toKey = searchBoundKey(value, operator);
+        } else if (operator == IXdStorageCriterionOperator.LTE) {
+            toKey = searchBoundKey(value, operator);
+            toInclusive = true;
+        } else if (operator == IXdStorageCriterionOperator.BETWEEN) {
+            if (!(value instanceof XdStorageRange)) {
+                throw new XdStorageRuntimeException("BETWEEN requires an " + XdStorageRange.class.getSimpleName()
+                        + " criterion value, got " + (value == null ? "null" : value.getClass().getName()));
+            }
+            final XdStorageRange range = (XdStorageRange) value;
+            fromKey = searchBoundKey(range.getFrom(), operator);
+            fromInclusive = true;
+            toKey = searchBoundKey(range.getTo(), operator);
+            toInclusive = true;
+        } else if (operator == IXdStorageCriterionOperator.IN) {
+            // unbounded single walk; membership is decided per record by the operator
+        } else {
+            throw new XdStorageRuntimeException("not a range operator: " + operator);
+        }
+
+        try {
+            tree.readRange(fromKey, fromInclusive, toKey, toInclusive, storage, transaction, new IXdStorageBTreeViewer() {
+                @Override
+                public void look(final Comparable key, final Object rec) throws XdStorageException, XdStorageConnectionException {
+                    final XdStorageSearchIndexRecord record = (XdStorageSearchIndexRecord) rec;
+                    if (!primaryCriterion.passed(record)) {
+                        return;
+                    }
+                    if (criterion == null || criterion.passed(record)) {
+                        processor.match(record);
+                    }
+                }
+            });
+        } catch (final ClassCastException e) {
+            // the walk compares index entries with the wrapped bounds — a bound whose type
+            // differs from the indexed values fails loudly here, never silently-empty
+            throw new XdStorageRuntimeException("range operator " + operator + ": criterion bound of type "
+                    + (value == null ? "null" : value.getClass().getName())
+                    + " is not comparable with the indexed values of index criteria for class "
+                    + clInfo.getClazz().getName() + " — mixed-type comparison fails loudly", e);
+        }
+    }
+
+    /** EQUALS primary: exact key lookup, per-record child-criterion check, processor per match. */
+    private void collectEqualsCriterion(final XdStorageTransaction transaction, final XdStorageClassInfo clInfo,
+                                        final XdStoragePolicy policy, final IXdStorage storage, final XdStorageBTree tree,
+                                        final IXdStoragePrimaryCriterion primaryCriterion,
+                                        final IXdStorageCriterion criterion, final MatchProcessor processor)
+            throws XdStorageException, XdStorageConnectionException {
+        final XdStorageSearchIndexKey key = new XdStorageSearchIndexKey(primaryCriterion.getValue(), null, XdStorageSearchIndexOperationType.Search);
+        final List<Object> records = tree.find(key, storage, transaction);
+        for (final Object rec : records) {
+            final XdStorageSearchIndexRecord record = (XdStorageSearchIndexRecord) rec;
+            if (criterion == null || criterion.passed(record)) {
+                processor.match(record);
+            }
+        }
+    }
+
+    /** Scan path: stream the whole index, apply every scan criterion pair, first match wins. */
+    private void collectScanCriterions(final XdStorageTransaction transaction, final XdStorageClassInfo clInfo,
+                                       final XdStorageSearchIndex index, final XdStoragePolicy policy,
+                                       final List<XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion>> scanPairs,
+                                       final MatchProcessor processor) throws XdStorageException, XdStorageConnectionException {
+        final IXdStorageSearchIndexDaoResource resource = services.getResourcesManager().lockSearchIndexResource(clInfo, index.getName(), transaction);
+        resource.watch(transaction, new IXdStorageWatcher<XdStorageSearchIndexRecord>() {
+            @Override
+            public void watch(final XdStorageSearchIndexRecord object) {
+                for (final XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion> pair : scanPairs) {
+                    final IXdStoragePrimaryCriterion primaryCriterion = pair.a;
+                    final IXdStorageCriterion criterion = pair.b;
+
+                    if (primaryCriterion != null && !primaryCriterion.passed(object)) {
+                        continue;
+                    }
+                    if (criterion == null || criterion.passed(object)) {
+                        try {
+                            processor.match(object);
+                        } catch (final XdStorageException | XdStorageConnectionException e) {
+                            throw new XdStorageRuntimeException(e);
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /** Union dedup: an object matched by several criteria contributes once (map semantics of the legacy path). */
+    private static MatchProcessor deduppped(final MatchProcessor delegate) {
+        return deduppped(Collections.newSetFromMap(new HashMap<Object, Boolean>()), delegate);
+    }
+
+    private static MatchProcessor deduppped(final Set<Object> seen, final MatchProcessor delegate) {
+        return new MatchProcessor() {
+            @Override
+            public void match(final XdStorageSearchIndexRecord record) throws XdStorageException, XdStorageConnectionException {
+                if (seen.add(record.getId())) {
+                    delegate.match(record);
+                }
+            }
+        };
     }
 
     /**
@@ -564,21 +898,30 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
     private <T> void fetchIntoResult(final XdStoragePolicy policy, final XdStorageClassInfo clInfo,
                                      final Map<Object, T> result, final XdStorageSearchIndexRecord record,
                                      final XdStorageTransaction transaction) throws XdStorageException {
+        final Object object = fetchVisible(policy, clInfo, record, transaction);
+        if (object != null) {
+            result.put(record.getId(), (T) object);
+        }
+    }
+
+    /**
+     * FP-1b: the visibility read behind every shaped/count match — reads the object behind an
+     * index record in the current transaction's snapshot, or returns null when the record is
+     * not visible (a concurrent commit landed after the tx began). Failures mark the
+     * transaction rollback-only, exactly like the legacy fetch tail.
+     */
+    private Object fetchVisible(final XdStoragePolicy policy, final XdStorageClassInfo clInfo,
+                                final XdStorageSearchIndexRecord record, final XdStorageTransaction transaction) throws XdStorageException {
         final Object objectId = record.getId();
         try {
             if (policy == XdStoragePolicy.StoreAsClassObjects) {
                 final IXdStorageDaoResource resource = services.getResourcesManager().lockResource(record.getResourceId(), clInfo, transaction);
-                final Object object = resource.read(objectId, transaction);
-                if (object != null) {
-                    result.put(objectId, (T) object);
-                }
+                return resource.read(objectId, transaction);
             } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
                 final IXdStorageDaoResource resource = services.getResourcesManager().lockObjectResource(clInfo, objectId, transaction);
-                final Object object = resource.read(objectId, transaction);
-                if (object != null) {
-                    result.put(objectId, (T) object);
-                }
+                return resource.read(objectId, transaction);
             }
+            return null;
         } catch (final XdStorageException | XdStorageConnectionException e) {
             transaction.markRollbackOnly();
             throw new XdStorageRuntimeException(e);

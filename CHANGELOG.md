@@ -29,7 +29,18 @@ Planned scope; items land here as they merge:
   termination (selective ranges run ~15× the scan they replace; lower-bound-only and wide ranges
   cost like a scan — README § Search engine has the operator table and plan/fallback matrix).
   Contract: `BETWEEN` bounds are inclusive (`XdStorageRange`); nulls never satisfy a range
-  operator; mixed-type bounds fail loudly. `ORDER BY`/`LIMIT`/`OFFSET` remain planned (FP-1b).
+  operator; mixed-type bounds fail loudly.
+- **FP-1 phase 2 (FP-1b)** — result shaping: `ORDER BY` on the primary index value (native key
+  order on the ordered walk; explicit in-snapshot sort on the scan path; ASC/DESC with nulls as
+  the greatest value and a stable sort for equal keys; secondary-field ordering explicitly
+  unsupported — the index orders by key trees, not arbitrary fields), `LIMIT`/`OFFSET` pagination
+  after ordering (negative arguments fail loudly at construction; `LIMIT 0` is a legal empty
+  page; on a single-criterion ascending range walk the limit is pushed down — the walk stops when
+  the page is complete, ~25% ahead of the unbounded same-window range), and
+  `count(cl, indexName, query[, tx])` — the record-level count of snapshot-visible matches
+  without building the result collection (ignores the shaping, SQL `COUNT` semantics; `count(q)`
+  is exactly `load(q).size()` on the same snapshot). Keyset/cursor pagination is the filed
+  follow-up for the `OFFSET` re-walk cost.
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
   + runnable example app.
 - **D-1/D-4** — JaCoCo coverage report in CI; JMH regression alert in the nightly.

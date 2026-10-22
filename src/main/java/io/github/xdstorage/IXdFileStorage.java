@@ -35,6 +35,20 @@ public interface IXdFileStorage extends IXdStorage {
     <T> Collection<T> load(Class<T> cl, String indexName, XdStorageSearchQuery query,
                            IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException;
 
+    /**
+     * FP-1b (docs/tasks/2.1.0/10): record-level count of the query's snapshot-visible matches,
+     * without building the result collection. Ignores the query's ORDER BY / LIMIT / OFFSET
+     * (SQL COUNT semantics); runs in the current transaction when one is open.
+     */
+    long count(Class<?> cl, String indexName, XdStorageSearchQuery query) throws XdStorageException, XdStorageConnectionException;
+
+    /**
+     * FP-1b: transactional form of {@link #count(Class, String, XdStorageSearchQuery)} — the
+     * count reflects exactly the given transaction's snapshot.
+     */
+    long count(Class<?> cl, String indexName, XdStorageSearchQuery query,
+               IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException;
+
     <T> void watch(Class<T> cl, IXdStorageWatcher<T> watcher) throws XdStorageException, XdStorageConnectionException;
 
     @SuppressWarnings("unchecked")

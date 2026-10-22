@@ -913,6 +913,53 @@ class XdStorage implements IXdFileStorage {
         }
     }
 
+    @Override
+    public long count(final Class<?> cl, final String indexName, final XdStorageSearchQuery query) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
+        if (!checkIsInTransaction())
+            throw new XdStorageException("method must be executed in transaction");
+
+        final IXdStorageTransaction transaction = services.getTransactionsManager().getCurrentTransaction();
+
+        return count(cl, indexName, query, transaction);
+    }
+
+    @Override
+    public long count(final Class<?> cl, final String indexName, final XdStorageSearchQuery query,
+                      final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
+        ensureOpen();
+        if (cl == null)
+            throw new XdStorageException("class cannot be null");
+        if (query == null)
+            throw new XdStorageException("query cannot be null");
+        if (transaction == null)
+            throw new XdStorageException("transaction cannot be null");
+
+        final XdStorageTransactionManager txManager = (XdStorageTransactionManager) services.getTransactionsManager();
+        txManager.incrementActiveThreads(transaction.getTransactionId());
+        try {
+            if (!isTransactionAlive(transaction))
+                throw new XdStorageException("transaction " + transaction.getTransactionId() + " is not alive");
+
+            if (!checkHasObjectIdField(cl))
+                throw new XdStorageException("the class " + cl + " must have  identifier field @XdStorageObjectId");
+
+            final XdStorageTransaction tx = cast(transaction);
+
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreWithParentObject) {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
+
+            return services.getSearchManager().count(cl, indexName, query, tx);
+        } finally {
+            txManager.decrementActiveThreads(transaction.getTransactionId());
+        }
+    }
+
     /**
      * This method load objects by specified predicate.
      *

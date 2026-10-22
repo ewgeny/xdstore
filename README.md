@@ -446,6 +446,29 @@ query.or(primaryCriterion2, criterion2);   // additional OR branches
   All plans return the same results for the same filter (verified by the boundary suite); results keep
   today's ordering contract. The walk starts at the first leaf — the engine deliberately avoids vertical
   descents for duplicate-bearing trees — so the win grows with selectivity of the **upper** bound.
+- **Result shaping (FP-1b) — `ORDER BY`, `LIMIT`/`OFFSET`, `COUNT`:**
+  - `query.orderByPrimary(descending)` orders by the primary index value. On the ordered-walk path
+    this is the native key order (free); on the scan path it is an explicit collect-and-sort within
+    the transaction snapshot (O(matches), stated honestly). Secondary-field ordering is not
+    supported — the search index orders by key trees, not arbitrary fields. Nulls are the greatest
+    value (last in ASC, first in DESC); the sort is stable for equal keys. `DESC` walks the full
+    range (the leaf chain is singly linked, there is no reverse walk) — the page is exact, the walk
+    cost is not reduced.
+  - `query.limit(n)` / `query.offset(n)` paginate after ordering. Negative arguments fail loudly at
+    query construction; `LIMIT 0` is a legal empty page; an offset past the end yields an empty
+    page. On a single-criterion ascending range walk the limit is **pushed down**: the walk stops
+    as soon as the page is complete (measured: `LIMIT 50` over a 100-key window runs ~25% ahead of
+    the unbounded same-window range — [BENCHMARKS.md](docs/BENCHMARKS.md) § FP-1b). Without
+    `ORDER BY`, pages follow the engine's evaluation order — deterministic within a snapshot, not
+    an API contract. `OFFSET` re-walks the skipped prefix; keyset/cursor pagination is the filed
+    follow-up if that cost matters at scale.
+  - `storage.count(cl, indexName, query[, tx])` — record-level count of the snapshot-visible
+    matches, without building the result collection; it ignores `ORDER BY`/`LIMIT`/`OFFSET` (SQL
+    `COUNT` semantics). Every counted record passes the same snapshot-visibility read as a `load`,
+    so `count(q)` is exactly `load(q).size()` on the same snapshot.
+  - Snapshot semantics: a page read inside a transaction reflects that transaction's snapshot —
+    concurrent inserts stay invisible; the index tree is live, so a concurrent deletion leaves the
+    walk too (the documented live-index exposure, identical to FP-1a's result sets).
 - **Custom predicates** — `XdStorageComplexCriterion` (`and(...)` / `or(...)`) and `XdStorageCriterionNot`
   let you compose arbitrary AND/OR/NOT filters over a record.
 
@@ -493,6 +516,20 @@ Collection<Ship> byCrew = storage.load(Ship.class, "ship_idx",
 Collection<Ship> notAlpha = storage.load(Ship.class, "ship_idx",
         new XdStorageSearchQuery(
                 new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.NOT_EQUALS, "Alpha"), null), tx);
+
+// result shaping (FP-1b): ordered page + count
+Collection<Ship> page3 = storage.load(Ship.class, "ship_idx",
+        new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.BETWEEN,
+                        new XdStorageRange(200, 400)),
+                new XdStorageCriterion("tonnage", IXdStorageCriterionOperator.GTE, 300))
+                .orderByPrimary(false)   // ORDER BY primary ASC (true = DESC)
+                .offset(100)             // skip the first 100 matches
+                .limit(50), tx);         // then take 50 — the walk stops when the page is full
+long howMany = storage.count(Ship.class, "ship_idx",
+        new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.BETWEEN,
+                        new XdStorageRange(200, 400)), null), tx);   // ignores ORDER BY/LIMIT/OFFSET
 ```
 
 Cost model (see [Benchmarks](#performance)): an indexed `EQUALS` search costs roughly the same as a plain

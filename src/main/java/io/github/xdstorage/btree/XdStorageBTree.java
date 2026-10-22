@@ -638,9 +638,26 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
                     viewer.look(key, value);
                 }
             });
-        } catch (final RangeWalkAborted walkedPastTheRange) {
+        } catch (final RangeWalkAborted | WalkTerminated walkFinished) {
             // normal completion of a bounded walk — the node walk releases all its locks on the way out
         }
+    }
+
+    /**
+     * FP-1b (docs/tasks/2.1.0/10): control-flow signal raised by a viewer that has collected
+     * everything it needs — the LIMIT pushdown on the ordered walk (readRange). Treated exactly
+     * like {@link RangeWalkAborted}: normal completion, the node walk releases all its locks on
+     * the way out; callers of readRange never see it.
+     */
+    public static final class WalkTerminated extends XdStorageRuntimeException {
+        private WalkTerminated() {
+            super(null, null, false, false);
+        }
+    }
+
+    /** FP-1b: a fresh walk-termination signal for a viewer that has collected its page. */
+    public static WalkTerminated walkTerminated() {
+        return new WalkTerminated();
     }
 
     /** Control-flow signal of readRange: the ordered chain walked past the upper bound. */

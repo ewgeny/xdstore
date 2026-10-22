@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][FP-1b] Query power pack II: ORDER BY, LIMIT/OFFSET, COUNT"
 labels: [2.1.0-train, P1, search, engine, feature]
-status: open
+status: done
 ---
 
 ## Summary
@@ -41,23 +41,49 @@ free and must not be silently sorted. Decision record: [MASTER-PLAN.md](../../MA
 
 ## Acceptance criteria
 
-- [ ] Composition suite: range + ORDER BY + LIMIT/OFFSET on both id-index types; boundary
-      cases (offset beyond end, LIMIT 0, negative arguments → loud validation errors);
-      DESC correctness; empty results.
-- [ ] Ordering-stability tests under concurrent commits (a second tx committing mid-read
-      changes nothing in the already-open snapshot result).
-- [ ] JMH: paged range query (LIMIT 50) on the B+tree path — the walk-termination win visible
-      vs unbounded range; recorded in BENCHMARKS.md.
-- [ ] README query section updated together with task 09's operator table; `CHANGELOG.md`
-      "Added" entry.
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict).
+- [x] **Composition suite** — `XdStorageQueryShapingTest` (12 tests): range + ORDER BY +
+      LIMIT/OFFSET on both id-index types (Hash = `RangeOpsEntity`, B+Tree =
+      `RangeOpsBTreeIdEntity`); boundary cases (offset past the end → empty page, LIMIT 0 →
+      legal empty page, negative LIMIT/OFFSET → loud `XdStorageRuntimeException` at query
+      construction); DESC correctness (exact mirror of ASC, DESC pagination from the tail);
+      empty results under shaping; child-criterion filter-then-shape; union of two ranges
+      ordered and paged; scan-path fallback ordering with the null contract (nulls are the
+      greatest value).
+- [x] **Ordering-stability under concurrent commits**: the open tx's ordered page does not
+      see concurrently inserted objects (FP-1a's snapshot semantic, pinned for pages); a
+      concurrent deletion IS reflected through the live index — the documented live-index
+      exposure, asserted deterministically in the suite.
+- [x] **JMH**: `searchByPrimaryBetweenPagedLimit50` — LIMIT 50 over the wide 100-key window
+      runs ~25% ahead of the unbounded same-window range (quick mode: 15 719 vs 12 588 ops/s);
+      recorded in [BENCHMARKS.md](../../BENCHMARKS.md) § FP-1b (quick rows 13 → 14; the
+      nightly row assertion is a lower bound and stays valid).
+- [x] README § Search engine updated (shaping contract + example next to the task 09 operator
+      table); `CHANGELOG.md` "Added" FP-1 phase 2 entry; MASTER-PLAN § Step 1 phase-2 note.
+- [x] Full suite green ×2 (BUILD SUCCESS verdict).
+
+## Implementation notes
+
+- `XdStorageSearchQuery.orderByPrimary(boolean)` / `limit(long)` / `offset(long)` — fluent,
+  validated at construction; `hasShaping()` routes to the shaping-aware evaluation, the legacy
+  path stays byte-compatible.
+- LIMIT pushdown rides a public `XdStorageBTree.WalkTerminated` signal caught by `readRange`
+  as normal completion (same lock-release protocol as the FP-1a upper-bound abort). ASC
+  single-criterion walks count only snapshot-visible matches toward the page, so the page is
+  exact; DESC must collect the full match set (singly linked leaf chain) and fetches only the
+  page after sorting — documented, not silently optimized.
+- `count()` ignores ORDER BY/LIMIT/OFFSET (SQL COUNT semantics) and counts through the same
+  visibility read as `load`, so `count(q) == load(q).size()` on one snapshot.
 
 ## Verification
 
 ```bash
 mvn clean test
-java -cp "$CP" org.flib.xdstorage.performance.XdStorageSearchEngineBenchmark quick
+mvn test-compile && java -cp target/test-classes:target/classes:$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout -Dmdep.includeScope=test) \
+     io.github.xdstorage.performance.XdStorageSearchEngineBenchmark quick
 ```
+
+(The task's original snippet referenced the pre-2.0 `org.flib.xdstorage` package — the
+namespace is `io.github.xdstorage` since 2.0.0.)
 
 ## References
 

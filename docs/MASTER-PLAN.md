@@ -169,7 +169,12 @@ grouping is tags, not layout.
    (T-3c) is part of the feature. **PHASE 1 DONE (2.1.0):** the six range operators shipped —
    bounded ordered walk with early termination (no vertical descents for duplicate-bearing
    trees, R-46 invariant), selective ranges ~15× the scan (BENCHMARKS § FP-1a); boundary suite
-   `XdStorageRangeSearchQueryTest` (8 tests). `ORDER BY`/`LIMIT`/`OFFSET` = FP-1b (task 10).
+   `XdStorageRangeSearchQueryTest` (8 tests). **PHASE 2 (FP-1b, task 10) DONE:** `ORDER BY`
+   (primary, ASC/DESC — native key order on the walk, in-snapshot fallback sort on the scan),
+   `LIMIT/OFFSET` (loud negative validation; LIMIT pushed down into the walk — paged range ~25%
+   ahead of the unbounded same-window range, BENCHMARKS § FP-1b) and `count()` (record-level,
+   snapshot-visible, shaping-agnostic). Composition suite `XdStorageQueryShapingTest` (12 tests,
+   both id-index types).
 5. **T-3 gap-filling** — guided by the T-1 map.
 6. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
    "when to choose XdStorage" + runnable example app): lands LAST so it describes the shipped
