@@ -13,6 +13,7 @@ import io.github.xdstorage.transaction.IXdStorageTransaction;
 import io.github.xdstorage.transaction.IXdStorageTransactionManager;
 import io.github.xdstorage.transaction.XdStorageTransaction;
 import io.github.xdstorage.utils.XdStorageClassInfo;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+@Tag("stress")
 public class XdStorageLongIdGeneratorStressTest {
 
     private XdStorageServicesLocator mockLocator;

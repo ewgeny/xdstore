@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Ультимативный MVCC Стресс-Тест: Изоляция Phantom Read на развесистом ORM Графе")
+@Tag("stress")
 public class XdStorageGraphPhantomReadStressTest {
 
     private static IXdStorage storage = null;

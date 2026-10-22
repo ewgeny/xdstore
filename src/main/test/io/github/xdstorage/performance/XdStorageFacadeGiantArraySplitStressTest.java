@@ -15,6 +15,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Интеграционный TDD-тест: Сплиты через фасад СУБД при t=5 (Автогенерация ID)")
+@Tag("stress")
 public class XdStorageFacadeGiantArraySplitStressTest {
 
     private static final String STORAGE_DIR = "./test_facade_giant_storage";

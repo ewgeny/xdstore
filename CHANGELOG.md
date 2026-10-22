@@ -44,9 +44,14 @@ Planned scope; items land here as they merge:
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
   + runnable example app.
 - **D-1/D-4** — JaCoCo coverage report in CI; JMH regression alert in the nightly.
-- **Track T** (MASTER-PLAN) — formal test groups: JUnit 5 `@Tag("stress")`/`@Tag("integration")`
-  replace the filename-based quick-gate/release excludes (naming contract enforced by a lint
-  test); JaCoCo coverage map drives gap-filling suites for the under-covered packages
+- **Track T** (MASTER-PLAN) — formal test groups: every stress/integration class carries
+  JUnit 5 `@Tag("stress")`/`@Tag("integration")`; the `release` profile excludes by tag
+  (filename patterns stay as a backstop until 3.0), while `quick-gate` keeps its documented-flaky
+  name list (the two structural tags cannot express it). The naming↔tag pairing is enforced in
+  both directions by `XdStorageTestGroupingContractTest` in the default run. Vintage cleanup:
+  JUnit 4 left the build — and the audit found the two JUnit-4-only serialization tests had been
+  silently dead all along (no vintage engine was ever configured); migrated to JUnit 5, they now
+  run in every suite. JaCoCo coverage map drives gap-filling suites for the under-covered packages
   (`operation`, `updaters`, `structure`, `trigger`, `observing`, `lock`, `object`, `index`)
   and a full `IXdFileStorage` happy/failure-path audit.
 

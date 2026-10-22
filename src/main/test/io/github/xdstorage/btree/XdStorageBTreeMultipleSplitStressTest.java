@@ -3,6 +3,7 @@ package io.github.xdstorage.btree;
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("Алгоритмический TDD-тест: Проверка расхождения навигаторов вставки и поиска")
+@Tag("stress")
 public class XdStorageBTreeMultipleSplitStressTest {
 
     private IXdStorage mockStorage;

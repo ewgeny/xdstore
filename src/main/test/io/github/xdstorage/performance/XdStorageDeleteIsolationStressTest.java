@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Стресс-тест MVCC: Экстремальная изоляция удалений (Delete Isolation)")
+@Tag("stress")
 public class XdStorageDeleteIsolationStressTest {
 
     private static IXdStorage storage = null;

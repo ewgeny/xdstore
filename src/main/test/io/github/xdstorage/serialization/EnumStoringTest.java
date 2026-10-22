@@ -8,28 +8,34 @@ import io.github.xdstorage.entities.map.TestEnum;
 import io.github.xdstorage.exceptions.XdStorageConnectionException;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class EnumStoringTest {
 
+    @TempDir
+    static java.nio.file.Path tempDir;
+
     private static IXdFileStorage storage = null;
 
-    @BeforeClass
+    @BeforeAll
     public static void beforeClass() {
-        storage = XdStorageProvider.newOrGetFileStorage("filetest", "./teststorage", 250);
+        // T-2 vintage migration: R-50 hygiene — unique per-run name and temp dir
+        // (the class was silently dead under the JUnit4 vintage gap; it runs now)
+        storage = XdStorageProvider.newOrGetFileStorage("enum-storing-" + System.nanoTime(),
+                tempDir.resolve("db").toString(), 250);
     }
 
-    @AfterClass
+    @AfterAll
     public static void afterClass() {
         storage.shutdown();
     }

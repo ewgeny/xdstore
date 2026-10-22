@@ -16,6 +16,7 @@ import io.github.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import io.github.xdstorage.utils.XdStorageClassInfo;
 import io.github.xdstorage.utils.XdStorageObjectIdField;
 import io.github.xdstorage.utils.XdStorageObjectUtils;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("Интеграционное тестирование связки XdStorageBTree + XdStorageResourceCache")
+@Tag("integration")
 public class BTreeResourceCacheIntegrationTest {
 
     private static final Logger log = LogManager.getLogger(BTreeResourceCacheIntegrationTest.class);

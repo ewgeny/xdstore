@@ -3,6 +3,7 @@ package io.github.xdstorage.btree;
 import io.github.xdstorage.IXdStorage;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @DisplayName("Экстремальный стресс-тест: Гигантские конфигурации B+Tree (t=50, 10000+ элементов)")
+@Tag("stress")
 public class XdStorageBTreeGiantMassiveStressTest {
 
     private IXdStorage mockStorage;

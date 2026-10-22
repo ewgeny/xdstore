@@ -12,6 +12,7 @@ import io.github.xdstorage.transaction.IXdStorageTransactionManager;
 import io.github.xdstorage.transaction.XdStorageTransaction;
 import io.github.xdstorage.transaction.XdStorageTransactionResourceChanges;
 import io.github.xdstorage.utils.XdStorageObjectIdField;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+@Tag("stress")
 public class XdStorageResourceCacheInsertReadStressTest {
 
     private XdStorageServicesLocator mockLocator;

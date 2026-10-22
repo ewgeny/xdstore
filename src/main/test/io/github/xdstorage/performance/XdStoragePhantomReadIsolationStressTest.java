@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Стресс-тест MVCC: Экстремальная изоляция Phantom Read в Б+ Дереве")
+@Tag("stress")
 public class XdStoragePhantomReadIsolationStressTest {
 
     private static IXdStorage storage = null;

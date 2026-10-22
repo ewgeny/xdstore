@@ -9,15 +9,16 @@ import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.operation.*;
 import io.github.xdstorage.serialization.FilesFormat;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
-import org.junit.FixMethodOrder;
 import org.junit.jupiter.api.*;
-import org.junit.runners.MethodSorters;
 
 import java.io.File;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-@FixMethodOrder(MethodSorters.JVM)
+// T-2 vintage migration: the JUnit4 method-ordering annotation (FixMethodOrder with JVM sorters)
+// was dropped - JVM reflection order was never a real guarantee; JUnit 5's deterministic
+// default order applies.
+@Tag("stress")
 public class XmlDataStorageMultithreadsTest {
 
     private static final Logger log = LogManager.getLogger(XmlDataStorageMultithreadsTest.class);

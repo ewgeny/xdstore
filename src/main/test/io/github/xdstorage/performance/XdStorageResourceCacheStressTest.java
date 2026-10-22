@@ -2,6 +2,7 @@ package io.github.xdstorage.performance;
 
 import io.github.xdstorage.entities.XdPlanet;
 import io.github.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Многопоточные стресс-тесты: Изоляция снимков и Lock-Free барьеры XdStorageResourceCache")
+@Tag("stress")
 public class XdStorageResourceCacheStressTest {
 
     private static final int PARALLEL_THREADS = 8; // По количеству ядер/потоков из упавшего лога

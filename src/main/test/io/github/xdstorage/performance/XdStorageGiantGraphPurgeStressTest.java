@@ -13,6 +13,7 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Экстремальный ORM-тест: Каскадный пурдж гигантского случайного графа")
+@Tag("stress")
 public class XdStorageGiantGraphPurgeStressTest {
 
     private static IXdStorage storage = null;

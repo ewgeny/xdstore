@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Стресс-тест MVCC: Экстремальная изоляция вложенных транзакций")
+@Tag("stress")
 public class XdStorageNestedTransactionIsolationStressTest {
 
     private static IXdStorage storage = null;

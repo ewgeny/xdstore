@@ -76,12 +76,10 @@
             <version>2.0.20</version>
         </dependency>
 
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.2</version>
-            <scope>test</scope>
-        </dependency>
+        <!-- T-2 vintage cleanup (docs/tasks/2.1.0/05): JUnit 4 removed — the last three
+             vintage classes were migrated to JUnit 5 (they had been silently dead: the
+             JUnit Platform provider needs the vintage engine to run JUnit 4 classes, and
+             none was ever configured). Tag semantics are now uniform across the estate. -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
@@ -296,7 +294,14 @@
     <profiles>
         <!-- C-2: быстрый гейт без известных флаки-семей (docs/FLAKY.md).
              Полный суит (включая флаки) остается умолчанием: mvn clean test.
-             Включение: mvn clean test -Pquick-gate -->
+             Включение: mvn clean test -Pquick-gate
+             T-2 (docs/tasks/2.1.0/05): this profile deliberately does NOT switch to
+             <excludedGroups>stress,integration — its contract is "documented flaky families
+             only" (the 4-name list below), which the two structural tags cannot express:
+             tagging everything stress would pull 16 non-flaky stress classes out of the dev
+             loop. The release profile is tag-driven since 2.1.0; reconsider this profile's
+             mechanism together with the 3.0 backstop removal (a dedicated flaky tag would
+             be the way). -->
         <profile>
             <id>quick-gate</id>
             <build>
@@ -345,12 +350,18 @@
                             <includes>
                                 <include>**/*Test.java</include>
                             </includes>
+                            <!-- T-2 (docs/tasks/2.1.0/05): the tag-driven exclusion is now the
+                                 primary mechanism — every *StressTest class and every integration
+                                 class carries @Tag("stress") / @Tag("integration") (the pairing
+                                 contract is enforced by XdStorageTestGroupingContractTest in the
+                                 default run). The filename patterns below stay as the 2.1.0
+                                 backstop; their removal is scheduled for 3.0. -->
+                            <excludedGroups>stress,integration</excludedGroups>
                             <excludes>
                                 <!-- Release builds run the correctness suite only: every
                                      *StressTest family, the Xml multithread stress, and the
                                      integration package — the slow and load-sensitive part of
-                                     the run (the same stress classes the quick-gate profile
-                                     quarantines). They stay mandatory in the nightly and the
+                                     the run. They stay mandatory in the nightly and the
                                      RC protocol (docs/RELEASE-PLAN.md § Quality bar). -->
                                 <exclude>**/*StressTest.java</exclude>
                                 <exclude>**/XmlDataStorageMultithreadsTest.java</exclude>

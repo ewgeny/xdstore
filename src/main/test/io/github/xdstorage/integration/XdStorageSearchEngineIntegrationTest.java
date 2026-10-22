@@ -13,6 +13,7 @@ import io.github.xdstorage.search.query.XdStorageCriterion;
 import io.github.xdstorage.search.query.XdStoragePrimaryCriterion;
 import io.github.xdstorage.search.query.XdStorageSearchQuery;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Интеграционное тестирование поискового движка на реальном файловом хранилище")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Tag("integration")
 public class XdStorageSearchEngineIntegrationTest {
 
     private static final String STORAGE_NAME = "search-e2e-engine";

@@ -10,14 +10,20 @@ checklist, the recurring release procedure, and standing recommendations.
     grep's exit code — the R-52 gotcha), the JMH smoke row assertion passing, and every open
     [FLAKY.md](FLAKY.md) row named in the release notes.
   - **The tag pipeline (automated, on tag push)** — the NON-STRESS suite via the `release`
-    profile (`mvn clean deploy -Prelease`: the profile excludes `**/*StressTest.java` +
-    `XmlDataStorageMultithreadsTest` + the `integration` package — the slow, load-sensitive
-    part of the run; ~677 of ~714 tests, seconds instead of minutes) plus the JMH smoke row
+    profile (`mvn clean deploy -Prelease`: the profile excludes the `stress` / `integration`
+    **tags** (T-2, primary mechanism since 2.1.0) with the legacy filename patterns
+    (`**/*StressTest.java` + `XmlDataStorageMultithreadsTest` + the `integration` package) kept
+    as a backstop until 3.0 — the slow, load-sensitive part of the run) plus the JMH smoke row
     assertion. The deploy phase cannot run unless the test phase passed — they share one
     Maven invocation.
   - Stress coverage is therefore mandatory twice around every release: nightly ×3 + RC
     protocol ×3. The pipeline skipping it is a speed choice, never a safety hole — do not
     tag without the RC protocol.
+  - **Grouping contract (T-2):** a stress/integration class is BOTH named per convention
+    (`*StressTest`, or living in the `integration` package) AND tagged
+    (`@Tag("stress")` / `@Tag("integration")`). The pairing is enforced in both directions by
+    `XdStorageTestGroupingContractTest` in the default run — a misnamed or untagged class fails
+    the build instead of silently joining or leaving the release gate.
 - **Versioning** — strict semver from 2.0.0. MAJOR = public API break or on-disk format break;
   MINOR = features, config-default changes, additive format changes; PATCH = fixes only.
 - **Single source of truth for the version** — the pom `<version>`. It reaches the jar as the

@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("4. Комплексный ультра-стресс тест фасада СУБД и Б+Дерево индексов")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Tag("stress")
 public class XdStorageFacadeStressTest extends AbstractXdStorageTest {
 
     private static final Logger log = LogManager.getLogger(XdStorageFacadeStressTest.class);

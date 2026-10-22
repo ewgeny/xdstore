@@ -3,6 +3,7 @@ package io.github.xdstorage.performance;
 import io.github.xdstorage.*;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Оптимизированный стресс-тест СУБД (Поинт Г).
  * Внедряет адаптивный Exponential Backoff для разведения конкурирующих транзакций во времени.
  */
+@Tag("stress")
 public class XdStorageStressTest {
 
     private static final String STRESS_DIR = "./target/stress_test_storage";

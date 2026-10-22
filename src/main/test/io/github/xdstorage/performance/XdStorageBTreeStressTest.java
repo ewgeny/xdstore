@@ -5,6 +5,7 @@ import io.github.xdstorage.btree.XdStorageBTree;
 import io.github.xdstorage.btree.XdStorageBTreeId;
 import io.github.xdstorage.exceptions.XdStorageException;
 import io.github.xdstorage.transaction.IXdStorageTransaction;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @DisplayName("Многопоточные стресс-тесты: Изоляция B+ Дерева индексов при каскадных сплитах")
+@Tag("stress")
 public class XdStorageBTreeStressTest {
 
     private static final int PARALLEL_THREADS = 8;

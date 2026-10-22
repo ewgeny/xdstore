@@ -29,6 +29,14 @@ tests (20 classes × 10 consecutive surefire passes, 2026-10-19 night).
 - A run is judged by Maven's own `BUILD SUCCESS`/`Tests run: N, Failures: M` line — **never by a
   piped grep's exit code** (the R-52 gotcha: `mvn test | grep ERROR; echo $?` reports grep's status
   and a failed build masqueraded as success until launch).
+- **T-2 grouping contract** (docs/tasks/2.1.0/05): a stress class is BOTH named per convention
+  (`*StressTest`, or the legacy-named `XmlDataStorageMultithreadsTest`) AND carries
+  `@Tag("stress")`; integration classes live in the `integration` package AND carry
+  `@Tag("integration")`. The pairing is enforced in both directions by
+  `XdStorageTestGroupingContractTest` in the default run; the `release` profile excludes by tag
+  since 2.1.0 (filename patterns kept as a backstop until 3.0). The `quick-gate` profile stays
+  name-based — its "documented flaky families only" contract cannot be expressed with the two
+  structural tags.
 - Storage name + directory must be **unique per test run** (R-50 stale-dir contamination):
   `File.delete` legally fails on IDE-held files → the storage parses stale disk state → confusing
   first-save failures. Never gate test logic on `deleteDir` success.
