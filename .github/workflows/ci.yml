@@ -68,6 +68,7 @@ jobs:
             grep -E "Tests run: [0-9]+, Failures" /tmp/mvn-nightly-$i.log | tail -1
           done
       - name: JMH smoke (canonical suite, quick mode — BENCH docs/tasks/2.1.0/13)
+        id: smoke
         run: |
           # The unified entry point (conditions protocol + manifests). CI runners are
           # dedicated 2-vCPU boxes: the dev-machine loadavg gate is raised here via the
@@ -83,6 +84,62 @@ jobs:
           # (incl. the FP-1a/FP-1b shapes absorbed into the canonical set).
           if [ "$CANON" -lt 9 ]; then echo "EXPECTED 9 canonical rows, got $CANON — a trial failed and JMH skipped it silently"; exit 1; fi
           if [ "$SEARCH" -lt 14 ]; then echo "EXPECTED 14 search-engine rows, got $SEARCH — a trial failed and JMH skipped it silently"; exit 1; fi
+
+      # ---- D-4 (docs/tasks/2.1.0/11): persist per-scenario scores, alert on a drop ----
+
+      - name: Extract JMH scores (the dated artifact payload)
+        if: always() && steps.smoke.outcome == 'success'
+        run: |
+          RUN_DIR=$(ls -dt target/bench-results/*-quick | head -1)
+          DATE=$(date -u +%F)
+          python3 scripts/jmh-scores.py extract "$RUN_DIR/jmh-quick.json" "jmh-scores-$DATE.json"
+          cp "jmh-scores-$DATE.json" jmh-scores.json
+
+      - name: Find the previous nightly run (for the D-4 comparison)
+        id: prev
+        if: always() && steps.smoke.outcome == 'success'
+        run: |
+          PREV=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=5" \
+            --jq ".workflow_runs[] | select(.id != ${{ github.run_id }}) | .id" | head -1)
+          echo "run_id=$PREV" >> "$GITHUB_OUTPUT"
+          echo "previous nightly run: ${PREV:-none}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download the previous scores artifact
+        id: download
+        if: steps.prev.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: jmh-scores-latest
+          path: prev-scores
+          run-id: ${{ steps.prev.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Compare against the previous nightly (D-4 regression alert)
+        if: steps.download.outcome == 'success'
+        run: |
+          # The table lands in the job summary; ::warning:: annotations (any scenario
+          # >25% slower) flow to the job log. Detection, NOT gating — never fails the run.
+          python3 scripts/jmh-scores.py compare prev-scores/jmh-scores.json jmh-scores.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the rolling scores artifact (last nightly wins)
+        if: always() && steps.smoke.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmh-scores-latest
+          path: jmh-scores.json
+          retention-days: 90
+          overwrite: true
+
+      - name: Upload the dated scores artifact (90-day history)
+        if: always() && steps.smoke.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmh-scores-${{ github.run_id }}
+          path: jmh-scores.json
+          retention-days: 90
       - name: Archive nightly logs
         if: always()
         uses: actions/upload-artifact@v4

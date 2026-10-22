@@ -39,6 +39,17 @@ JDK, CPU model, loadavg, config flags inside `manifest.json`).
   (1.2k → 3.5k → 7.5k → 11k): batching amortizes the commit; the per-tx fixed cost dominates
   small batches.
 
+#### Nightly regression watch (D-4, docs/tasks/2.1.0/11)
+
+Every nightly the smoke's quick scores are persisted as workflow artifacts (`jmh-scores-latest`
+= last nightly wins; `jmh-scores-<date>` dated copies, 90-day retention) and compared against
+the previous nightly's scores. Any scenario **>25% slower** emits a `::warning::` annotation,
+and the full delta table lands in the job summary. Semantics: **detection, not gating** — the
+alert never fails the run. Quick-mode single-iteration numbers on shared runners are noisy:
+a warning means "re-measure on a quiet machine (`scripts/run-benchmarks.sh full`)", exactly
+the discipline BENCHMARKS.md has always prescribed. A missing previous artifact (first runs,
+pruned history) skips the comparison silently. The gate job is unaffected.
+
 #### Canonical tables (generated; full mode; result set 2026-10-22-185216)
 
 #### `XdStorageCanonicalBenchmark`
