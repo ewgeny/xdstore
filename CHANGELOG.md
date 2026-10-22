@@ -150,6 +150,27 @@ The 2.0 engineering campaign is journaled in detail in
 
 ### Fixed
 
+- **BUG-C — numeric ids are addressable by id after a reopen** (2.1.0/17): the hash id-index
+  resource restored record keys without the ENTITY's id-field type (`Long 9000` vs stored
+  `"9000"`), so every numeric-id lookup missed after reopen — generated and explicit alike;
+  String ids masked it for years. Keys are now typed on cache fill; no migration needed
+  (on-disk records were always correct).
+- **BUG-D — `UUID_GENERATOR` now generates** (2.1.0/14): the property never activated
+  auto-generation (all three gates covered: both id-index resources at save time + the
+  writer's four write-out sites, unified into one helper); the mux validates
+  UUID_GENERATOR to String ids loudly; the README id-generation matrix replaces the
+  incorrect "client assigns" text.
+- **BUG-A — a structure update can no longer strand the folder** (2.1.0/15): journal/data
+  records embed `java.lang.Class` values that raw `Class.forName` could not resolve for
+  application-loaded entity generations → null identity → a replay NPE that made the
+  folder unopenable. Class resolution now goes through the metadata registry (any
+  classloader), unresolvable journal upserts are skipped loudly (documented recovery),
+  and the codegen shared loader bridges application code sources.
+- **BUG-B refined, open** (2.1.0/16): after the A/C fixes the remaining seam is precise —
+  the codegen wrapper identity is NAME-based, so two live generations of one entity FQCN
+  collide on one wrapper class. Filed with the exact reproduction; generation-aware
+  wrapper identity is the design decision to make.
+
 - **Track A flake families** (R-54..R-58): facade-storm, GraphPhantom and Xml purge flakes
   resolved — 10/10 all-stress gate, full suite green; 13 regression pins (`333e864`).
 - **StackOverflowError on deep B+trees** (R-59): iterative leaf-chain walk in
