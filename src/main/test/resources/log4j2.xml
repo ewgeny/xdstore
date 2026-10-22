@@ -21,7 +21,7 @@
     <Loggers>
         <!-- Engine: INFO+ to the file; the console (shared, ThresholdFilter=warn) shows
              engine WARN/ERROR only — no per-operation INFO on stdout during builds. -->
-        <Logger name="io.github.xdstorage" level="info" additive="false">
+        <Logger name="io.github.xdstorage" level="info" additivity="false">
             <AppenderRef ref="xdstorage-file"/>
             <AppenderRef ref="STDOUT"/>
         </Logger>

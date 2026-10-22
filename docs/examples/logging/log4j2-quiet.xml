@@ -21,7 +21,7 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="io.github.xdstorage" level="info" additive="false">
+        <Logger name="io.github.xdstorage" level="info" additivity="false">
             <AppenderRef ref="file"/>
             <AppenderRef ref="STDOUT"/>
         </Logger>
