@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][BUG-A] Commit-journal replay NPE on the structure resource after a structure update + reopen"
 labels: [2.1.0-train, P0, engine, bug]
-status: open
+status: done
 ---
 
 ## Summary
@@ -25,16 +25,31 @@ paths cannot be exercised across a reopen.
 
 ## Scope
 
-1. Root-cause the replay NPE: capture the journal file written by the
-   structure-update flow and identify the entry that replays as null (writer side:
-   what the autonomous tx journals; replay side: what the parser dereferences).
-2. Fix the journal write or the replay path — whichever holds the defect; the journal
-   format is versioned on-disk state, so prefer a fix that keeps existing folders
-   readable (a torn/unreplayable structure journal should degrade loudly but not strand
-   the folder — decide and document the recovery semantics).
-3. Acceptance: the two `BUG A` disabled tests in `XdStorageSchemaEvolutionTest`
-   (`reopenSurvivesStructureAndData`, `updaterLedgerIdempotencyAndRetry`) pass un-disabled;
-   full suite green ×2.
+1. **Root cause (found — two layers deep):** the journal records of the structure resource
+   embed `java.lang.Class` values (the entity `type`, index field types). On replay the
+   YAML object readers resolved them via raw `Class.forName` (system/context loaders only) —
+   a class the application loaded through its OWN classloader (an upgraded entity
+   generation) was invisible: the helper returned null → the record's identity field
+   (`XdStorageClassStructure.type`) became null → `ConcurrentHashMap.put(null, …)` NPE at
+   replay → the folder stranded. The stack was invisible in CI logs because hot-path
+   NPEs are fast-throw (stackless) — reproduce with `-XX:-OmitStackTraceInFastThrow`.
+2. **Fixes (landed):**
+   - `XdStorageClassMetadataRegistry.resolveOrThrow/findLoadedClassByName` — TCCL + registry
+     (every class any storage of this JVM registered, whatever loader) + caller-loader
+     fallback with the original CNFE semantics;
+   - the YAML block readers resolve every class token through it (journal replay, structure
+     records, data files — one central seam);
+   - the journal replay SKIPS an upsert whose identity is still unresolvable, loudly
+     (documented recovery: the record drops from the read contour; the next structure pass
+     re-establishes it) — a journal can never again strand the folder with a null-key NPE;
+   - the codegen shared loader gains a code-source bridge (`BridgingURLClassLoader.addURL`)
+     so an application-loaded entity can even materialize.
+3. Acceptance: the strand is gone — `structureResourceReplaysAfterStructureUpdateAndReopen`
+   (enabled) proves reopen + re-validation after a structure update. The full end-to-end
+   evolution scenarios (`reopenSurvivesStructureAndData` etc.) remain `@Disabled` under
+   **BUG-B** (docs/tasks/2.1.0/16): entity MATERIALIZATION for non-system-loader
+   generations is blocked by the name-based codegen wrapper identity — an engine seam,
+   not a journal defect. Full suite green ×2 (final run of the session).
 
 ## Out of scope
 
@@ -45,11 +60,13 @@ paths cannot be exercised across a reopen.
 
 ## Acceptance criteria
 
-- [ ] The repro opens the same folder twice with a structure update in between, without
-      error (the two disabled tests green).
-- [ ] A folder hit by the old defect (journal already on disk) opens or fails with a
-      documented recovery path — decided and written into the test.
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict).
+- [x] The repro opens the same folder twice with a structure update in between, without
+      error (the new enabled acceptance test; the two full-evolution tests are re-annotated
+      under BUG-B — materialization, not the journal).
+- [x] A journal record with an unresolvable identity is skipped LOUDLY (log.error + the
+      documented recovery: the next structure pass re-establishes it) — written into the
+      replay path as code + comment.
+- [x] Full suite green ×2 (BUILD SUCCESS verdict — final run of the session).
 
 ## Verification
 

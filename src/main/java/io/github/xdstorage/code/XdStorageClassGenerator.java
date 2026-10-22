@@ -22,7 +22,7 @@ public class XdStorageClassGenerator {
     // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ: Выносим URLClassLoader в единое статическое переиспользуемое поле СУБД!
     // Это полностью пресекает утечки памяти в Metaspace JVM и ликвидирует взаимные дедлоки
     // параллельных потоков при иерархическом вызове Class.forName()!
-    private static final URLClassLoader sharedClassLoader;
+    private static final BridgingURLClassLoader sharedClassLoader;
 
     static {
         try {
@@ -30,10 +30,9 @@ public class XdStorageClassGenerator {
             if (!path.exists()) {
                 path.mkdirs();
             }
-            sharedClassLoader = URLClassLoader.newInstance(
+            sharedClassLoader = new BridgingURLClassLoader(
                     new URL[]{new File(CODE_DIRECTORY).toURI().toURL()},
-                    XdStorageClassGenerator.class.getClassLoader()
-            );
+                    XdStorageClassGenerator.class.getClassLoader());
         } catch (Exception e) {
             throw new RuntimeException("Критическая ошибка инициализации транзакционного ClassLoader СУБД", e);
         }
@@ -107,6 +106,18 @@ public class XdStorageClassGenerator {
         }
         if (success) {
             try {
+                // BUG-A/B: make the entity's own code source linkable through the shared loader
+                // BEFORE the generated wrapper loads — the wrapper's supertype IS the entity.
+                for (Class<?> c = cl; c != null && c != Object.class; c = c.getSuperclass()) {
+                    try {
+                        final java.security.CodeSource source = c.getProtectionDomain().getCodeSource();
+                        if (source != null && source.getLocation() != null) {
+                            sharedClassLoader.addURL(source.getLocation());
+                        }
+                    } catch (final Exception e) {
+                        log.debug("cannot bridge code source of {} into the shared loader", c.getName(), e);
+                    }
+                }
                 final Map<Class<?>, Class<?>> result = new HashMap<>();
                 for (final Map.Entry<String, String> entry : generatedCode.entrySet()) {
                     // Используем наш единый разделяемый sharedClassLoader СУБД
@@ -119,6 +130,23 @@ public class XdStorageClassGenerator {
             }
         }
         return new HashMap<>();
+    }
+
+    /**
+     * BUG-A/B (docs/tasks/2.1.0/15, /16): the shared loader can BRIDGE in the code source of
+     * application-loaded entity classes — an entity the app provided through its own
+     * classloader (an upgraded generation) must become visible here, or the generated wrapper
+     * fails to LINK (NoClassDefFoundError on the entity supertype at defineClass).
+     */
+    private static final class BridgingURLClassLoader extends URLClassLoader {
+        BridgingURLClassLoader(final URL[] urls, final ClassLoader parent) {
+            super(urls, parent);
+        }
+
+        @Override
+        public void addURL(final URL url) {
+            super.addURL(url);
+        }
     }
 
     private static String buildCompilationClasspath(final Class<?> cl) {

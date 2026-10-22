@@ -1,5 +1,6 @@
 package io.github.xdstorage.serialization.yaml;
 
+import io.github.xdstorage.utils.XdStorageClassMetadataRegistry;
 import io.github.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 
 import java.lang.reflect.Method;
@@ -33,7 +34,7 @@ public class XdStorageYamlBlockContainersReader {
 
         if (className == null || enumValue == null) return null;
 
-        final Class<?> cl = Class.forName(className);
+        final Class<?> cl = XdStorageClassMetadataRegistry.resolveOrThrow(className);
         final Method m = cl.getMethod("valueOf", String.class);
         return m.invoke(cl, enumValue);
     }
@@ -45,7 +46,7 @@ public class XdStorageYamlBlockContainersReader {
             return null;
         }
 
-        Class<?> cl = Class.forName(classToken.value);
+        Class<?> cl = XdStorageClassMetadataRegistry.resolveOrThrow(classToken.value);
         Collection<Object> collection;
         try {
             collection = (Collection<Object>) cl.newInstance();
@@ -82,7 +83,7 @@ public class XdStorageYamlBlockContainersReader {
             return null;
         }
 
-        final Class<?> component = Class.forName(classToken.value);
+        final Class<?> component = XdStorageClassMetadataRegistry.resolveOrThrow(classToken.value);
         final List<Object> items = new ArrayList<>();
 
         YamlLineToken token;
@@ -112,7 +113,7 @@ public class XdStorageYamlBlockContainersReader {
             return null;
         }
 
-        Class<?> cl = Class.forName(classToken.value);
+        Class<?> cl = XdStorageClassMetadataRegistry.resolveOrThrow(classToken.value);
         Map<Object, Object> map;
         try {
             map = (Map<Object, Object>) cl.newInstance();
@@ -198,7 +199,7 @@ public class XdStorageYamlBlockContainersReader {
 
         if (rawScalar != null && !"null".equals(rawScalar)) {
             if (typeName != null) {
-                Class<?> targetType = Class.forName(normalizePrimitiveName(typeName));
+                Class<?> targetType = XdStorageClassMetadataRegistry.resolveOrThrow(normalizePrimitiveName(typeName));
                 if (targetType == Object.class) targetType = String.class;
                 return simpleTypeHelper.simpleTypeFromString(targetType, rawScalar);
             }

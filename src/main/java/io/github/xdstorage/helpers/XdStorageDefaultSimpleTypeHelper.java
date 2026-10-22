@@ -37,8 +37,15 @@ public class XdStorageDefaultSimpleTypeHelper implements IXdStorageSimpleTypeHel
             try {
                 return ClassUtils.getClass(value);
             } catch (ClassNotFoundException e) {
-                log.error("class not found", e);
-                return null;
+                // BUG-A (docs/tasks/2.1.0/15): the value may belong to a class the application
+                // loaded through its OWN classloader (an upgraded entity generation) — invisible
+                // to ClassUtils. Resolve against the metadata registry before giving up: a null
+                // here used to degrade journal/data records into null-keyed poison.
+                final Class<?> loaded = io.github.xdstorage.utils.XdStorageClassMetadataRegistry.findLoadedClassByName(value);
+                if (loaded == null) {
+                    log.error("class not found and not registered in this JVM: {}", value, e);
+                }
+                return loaded;
             }
         }
         if (cl == Boolean.class || cl == boolean.class)

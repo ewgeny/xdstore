@@ -235,6 +235,18 @@ public class XdStorageResource extends XdStorageAbstractResource {
                     io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.readForReplay(
                             journalFile, idField.field.getType(), yamlJournalFactory);
             for (final Object upsert : replay.upserts) {
+                // BUG-A (docs/tasks/2.1.0/15) recovery semantics: a record whose id cannot be
+                // restored (its identity class was unresolvable at replay time) is SKIPPED
+                // loudly instead of poisoning the cache with a null key (the old behavior —
+                // a ConcurrentHashMap null-key NPE that stranded the whole folder at open).
+                // The identity-bearing data is re-validated by the next structure pass.
+                if (idField.get(upsert) == null) {
+                    log.error("resource {} journal replay skips an upsert with an unrestorable identity "
+                            + "(class {}): the record is dropped from the read contour — "
+                            + "run the structure update to re-establish it", getFileName(),
+                            upsert != null ? upsert.getClass().getName() : "null");
+                    continue;
+                }
                 cache.applyCommittedJournalUpsert(upsert);
             }
             for (final Object id : replay.deletes) {

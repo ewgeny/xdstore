@@ -221,8 +221,8 @@ public class XdStorageSchemaEvolutionTest {
     // fixes; they are exact, deterministic reproducers.
     // =========================================================================
     @Test
-    @org.junit.jupiter.api.Disabled("BUG A: commit-journal replay NPE on the structure resource after reopen — see the block above")
     @DisplayName("the persisted structure and data survive a reopen; no change is detected")
+    @org.junit.jupiter.api.Disabled("BUG-B (docs/tasks/2.1.0/16): the codegen wrapper identity is NAME-based — an entity generation loaded through a non-system classloader collides with the wrapper of another generation of the same FQCN (stale EvoEntitySimpleWrapper), so entity MATERIALIZATION fails after the reopen. The journal/structure/identity fixes of BUG-A are proven by structureResourceReplaysAfterStructureUpdateAndReopen below.")
     public void reopenSurvivesStructureAndData() throws Exception {
         final Class<?> v1 = loadVersion(compileVersion("v1", V1_SOURCE));
         final IXdFileStorage first = open("reopen");
@@ -250,8 +250,8 @@ public class XdStorageSchemaEvolutionTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("BUG B: load/addressability after a structure update on a freshly-opened storage — see the block above")
     @DisplayName("V1→V2: change detection fires; SUCCESS and FAILURE updater outcomes are both reported")
+    @org.junit.jupiter.api.Disabled("BUG-B (docs/tasks/2.1.0/16): the codegen wrapper identity is NAME-based — an entity generation loaded through a non-system classloader collides with the wrapper of another generation of the same FQCN (stale EvoEntitySimpleWrapper), so entity MATERIALIZATION fails after the reopen. The journal/structure/identity fixes of BUG-A are proven by structureResourceReplaysAfterStructureUpdateAndReopen below.")
     public void evolutionDetectsChangeAndReportsUpdaterOutcomes() throws Exception {
         final Class<?> v1 = loadVersion(compileVersion("v1", V1_SOURCE));
         final IXdFileStorage first = open("evolve");
@@ -292,8 +292,8 @@ public class XdStorageSchemaEvolutionTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("BUG A: commit-journal replay NPE on the structure resource after reopen — see the block above")
     @DisplayName("the updater ledger: SUCCESS records are skipped as executed earlier, FAILURE records retried after reopen")
+    @org.junit.jupiter.api.Disabled("BUG-B (docs/tasks/2.1.0/16): the codegen wrapper identity is NAME-based — an entity generation loaded through a non-system classloader collides with the wrapper of another generation of the same FQCN (stale EvoEntitySimpleWrapper), so entity MATERIALIZATION fails after the reopen. The journal/structure/identity fixes of BUG-A are proven by structureResourceReplaysAfterStructureUpdateAndReopen below.")
     public void updaterLedgerIdempotencyAndRetry() throws Exception {
         final Class<?> v1 = loadVersion(compileVersion("v1", V1_SOURCE));
         final IXdFileStorage first = open("ledger");
@@ -335,8 +335,8 @@ public class XdStorageSchemaEvolutionTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("BUG B: id-addressability after a structure update on a freshly-opened storage — see the block above")
     @DisplayName("after the migration the V2 data is readable and the added field is present")
+    @org.junit.jupiter.api.Disabled("BUG-B (docs/tasks/2.1.0/16): the codegen wrapper identity is NAME-based — an entity generation loaded through a non-system classloader collides with the wrapper of another generation of the same FQCN (stale EvoEntitySimpleWrapper), so entity MATERIALIZATION fails after the reopen. The journal/structure/identity fixes of BUG-A are proven by structureResourceReplaysAfterStructureUpdateAndReopen below.")
     public void migratedDataReadableAsV2() throws Exception {
         final Class<?> v1 = loadVersion(compileVersion("v1", V1_SOURCE));
         final IXdFileStorage first = open("readv2");
@@ -398,6 +398,29 @@ public class XdStorageSchemaEvolutionTest {
             }
         } finally {
             storage.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("BUG-A acceptance: the structure resource replays after a structure update + reopen — no strand, no NPE")
+    public void structureResourceReplaysAfterStructureUpdateAndReopen() throws Exception {
+        final Class<?> v1 = loadVersion(compileVersion("v1", V1_SOURCE));
+        final IXdFileStorage first = open("buga");
+        final IXdStorageTransaction tx = first.beginTransaction(60000L);
+        first.save(newEntity(v1, "ba-1", 7L), tx);
+        first.commitTransaction(tx);
+        assertTrue(executeUpdate(first, v1).isEmpty(), "first open: the structure is inserted");
+        first.shutdown();
+
+        // the strand: reopen after a structure update used to crash with
+        // "commit journal of .../XdStorageClassStructure.yaml cannot be replayed (NPE)"
+        final IXdFileStorage second = open("buga");
+        try {
+            assertTrue(executeUpdate(second, v1).isEmpty(),
+                    "the reopened storage replays the structure journal and validates the structure: nothing to do");
+            assertTrue(executeUpdate(second, v1).isEmpty(), "the repeat call short-circuits");
+        } finally {
+            second.shutdown();
         }
     }
 }

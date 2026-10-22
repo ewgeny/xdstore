@@ -1,5 +1,6 @@
 package io.github.xdstorage.serialization.yaml;
 
+import io.github.xdstorage.utils.XdStorageClassMetadataRegistry;
 import io.github.xdstorage.helpers.IXdStorageSimpleTypeHelper;
 import io.github.xdstorage.object.XdStorageIdentifiableObject;
 import io.github.xdstorage.utils.XdStorageClassInfo;
@@ -26,7 +27,7 @@ public class XdStorageYamlBlockObjectsReader {
         }
 
         token = tokenizer.nextToken();
-        final Class<?> cl = Class.forName(token.value);
+        final Class<?> cl = XdStorageClassMetadataRegistry.resolveOrThrow(token.value);
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
 
         Map<String, XdStorageObjectField> props = propertiesCache.get(cl);
@@ -107,7 +108,7 @@ public class XdStorageYamlBlockObjectsReader {
 
         if (rawScalarValue != null && !"null".equals(rawScalarValue)) {
             if (fieldTypeName != null && !"null".equals(fieldTypeName)) {
-                Class<?> targetType = Class.forName(normalizePrimitiveName(fieldTypeName));
+                Class<?> targetType = XdStorageClassMetadataRegistry.resolveOrThrow(normalizePrimitiveName(fieldTypeName));
                 if (targetType == Object.class) targetType = String.class;
                 finalValue = simpleTypeHelper.simpleTypeFromString(targetType, rawScalarValue);
             } else {
@@ -170,7 +171,7 @@ public class XdStorageYamlBlockObjectsReader {
 
         if (className == null) return null;
 
-        final Class<?> entityClass = Class.forName(className);
+        final Class<?> entityClass = XdStorageClassMetadataRegistry.resolveOrThrow(className);
         final Object result = entityClass.newInstance();
 
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(entityClass);
@@ -195,7 +196,7 @@ public class XdStorageYamlBlockObjectsReader {
 
     public static Object readObjectData(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         YamlLineToken token = tokenizer.nextToken();
-        final Class<?> cl = Class.forName(token.value);
+        final Class<?> cl = XdStorageClassMetadataRegistry.resolveOrThrow(token.value);
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
         final XdStorageObjectIdField idField = clInfo.getIdField();
 
@@ -247,7 +248,7 @@ public class XdStorageYamlBlockObjectsReader {
                     Object finalValue = null;
                     if (rawScalar != null && !"null".equals(rawScalar)) {
                         if (fTypeName != null) {
-                            Class<?> targetType = Class.forName(normalizePrimitiveName(fTypeName));
+                            Class<?> targetType = XdStorageClassMetadataRegistry.resolveOrThrow(normalizePrimitiveName(fTypeName));
                             if (targetType == Object.class) targetType = String.class;
                             finalValue = simpleTypeHelper.simpleTypeFromString(targetType, rawScalar);
                         } else {

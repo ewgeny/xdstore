@@ -22,18 +22,36 @@ id-addressability after its structure is migrated is silent data unavailability.
 dual-classloader scenario is not exotic: it is exactly what an application upgrade
 (older entity class version on disk, newer class in the running JVM) looks like.
 
+## Root cause (precisely characterized by the BUG-A session, 2026-10-23)
+
+The journal replay and identity resolution are FIXED (docs/tasks/2.1.0/15): after the
+fixes, the reopened storage OPENS, the id-index resolves, the data is found — and the
+object still cannot be MATERIALIZED. The remaining seam is the codegen wrapper identity:
+
+- every stored entity is wrapped (`XdStorageSimpleWrapperClassCodeGenerator`) under a
+  NAME-based wrapper class (`<Entity>SimpleWrapper`) in one shared code directory, loaded
+  through one shared classloader (`XdStorageClassGenerator.sharedClassLoader`);
+- two LIVE generations of one FQCN (V1 saved by storage-1, V2 loaded by the app through
+  its own loader) collide on that one wrapper name: the first generation's wrapper class
+  wins `Class.forName`, and the second generation's object fails instantiation with
+  `NoSuchMethodException: <Wrapper>.<init>(Object, evolution.EvoEntity, IXdStorage)` —
+  exactly reproducible with `XdStorageSchemaEvolutionTest`'s dual-classloader scenarios
+  (their `@Disabled` annotations carry the signature).
+
+The fix is a DESIGN decision, not a patch: generation-aware wrapper identity (loader-
+or-content-qualified wrapper names with per-generation loading), or wrapper-less
+materialization for non-system-loader classes. Both touch the codegen contract that the
+whole read path depends on — hence the task stays open and scoped to the 2.2.0-class
+surgery tier alongside W-4.
+
 ## Scope
 
-1. Root-cause: walk the load-by-id path (`lockIndexResource` → resource id → data read)
-   for a non-system-loader class after a structure update; compare with the working
-   plain-class probe. Suspects: class-name vs classloader-qualified keying in the id
-   index or the metadata registry, and the structure pass re-registering the class
-   under a second identity.
-2. Fix the identity model (one class, one id-index identity, loader-independent).
-3. Acceptance: the two `BUG B` disabled tests in `XdStorageSchemaEvolutionTest`
-   (`evolutionDetectsChangeAndReportsUpdaterOutcomes`, `migratedDataReadableAsV2`)
-   pass un-disabled — change detection fires, the migrated object is readable through
-   the V2 class with its persisted fields intact.
+1. Decide the wrapper identity model (generation-qualified names vs wrapper-less
+   materialization fallback) — record it in [MASTER-PLAN.md](../../MASTER-PLAN.md) § codegen.
+2. Implement + make the four `@Disabled` dual-classloader scenarios in
+   `XdStorageSchemaEvolutionTest` pass un-disabled (change detection fires; the migrated
+   object is readable through the V2 class with its persisted fields intact).
+3. A regression: the plain-class (system-loader) probe sequence stays green.
 
 ## Out of scope
 
