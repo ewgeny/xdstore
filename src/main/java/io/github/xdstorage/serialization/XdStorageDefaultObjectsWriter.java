@@ -129,16 +129,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
 
         for (final XdStorageObjectField property : props) {
             if (property.isIdField()) {
-                final XdStorageObjectIdField idField = clInfo.getIdField();
-                if ((idField.getIdGeneretorType() == XdStorageIdGeneratorType.DATABASE_GENERATOR
-                        || idField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
-                        && idField.get(object) == null) {
-                    try {
-                        idField.set(XdStorageObserverService.getObservableWrapper(object), idGenerator.generate(cl, services.getStorage(), null));
-                    } catch (final XdStorageException e) {
-                        throw new XdStorageIOException(e);
-                    }
-                }
+                assignGeneratedIdIfNeeded(cl, object);
             }
 
             final Object value = property.get(object);
@@ -480,17 +471,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writer.append("<object name=\"").append(name).append("\" class=\"").append(cl.getName()).append("\">");
         for (final XdStorageObjectField property : props) {
             if (property.isIdField()) {
-                final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
-                final XdStorageObjectIdField idField = clInfo.getIdField();
-                if ((idField.getIdGeneretorType() == XdStorageIdGeneratorType.DATABASE_GENERATOR
-                        || idField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
-                        && idField.get(object) == null) {
-                    try {
-                        idField.set(XdStorageObserverService.getObservableWrapper(object), idGenerator.generate(cl, services.getStorage(), null));
-                    } catch (final XdStorageException e) {
-                        throw new XdStorageIOException(e);
-                    }
-                }
+                assignGeneratedIdIfNeeded(cl, object);
             }
 
             final Object value = property.get(object);
@@ -530,17 +511,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writer.append("<object class=\"").append(cl.getName()).append("\">");
         for (final XdStorageObjectField property : props) {
             if (property.isIdField()) {
-                final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
-                final XdStorageObjectIdField idField = clInfo.getIdField();
-                if ((idField.getIdGeneretorType() == XdStorageIdGeneratorType.DATABASE_GENERATOR
-                        || idField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
-                        && idField.get(object) == null) {
-                    try {
-                        idField.set(XdStorageObserverService.getObservableWrapper(object), idGenerator.generate(cl, services.getStorage(), null));
-                    } catch (final XdStorageException e) {
-                        throw new XdStorageIOException(e);
-                    }
-                }
+                assignGeneratedIdIfNeeded(cl, object);
             }
 
             final Object value = property.get(object);
@@ -577,17 +548,7 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writer.append(entityClass.getName());
         writer.append("\" classObjectId=\"");
         if (field.get(object) == null) {
-            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(entityClass);
-            final XdStorageObjectIdField idField = clInfo.getIdField();
-            if ((idField.getIdGeneretorType() == XdStorageIdGeneratorType.DATABASE_GENERATOR
-                    || idField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
-                    && idField.get(object) == null) {
-                try {
-                    idField.set(XdStorageObserverService.getObservableWrapper(object), idGenerator.generate(entityClass, services.getStorage(), null));
-                } catch (final XdStorageException e) {
-                    throw new XdStorageIOException(e);
-                }
-            }
+            assignGeneratedIdIfNeeded(entityClass, object);
         }
         writer.append(field.get(object).getClass().getName());
         final Object value = field.get(object);
@@ -637,6 +598,30 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
         writer.append("\r\n");
         for (int i = 0; i < level; ++i)
             writer.append('\t');
+    }
+
+
+    /**
+     * BUG-D (docs/tasks/2.1.0/14): the single id-generation gate of every write path. An id
+     * is engine-assigned here when it is still null and its field asks for engine
+     * generation — DATABASE_GENERATOR (Hi-Lo/UUID by id type), UUID_GENERATOR (the same
+     * mux, validated to String ids), or CUSTOM_GENERATOR (the mux resolves the SPI class).
+     * Fields without an engine generator type keep whatever the application set.
+     */
+    private void assignGeneratedIdIfNeeded(final Class<?> cl, final Object object) throws XdStorageIOException {
+        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+        final XdStorageObjectIdField idField = clInfo.getIdField();
+        final XdStorageIdGeneratorType generatorType = idField.getIdGeneretorType();
+        final boolean engineGenerates = generatorType == XdStorageIdGeneratorType.DATABASE_GENERATOR
+                || generatorType == XdStorageIdGeneratorType.UUID_GENERATOR
+                || generatorType == XdStorageIdGeneratorType.CUSTOM_GENERATOR;
+        if (engineGenerates && idField.get(object) == null) {
+            try {
+                idField.set(XdStorageObserverService.getObservableWrapper(object), idGenerator.generate(cl, services.getStorage(), null));
+            } catch (final XdStorageException e) {
+                throw new XdStorageIOException(e);
+            }
+        }
     }
 
 }

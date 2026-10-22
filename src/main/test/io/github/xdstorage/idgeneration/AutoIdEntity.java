@@ -53,4 +53,15 @@ public final class AutoIdEntity {
         public String getId() { return id; }
         public void setId(String id) { this.id = id; }
     }
+
+    /** Long id mis-declared as UUID_GENERATOR — the loud-validation test case (BUG-D contract). */
+    @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
+    public static class UuidOnLongId {
+        @XdStorageObjectId
+        @XdStorageObjectFieldProperties(idGeneratorType = XdStorageIdGeneratorType.UUID_GENERATOR)
+        private Long id;
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+    }
 }

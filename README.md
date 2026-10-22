@@ -257,8 +257,19 @@ private String name;
 ```
 
 - `length` — declared length of the field (default 255).
-- `idGeneratorType` — `DATABASE_GENERATOR` (default, storage assigns the id), `UUID_GENERATOR`
-  (the client assigns the id itself), or `CUSTOM_GENERATOR` with `idGeneratorClass`.
+- `idGeneratorType` — who assigns the id when it is still null at save time:
+
+  | `idGeneratorType` | Long / Integer id | String id |
+  |---|---|---|
+  | `DATABASE_GENERATOR` *(default)* | engine Hi-Lo batches (per class, persisted counter; a reopen burns the unused batch remainder — at most batch-size−1 ids) | engine UUID |
+  | `UUID_GENERATOR` | **loud validation error** (a numeric id cannot carry a UUID) | engine UUID |
+  | `CUSTOM_GENERATOR` + `idGeneratorClass` | the SPI class generates (constructed with the services locator when such a constructor exists, else no-arg) | same |
+
+  An app-assigned (non-null) id is **never overwritten** in any mode. Generated Long/Integer
+  ids are addressable by id after a reopen; UUID ids likewise (BUG-D contract,
+  docs/tasks/2.1.0/14 — before the fix `UUID_GENERATOR` never generated and the client had
+  to assign). A custom generator SPI implements `IXdStorageIdGenerator` — its `generate`
+  receives the entity class and the running transaction.
 
 ### Parent references and lazy children
 

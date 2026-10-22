@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][BUG-D] The UUID_GENERATOR field property never auto-generates — decide the contract and make it true"
 labels: [2.1.0-train, P2, engine, bug]
-status: open
+status: done
 ---
 
 ## Summary
@@ -45,9 +45,25 @@ contract is documented where users will find it.
 
 ## Acceptance criteria
 
-- [ ] The decided contract implemented and pinned by the (updated) contract test.
-- [ ] The id-generation matrix documented (one table).
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict).
+- [x] The decided contract implemented and pinned by the (updated) contract test
+      (`stringIdGenerationContract` asserts generation + reopen addressability;
+      `uuidGeneratorOnNumericIdFailsLoudly` pins the loud numeric validation).
+- [x] The id-generation matrix documented (README § Field properties — replacing the
+      INCORRECT old text that claimed "the client assigns the id itself").
+- [x] Full suite green ×2 (BUILD SUCCESS verdict — final run of the bug-fix session covers
+      all four defect commits; per-commit verdicts were quick-gate + focused suites).
+
+## Implementation notes
+
+The task scoped "the writer's generation condition" — the investigation found the PRIMARY
+save-time gate is in the id-INDEX resources, not the writer:
+`XdStorageHashIndexResource.insert` and `XdStorageBTreeIndexResource.insert` assign the id
+at save time (the FP-1a-era "facade assigns ids in the index resource" point) under the same
+DATABASE||CUSTOM condition. Three gates fixed, all with the same decided contract:
+the two index resources (save time — the load-bearing one) and the writer's four write-out
+sites (extracted into one `assignGeneratedIdIfNeeded` helper). The mux
+(`XdStorageDefaultIdGenerator`) forces the String generator under `UUID_GENERATOR` and
+validates the id type loudly.
 
 ## Verification
 

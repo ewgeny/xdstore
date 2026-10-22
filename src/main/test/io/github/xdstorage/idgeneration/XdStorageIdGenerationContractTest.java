@@ -123,32 +123,50 @@ public class XdStorageIdGenerationContractTest {
     }
 
     @Test
-    @DisplayName("String ids: the DATABASE default auto-generates UUIDs; the UUID_GENERATOR property does NOT (app assigns)")
+    @DisplayName("String ids: the DATABASE default and the UUID_GENERATOR property both auto-generate UUIDs")
     public void stringIdGenerationContract() throws Exception {
         final IXdFileStorage s = open();
         final IXdStorageTransaction tx = s.beginTransaction(60000L);
         final AutoIdEntity.StringId byDefault = new AutoIdEntity.StringId();
         s.save(byDefault, tx);
-        storage.commitTransaction(tx);
-
-        assertNotNull(byDefault.getId(), "a String id under the DATABASE default is auto-generated");
-        UUID.fromString(byDefault.getId()); // the String generator is the UUID generator
-
-        // actual contract (pinned): the writer auto-generates only for DATABASE and CUSTOM
-        // generator types — a field property of UUID_GENERATOR is NOT auto-generated, so a
-        // null id fails loudly at save time and the app must assign it
-        final IXdStorageTransaction tx2 = s.beginTransaction(60000L);
-        final AutoIdEntity.ExplicitUuidId unassigned = new AutoIdEntity.ExplicitUuidId();
-        assertThrows(RuntimeException.class, () -> s.save(unassigned, tx2),
-                "a UUID_GENERATOR id left null is not auto-generated — the save fails loudly");
-        storage.rollbackTransaction(tx2);
-
+        final AutoIdEntity.ExplicitUuidId generated = new AutoIdEntity.ExplicitUuidId();
+        s.save(generated, tx);
         final AutoIdEntity.ExplicitUuidId assigned = new AutoIdEntity.ExplicitUuidId();
         assigned.setId("app-chosen-id");
-        final IXdStorageTransaction tx3 = s.beginTransaction(60000L);
-        s.save(assigned, tx3);
-        storage.commitTransaction(tx3);
-        assertEquals("app-chosen-id", assigned.getId(), "an app-assigned id is preserved");
+        s.save(assigned, tx);
+        storage.commitTransaction(tx);
+
+        // BUG-D decided contract (docs/tasks/2.1.0/14, option (a)): UUID_GENERATOR generates,
+        // like the DATABASE default — the mux dispatches by id type and validates the pair
+        assertNotNull(byDefault.getId(), "a String id under the DATABASE default is auto-generated");
+        UUID.fromString(byDefault.getId());
+        assertNotNull(generated.getId(), "UUID_GENERATOR auto-generates (it never did before the fix)");
+        UUID.fromString(generated.getId());
+        assertNotEquals(byDefault.getId(), generated.getId());
+        assertEquals("app-chosen-id", assigned.getId(), "an app-assigned id is never overwritten");
+
+        // the generated ids are durable and addressable after reopen
+        s.shutdown();
+        final IXdFileStorage second = XdStorageProvider.newOrGetFileStorage("idgen-uuid-reopen-" + System.nanoTime(),
+                tempDir.resolve(lastName).toString(), 512);
+        try {
+            final IXdStorageTransaction readTx = second.beginTransaction(60000L);
+            final AutoIdEntity.ExplicitUuidId loaded =
+                    second.load(AutoIdEntity.ExplicitUuidId.class, generated.getId(), readTx);
+            second.commitTransaction(readTx);
+            assertNotNull(loaded, "the UUID_GENERATED object is addressable by its generated id after reopen");
+        } finally {
+            second.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("UUID_GENERATOR on a numeric id field fails loudly")
+    public void uuidGeneratorOnNumericIdFailsLoudly() {
+        final XdStorageDefaultIdGenerator mux = new XdStorageDefaultIdGenerator(null);
+        assertThrows(io.github.xdstorage.exceptions.XdStorageException.class,
+                () -> mux.generate(AutoIdEntity.UuidOnLongId.class, null, null),
+                "UUID_GENERATOR + Long id is a loud contract error");
     }
 
     @Test

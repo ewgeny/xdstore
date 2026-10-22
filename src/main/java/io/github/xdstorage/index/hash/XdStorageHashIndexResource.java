@@ -214,8 +214,11 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
     @Override
     public void insert(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         Object objectId = objectIdField.get(object);
+        // BUG-D (docs/tasks/2.1.0/14): UUID_GENERATOR generates here too — the mux
+        // dispatches by id type and validates UUID_GENERATOR to String id fields.
         if (objectId == null &&
                 (objectIdField.getIdGeneretorType() == XdStorageIdGeneratorType.DATABASE_GENERATOR
+                        || objectIdField.getIdGeneretorType() == XdStorageIdGeneratorType.UUID_GENERATOR
                         || objectIdField.getIdGeneretorType() == XdStorageIdGeneratorType.CUSTOM_GENERATOR)
                 && idGenerator != null) {
             objectIdField.set(XdStorageObserverService.getObservableWrapper(object), objectId = idGenerator.generate(object.getClass(), services.getStorage(), transaction));
