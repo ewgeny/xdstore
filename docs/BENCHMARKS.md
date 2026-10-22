@@ -46,6 +46,30 @@ XdStorageSearchEngineBenchmark.searchByScanNullPrimaryFieldCriterion    thrpt   
 XdStorageSearchEngineBenchmark.updateShipRenameSearchKey                thrpt    3   74.847 ±  29.508  ops/s
 ```
 
+### FP-1a: range operators (added 2026-10-22)
+
+Four scenarios joined the benchmark: `searchByPrimaryBetweenSelective` (lexicographic window over a
+small prefix of the thread's names — the walk terminates past the upper bound),
+`searchByPrimaryBetweenWide` (upper bound at the end of the band — approaches scan cost),
+`searchByPrimaryGT` (lower bound only — no early termination by design) and `searchByPrimaryIn`
+(one membership-filtered walk). Quick mode (single iteration — ballpark, same box as the table above):
+
+```
+XdStorageSearchEngineBenchmark.searchByPrimaryBetweenSelective   thrpt  22907 ops/s
+XdStorageSearchEngineBenchmark.searchByPrimaryBetweenWide        thrpt  12095 ops/s
+XdStorageSearchEngineBenchmark.searchByPrimaryGT                 thrpt  15538 ops/s
+XdStorageSearchEngineBenchmark.searchByPrimaryIn                 thrpt  23911 ops/s
+XdStorageSearchEngineBenchmark.searchByScanNotEqualsPrimary      thrpt   1506 ops/s   (the scan these replace)
+```
+
+**Reading (honest):** a selective upper-bounded range runs ~15× the scan it replaces — the walk
+terminates past the upper bound and fetches only the matching objects, while the scan visits and
+reads every record. `IN` behaves like a selective walk. A **lower-bound-only** range (`GT`/`GTE`) and a
+**wide** range degrade toward scan cost by design — documented in README § Search engine; the walk
+starts at the first leaf because the engine deliberately avoids vertical descents for
+duplicate-bearing trees (the R-46 invariant). Quick-mode rows: 9 → 13 (the nightly row assertion is a
+lower bound and stays valid).
+
 **Reading:**
 
 - **Indexed search costs ≈ a plain id load** (~470 vs ~480 ops/s): the B+tree key lookup + record read

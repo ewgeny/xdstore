@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][FP-1a] Query power pack I: GT/GTE/LT/LTE/BETWEEN/IN primaries on the ordered index"
 labels: [2.1.0-train, P0, search, engine, feature]
-status: open
+status: done
 ---
 
 ## Summary
@@ -49,15 +49,21 @@ FP-1) calls this pack "P0: cheap differentiator". Decision record:
 
 ## Acceptance criteria
 
-- [ ] **Boundary-semantics suite** (the T-3c deliverable): empty ranges, degenerate BETWEEN
+- [x] **Boundary-semantics suite** (the T-3c deliverable): empty ranges, degenerate BETWEEN
       (lo > hi), open/closed bound combinations, IN with duplicates/empty list, null handling
       for every operator, mixed-type loud failure, composition with AND/OR/NOT and child
       criteria, snapshot-isolation interplay (a range query inside a tx sees the snapshot).
-- [ ] **JMH evidence**: a new scenario in `XdStorageSearchEngineBenchmark` (range on the
+      (`XdStorageRangeSearchQueryTest`, 8 tests green.)
+- [x] **JMH evidence**: a new scenario in `XdStorageSearchEngineBenchmark` (range on the
       B+tree id index) scales **sub-linearly vs the scan it replaces**; recorded in
       BENCHMARKS.md with the Hash-fallback numbers beside it.
-- [ ] README § Search engine updated (operator table + fallback matrix).
-- [ ] Full suite green ×2; no new FLAKY rows; `CHANGELOG.md` "Added" FP-1 entry updated.
+      (4 new scenarios, quick rows 9→13: selective BETWEEN 22,907 ops/s vs scan 1,506 —
+      ~15×; wide range and lower-bound-only GT honestly degrade toward scan cost — README
+      fallback matrix. Note: the search-index trees are always ordered B+trees; the plan is
+      decided by operator, and no vertical descents exist for duplicate-bearing trees (R-46),
+      so positioning starts at the first leaf with early termination.)
+- [x] README § Search engine updated (operator table + fallback matrix).
+- [x] Full suite green ×2; no new FLAKY rows; `CHANGELOG.md` "Added" FP-1 entry updated. (727 tests, 0 failures — twice.)
 
 ## Verification
 

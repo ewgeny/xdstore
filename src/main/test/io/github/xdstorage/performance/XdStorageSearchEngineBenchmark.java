@@ -6,6 +6,7 @@ import io.github.xdstorage.search.SearchEngineCrewMember;
 import io.github.xdstorage.search.SearchEngineShip;
 import io.github.xdstorage.search.query.IXdStorageChildCriterionOperator;
 import io.github.xdstorage.search.query.IXdStorageCriterionOperator;
+import io.github.xdstorage.search.query.XdStorageRange;
 import io.github.xdstorage.search.query.XdStorageChildCriterion;
 import io.github.xdstorage.search.query.XdStorageCriterion;
 import io.github.xdstorage.search.query.XdStoragePrimaryCriterion;
@@ -300,6 +301,87 @@ public class XdStorageSearchEngineBenchmark {
     // ЗАПИСЬ (однопоточно: коммиты переписывают файлы ресурсов целиком -
     // параллельные писатели дали бы драку блокировок, а не метрику движка)
     // =========================================================================
+
+    // =========================================================================
+    // FP-1a (docs/tasks/2.1.0/09): range operators on the ordered search index.
+    // The bounded walk visits the chain from the first leaf and TERMINATES past the
+    // upper bound, so a selective upper-bounded range is sub-linear vs the scan.
+    // =========================================================================
+
+    @Benchmark
+    public java.util.Collection<SearchEngineShip> searchByPrimaryBetweenSelective(final BenchmarkSharedState shared, final ThreadState ts) throws Exception {
+        // lexicographic window [Ship-{t}-0 .. Ship-{t}-2]: a small prefix of the thread's
+        // own 100 names; the walk aborts early past the upper bound
+        final XdStorageSearchQuery query = new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.BETWEEN,
+                        new XdStorageRange("Ship-" + ts.threadIdx + "-0", "Ship-" + ts.threadIdx + "-2")), null);
+        final IXdStorageTransaction tx = shared.storage.beginTransaction(TX_TIMEOUT);
+        try {
+            final java.util.Collection<SearchEngineShip> found =
+                    shared.storage.load(SearchEngineShip.class, ID_INDEX_NAME, query, tx);
+            shared.storage.commitTransaction(tx);
+            return found;
+        } catch (final Exception e) {
+            shared.storage.rollbackTransaction(tx);
+            throw e;
+        }
+    }
+
+    @Benchmark
+    public java.util.Collection<SearchEngineShip> searchByPrimaryBetweenWide(final BenchmarkSharedState shared, final ThreadState ts) throws Exception {
+        // nearly the thread's whole band: the upper bound sits at the end of the range,
+        // so the walk cost approaches the scan — the honest "wide range" row
+        final XdStorageSearchQuery query = new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.BETWEEN,
+                        new XdStorageRange("Ship-" + ts.threadIdx + "-0", "Ship-" + ts.threadIdx + "-99")), null);
+        final IXdStorageTransaction tx = shared.storage.beginTransaction(TX_TIMEOUT);
+        try {
+            final java.util.Collection<SearchEngineShip> found =
+                    shared.storage.load(SearchEngineShip.class, ID_INDEX_NAME, query, tx);
+            shared.storage.commitTransaction(tx);
+            return found;
+        } catch (final Exception e) {
+            shared.storage.rollbackTransaction(tx);
+            throw e;
+        }
+    }
+
+    @Benchmark
+    public java.util.Collection<SearchEngineShip> searchByPrimaryGT(final BenchmarkSharedState shared, final ThreadState ts) throws Exception {
+        // lower bound only: no early termination — the honest "no-win without an upper
+        // bound" row (cost equals the scan; the operator contract is what is exercised)
+        final XdStorageSearchQuery query = new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.GT, "Ship-" + ts.threadIdx + "-95"), null);
+        final IXdStorageTransaction tx = shared.storage.beginTransaction(TX_TIMEOUT);
+        try {
+            final java.util.Collection<SearchEngineShip> found =
+                    shared.storage.load(SearchEngineShip.class, ID_INDEX_NAME, query, tx);
+            shared.storage.commitTransaction(tx);
+            return found;
+        } catch (final Exception e) {
+            shared.storage.rollbackTransaction(tx);
+            throw e;
+        }
+    }
+
+    @Benchmark
+    public java.util.Collection<SearchEngineShip> searchByPrimaryIn(final BenchmarkSharedState shared, final ThreadState ts) throws Exception {
+        // IN = ONE membership-filtered walk (not k point lookups)
+        final XdStorageSearchQuery query = new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.IN,
+                        java.util.Arrays.asList("Ship-" + ts.threadIdx + "-0", "Ship-" + ts.threadIdx + "-25",
+                                "Ship-" + ts.threadIdx + "-50", "Ship-" + ts.threadIdx + "-75", "Ship-" + ts.threadIdx + "-99")), null);
+        final IXdStorageTransaction tx = shared.storage.beginTransaction(TX_TIMEOUT);
+        try {
+            final java.util.Collection<SearchEngineShip> found =
+                    shared.storage.load(SearchEngineShip.class, ID_INDEX_NAME, query, tx);
+            shared.storage.commitTransaction(tx);
+            return found;
+        } catch (final Exception e) {
+            shared.storage.rollbackTransaction(tx);
+            throw e;
+        }
+    }
 
     @Benchmark
     @Threads(1)

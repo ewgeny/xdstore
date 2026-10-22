@@ -407,15 +407,36 @@ query.or(primaryCriterion2, criterion2);   // additional OR branches
 ```
 
 - **Primary criterion** — `new XdStoragePrimaryCriterion(operator, value)` evaluates against the primary
-  index value (the first `indexFieldNames` entry). `EQUALS` uses the B+tree directly; `NOT_EQUALS` (or a
-  `null` primary) performs a full index scan.
+  index value (the first `indexFieldNames` entry). `EQUALS` uses the B+tree directly; the range operators
+  `GT` / `GTE` / `LT` / `LTE` / `BETWEEN` / `IN` walk the ordered index with early termination; `NOT_EQUALS`
+  (or a `null` primary) performs a full index scan.
 - **Field criterion** — `new XdStorageCriterion("tonnage", operator, value)` filters fetched records by a
   secondary indexed field.
 - **Child criterion** — `new XdStorageChildCriterion(childFieldName, ChildClass.class, "fieldName",
   operator, value)` matches objects by values in their indexed child objects.
-- **Operators** — `IXdStorageCriterionOperator.{EQUALS, NOT_EQUALS, CONTAINS, IS_NULL, IS_NOT_NULL}`
-  (`CONTAINS` is a substring match on strings, case-sensitive); `IXdStorageChildCriterionOperator.CONTAINS`
-  for child criteria.
+- **Operators** — `IXdStorageCriterionOperator.{EQUALS, NOT_EQUALS, CONTAINS, IS_NULL, IS_NOT_NULL,
+  GT, GTE, LT, LTE, BETWEEN, IN}` (`CONTAINS` is a substring match on strings, case-sensitive);
+  `IXdStorageChildCriterionOperator.CONTAINS` for child criteria.
+- **Range operators (FP-1a) — comparison contract:**
+  - `BETWEEN` takes an inclusive `new XdStorageRange(from, to)`; both bounds are inclusive
+    (pinned choice); `from > to` matches nothing; a single-point range matches exactly that value.
+  - `IN` takes a `Collection` (or array); duplicates are harmless; an empty collection matches nothing;
+    membership is `equals`-based (a foreign type simply never matches — no error).
+  - **Nulls never satisfy a range operator** (`IS_NULL` / `IS_NOT_NULL` remain the null tests).
+  - Comparisons are per field type: numbers numerically, strings lexicographically, `Comparable`
+    contract otherwise. A comparable-type mismatch (e.g. a `String` bound on a numeric field) and a
+    `null` bound fail **loudly** with `XdStorageRuntimeException` — never silently-empty.
+- **Plan / fallback matrix** — the operator is API-wide; the available index decides the plan:
+
+  | Primary criterion | Plan |
+  |---|---|
+  | `EQUALS` | B+tree point lookup |
+  | `GT` / `GTE` / `LT` / `LTE` / `BETWEEN` / `IN` | ordered bounded walk of the index B+tree (early termination past the upper bound; `IN` = one membership-filtered walk; `GT`/`GTE` have no upper bound and cost like a scan) |
+  | anything else (`NOT_EQUALS`, `CONTAINS`, `IS_NULL`, …) | full index scan (unchanged) |
+
+  All plans return the same results for the same filter (verified by the boundary suite); results keep
+  today's ordering contract. The walk starts at the first leaf — the engine deliberately avoids vertical
+  descents for duplicate-bearing trees — so the win grows with selectivity of the **upper** bound.
 - **Custom predicates** — `XdStorageComplexCriterion` (`and(...)` / `or(...)`) and `XdStorageCriterionNot`
   let you compose arbitrary AND/OR/NOT filters over a record.
 
@@ -438,6 +459,19 @@ XdStorageSearchQuery orQuery = new XdStorageSearchQuery(
         new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.EQUALS, "Alpha"), null);
 orQuery.or(new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.EQUALS, "Gamma"), null);
 Collection<Ship> two = storage.load(Ship.class, "ship_idx", orQuery, tx);
+
+// range on the primary value (inclusive bounds), with a secondary-field filter
+Collection<Ship> byRange = storage.load(Ship.class, "ship_idx",
+        new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.BETWEEN,
+                        new XdStorageRange(200, 400)),          // inclusive [200, 400]
+                new XdStorageCriterion("tonnage", IXdStorageCriterionOperator.GTE, 300)), tx);
+
+// membership
+Collection<Ship> inList = storage.load(Ship.class, "ship_idx",
+        new XdStorageSearchQuery(
+                new XdStoragePrimaryCriterion(IXdStorageCriterionOperator.IN,
+                        Arrays.asList("Alpha", "Gamma", "Delta")), null), tx);
 
 // child criterion: ships of Alpha whose crew contains a member ranked "Pilot"
 Collection<Ship> byCrew = storage.load(Ship.class, "ship_idx",

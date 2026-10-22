@@ -17,11 +17,13 @@ import io.github.xdstorage.observing.XdStorageAbstractIdObserver;
 import io.github.xdstorage.observing.XdStorageObserverService;
 import io.github.xdstorage.resource.IXdStorageDaoResource;
 import io.github.xdstorage.search.data.XdStorageSearchIndexRecord;
+import io.github.xdstorage.btree.IXdStorageBTreeViewer;
 import io.github.xdstorage.search.key.XdStorageSearchIndexKey;
 import io.github.xdstorage.search.key.XdStorageSearchIndexOperationType;
 import io.github.xdstorage.search.query.IXdStorageCriterion;
 import io.github.xdstorage.search.query.IXdStorageCriterionOperator;
 import io.github.xdstorage.search.query.IXdStoragePrimaryCriterion;
+import io.github.xdstorage.search.query.XdStorageRange;
 import io.github.xdstorage.search.query.XdStorageSearchQuery;
 import io.github.xdstorage.services.XdStorageServicesLocator;
 import io.github.xdstorage.transaction.XdStorageTransaction;
@@ -425,6 +427,7 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
                                  final XdStorageSearchIndex index, final XdStoragePolicy policy, final Map<Object, T> result,
                                  final IXdStorage storage, final XdStorageBTree tree) throws XdStorageException, XdStorageConnectionException {
         final List<XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion>> notEquals = Collections.synchronizedList(new ArrayList<>());
+        final List<XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion>> ranges = Collections.synchronizedList(new ArrayList<>());
 
         final AtomicBoolean failed = new AtomicBoolean(false);
         final XdStorageException[] ex = new XdStorageException[] { null };
@@ -444,6 +447,9 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
                     failed.set(true);
                     ex[0] = new XdStorageException(e);
                 }
+            } else if (pair.a != null && isRangeOperator(pair.a.getOperator())) {
+                // FP-1a: GT/GTE/LT/LTE/BETWEEN/IN — bounded ordered walk on the search tree
+                ranges.add(pair);
             } else {
                 notEquals.add(pair);
             }
@@ -453,9 +459,129 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
             throw ex[0];
         }
 
+        for (final XdStoragePair<IXdStoragePrimaryCriterion, IXdStorageCriterion> pair : ranges) {
+            handleRangePrimaryCriterion(transaction, clInfo, policy, result, storage, tree, pair.a, pair.b);
+        }
+
         if (!notEquals.isEmpty()) {
             handleNotEqualsPrimaryCriterions(transaction, clInfo, index, policy, result, notEquals);
-            return;
+        }
+    }
+
+    /** FP-1a: the range-operator family routed to the ordered bounded walk. */
+    private static boolean isRangeOperator(final IXdStorageCriterionOperator operator) {
+        return operator == IXdStorageCriterionOperator.GT
+                || operator == IXdStorageCriterionOperator.GTE
+                || operator == IXdStorageCriterionOperator.LT
+                || operator == IXdStorageCriterionOperator.LTE
+                || operator == IXdStorageCriterionOperator.BETWEEN
+                || operator == IXdStorageCriterionOperator.IN;
+    }
+
+    /**
+     * FP-1a: evaluates one range-operator primary criterion as a bounded ordered walk of the
+     * search tree (early termination at the upper bound; IN as a single membership-filtered
+     * walk). Result semantics are identical to the scan path — the operator itself
+     * ({@code primaryCriterion.passed(record)}) is the semantic authority per record, the
+     * bounds only prune; nulls never satisfy, mixed-type bounds fail loudly.
+     */
+    private <T> void handleRangePrimaryCriterion(final XdStorageTransaction transaction, final XdStorageClassInfo clInfo,
+                                                 final XdStoragePolicy policy, final Map<Object, T> result,
+                                                 final IXdStorage storage, final XdStorageBTree tree,
+                                                 final IXdStoragePrimaryCriterion primaryCriterion,
+                                                 final IXdStorageCriterion criterion) throws XdStorageException, XdStorageConnectionException {
+        final IXdStorageCriterionOperator operator = primaryCriterion.getOperator();
+        final Object value = primaryCriterion.getValue();
+        Comparable fromKey = null;
+        boolean fromInclusive = false;
+        Comparable toKey = null;
+        boolean toInclusive = false;
+
+        if (operator == IXdStorageCriterionOperator.GT) {
+            fromKey = searchBoundKey(value, operator);
+        } else if (operator == IXdStorageCriterionOperator.GTE) {
+            fromKey = searchBoundKey(value, operator);
+            fromInclusive = true;
+        } else if (operator == IXdStorageCriterionOperator.LT) {
+            toKey = searchBoundKey(value, operator);
+        } else if (operator == IXdStorageCriterionOperator.LTE) {
+            toKey = searchBoundKey(value, operator);
+            toInclusive = true;
+        } else if (operator == IXdStorageCriterionOperator.BETWEEN) {
+            if (!(value instanceof XdStorageRange)) {
+                throw new XdStorageRuntimeException("BETWEEN requires an " + XdStorageRange.class.getSimpleName()
+                        + " criterion value, got " + (value == null ? "null" : value.getClass().getName()));
+            }
+            final XdStorageRange range = (XdStorageRange) value;
+            fromKey = searchBoundKey(range.getFrom(), operator);
+            fromInclusive = true;
+            toKey = searchBoundKey(range.getTo(), operator);
+            toInclusive = true;
+        } else if (operator == IXdStorageCriterionOperator.IN) {
+            // unbounded single walk; membership is decided per record by the operator
+        } else {
+            throw new XdStorageRuntimeException("not a range operator: " + operator);
+        }
+
+        try {
+            tree.readRange(fromKey, fromInclusive, toKey, toInclusive, storage, transaction, new IXdStorageBTreeViewer() {
+                @Override
+                public void look(final Comparable key, final Object rec) throws XdStorageException, XdStorageConnectionException {
+                    final XdStorageSearchIndexRecord record = (XdStorageSearchIndexRecord) rec;
+                    if (!primaryCriterion.passed(record)) {
+                        return;
+                    }
+                    if (criterion == null || criterion.passed(record)) {
+                        fetchIntoResult(policy, clInfo, result, record, transaction);
+                    }
+                }
+            });
+        } catch (final ClassCastException e) {
+            // the walk compares index entries with the wrapped bounds — a bound whose type
+            // differs from the indexed values fails loudly here, never silently-empty
+            throw new XdStorageRuntimeException("range operator " + operator + ": criterion bound of type "
+                    + (value == null ? "null" : value.getClass().getName())
+                    + " is not comparable with the indexed values of index criteria for class "
+                    + clInfo.getClazz().getName() + " — mixed-type comparison fails loudly", e);
+        }
+    }
+
+    private static Comparable searchBoundKey(final Object bound, final IXdStorageCriterionOperator operator) {
+        if (bound == null) {
+            throw new XdStorageRuntimeException("range operator " + operator
+                    + " requires a non-null criterion bound — IS_NULL / IS_NOT_NULL are the null tests");
+        }
+        return new XdStorageSearchIndexKey(bound, null, XdStorageSearchIndexOperationType.Search);
+    }
+
+    /**
+     * Shared tail of the index-driven fast paths: fetch the object behind an index record.
+     * A record whose object is not visible in THIS transaction's snapshot (a concurrent commit
+     * landed after the tx began — the index tree is live, the data read is snapshot-filtered)
+     * contributes nothing rather than a null element: the result set stays snapshot-consistent.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> void fetchIntoResult(final XdStoragePolicy policy, final XdStorageClassInfo clInfo,
+                                     final Map<Object, T> result, final XdStorageSearchIndexRecord record,
+                                     final XdStorageTransaction transaction) throws XdStorageException {
+        final Object objectId = record.getId();
+        try {
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageDaoResource resource = services.getResourcesManager().lockResource(record.getResourceId(), clInfo, transaction);
+                final Object object = resource.read(objectId, transaction);
+                if (object != null) {
+                    result.put(objectId, (T) object);
+                }
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource resource = services.getResourcesManager().lockObjectResource(clInfo, objectId, transaction);
+                final Object object = resource.read(objectId, transaction);
+                if (object != null) {
+                    result.put(objectId, (T) object);
+                }
+            }
+        } catch (final XdStorageException | XdStorageConnectionException e) {
+            transaction.markRollbackOnly();
+            throw new XdStorageRuntimeException(e);
         }
     }
 

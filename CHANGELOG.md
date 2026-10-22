@@ -24,8 +24,12 @@ Planned scope; items land here as they merge:
   (the PERF study §5.3 ~25 ms figure no longer reproduces — BENCHMARKS.md addendum).
   Contract coverage: committed-count metrics, snapshot isolation under a concurrent writer,
   rollback-only still throws, a parent still waits for an open nested read-only transaction.
-- **FP-1 phase 1** — query power pack: `GT`/`GTE`/`LT`/`LTE`/`BETWEEN`/`IN` primaries,
-  `ORDER BY`, `LIMIT`/`OFFSET` on the ordered B+tree primary index.
+- **FP-1 phase 1** — query power pack, range primaries: `GT`/`GTE`/`LT`/`LTE`/`BETWEEN`/`IN`
+  on the primary criterion, evaluated as an ordered bounded walk of the index B+tree with early
+  termination (selective ranges run ~15× the scan they replace; lower-bound-only and wide ranges
+  cost like a scan — README § Search engine has the operator table and plan/fallback matrix).
+  Contract: `BETWEEN` bounds are inclusive (`XdStorageRange`); nulls never satisfy a range
+  operator; mixed-type bounds fail loudly. `ORDER BY`/`LIMIT`/`OFFSET` remain planned (FP-1b).
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
   + runnable example app.
 - **D-1/D-4** — JaCoCo coverage report in CI; JMH regression alert in the nightly.

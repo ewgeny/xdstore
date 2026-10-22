@@ -606,6 +606,51 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
     }
 
     /**
+     * FP-1a (docs/tasks/2.1.0/09): ORDERED BOUNDED walk of the leaf chain — the range-operator
+     * fast path. Reuses read()'s prewarm/lock machinery (R-38/R-53) and feeds the viewer only
+     * the entries inside [fromKey, toKey]; the walk TERMINATES as soon as the chain passes the
+     * upper bound (the chain is ordered, nothing further can re-enter the range). A null bound
+     * is open on that side. No vertical descent: for duplicate-bearing trees (search indexes,
+     * multiple=true) the engine deliberately forbids descents (splits reorder duplicates across
+     * branches — see the invariant comment in find), so positioning starts at the first leaf;
+     * early termination is what makes selective upper-bounded ranges sub-linear.
+     */
+    public void readRange(final Comparable fromKey, final boolean fromInclusive,
+                          final Comparable toKey, final boolean toInclusive,
+                          final IXdStorage storage, final IXdStorageTransaction transaction,
+                          final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
+        try {
+            read(storage, transaction, new IXdStorageBTreeViewer() {
+                @Override
+                public void look(final Comparable key, final Object value) throws XdStorageException, XdStorageConnectionException {
+                    if (fromKey != null) {
+                        final int cmp = key.compareTo(fromKey);
+                        if (cmp < 0 || (cmp == 0 && !fromInclusive)) {
+                            return;
+                        }
+                    }
+                    if (toKey != null) {
+                        final int cmp = key.compareTo(toKey);
+                        if (cmp > 0 || (cmp == 0 && !toInclusive)) {
+                            throw new RangeWalkAborted();
+                        }
+                    }
+                    viewer.look(key, value);
+                }
+            });
+        } catch (final RangeWalkAborted walkedPastTheRange) {
+            // normal completion of a bounded walk — the node walk releases all its locks on the way out
+        }
+    }
+
+    /** Control-flow signal of readRange: the ordered chain walked past the upper bound. */
+    private static final class RangeWalkAborted extends XdStorageRuntimeException {
+        private RangeWalkAborted() {
+            super(null, null, false, false);
+        }
+    }
+
+    /**
      * R-38: разрешает (догружает с диска) стабы-узлы вдоль цепи листьев ДО захвата read-локов
      * обхода. Идемпотентно: загруженный канонический инстанс больше не является стабом.
      * НЕБЛОКИРУЮЩЕЕ (R-42): стаб, чей write-лок занят чужим читателем/писателем, ПРОПУСКАЕТСЯ —

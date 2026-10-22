@@ -166,7 +166,10 @@ grouping is tags, not layout.
    `LIMIT/OFFSET`): the B+tree primary index is already ordered — range scans and ordered
    iteration are nearly free, and today their absence forces O(N) scans. Acceptance: JMH shows
    range queries scaling sub-linearly vs the scan they replace; the boundary-semantics suite
-   (T-3c) is part of the feature.
+   (T-3c) is part of the feature. **PHASE 1 DONE (2.1.0):** the six range operators shipped —
+   bounded ordered walk with early termination (no vertical descents for duplicate-bearing
+   trees, R-46 invariant), selective ranges ~15× the scan (BENCHMARKS § FP-1a); boundary suite
+   `XdStorageRangeSearchQueryTest` (8 tests). `ORDER BY`/`LIMIT`/`OFFSET` = FP-1b (task 10).
 5. **T-3 gap-filling** — guided by the T-1 map.
 6. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
    "when to choose XdStorage" + runnable example app): lands LAST so it describes the shipped
