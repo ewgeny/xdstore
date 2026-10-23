@@ -102,6 +102,13 @@ Planned scope; items land here as they merge:
   one-liners on the machinery tier) and the release profile's javadoc doclint enforced —
   the published javadoc jar becomes the API reference and can no longer regress silently.
 
+- **The evaluator-facing docs track** (planned, [29](docs/tasks/2.1.0/29-readme-landing-restructure.md)
+  / [30](docs/tasks/2.1.0/30-benchmarks-context.md)) — README first screens answer
+  what/when-to-take/when-not with a ≤10-line example and the comparison table; BENCHMARKS
+  gains the field context; the write-throughput limitation is stated up front **with the
+  fix plan** ([31](docs/tasks/2.1.0/31-write-path-analysis-design.md) — the write-path
+  analysis and the W-4 design round, pulled into this train; implementation in 2.2.0).
+
 ### Fixed (planned)
 
 Still open from the defect train (**a defect discovered by a train's own work ships with the

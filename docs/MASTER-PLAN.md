@@ -220,17 +220,26 @@ grouping is tags, not layout.
     change; **D-2's JDK-21 CI matrix** (task 27) — never train-tracked before. Everything
     else stays pinned: W-4 + B3 (Step 2 — deep surgery), FP-3 AOT + FP-5 `backupTo` +
     FP-6 CLI (Step 3 — multi-session), FP-7/8/9/10/12 (demand-driven / post-FP-3).
+13. **FIELD-FEEDBACK AMENDMENT (2026-10-23, the evaluator verdict — docs-first, write-path
+    honesty):** the P0 docs track **29 (README landing restructure) → 30 (benchmarks in
+    context)** runs before new features; and **the W-4 DESIGN ROUND is pulled into this
+    train** as task 31 (P1, ASAP) — profile the write path, ledger the bottlenecks by
+    measured share, produce the solution design (index journaling + disk-anchored scans +
+    checkpointing) and publish the fix plan in the README. **The W-4 IMPLEMENTATION stays
+    2.2.0** — the train gains the analysis and the public plan, not the surgery.
 
 **2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
 recovery, JMH vs baselines, fresh-clone README walkthrough) → tag `v2.1.0`.
 
 ### Step 2 — The engine's 2.x maturity (3–5 sessions, design round first)
 
-1. **B1 / FP-4 / F-3 thaw — W-4 design round → index journaling + disk-anchored scans +
+1. **B1 / FP-4 / F-3 thaw — W-4 IMPLEMENTATION → index journaling + disk-anchored scans +
    record-cache eviction.** Removes the heap ≈ DB ceiling and the index-write amplification;
    the ≥10× write acceptance target lives here. The project's own rule holds: mandatory design
    doc, kill-9 recovery tests, honest benchmark verdicts — do not let Step 1 enthusiasm pull
-   it forward.
+   it forward. **AMENDED 2026-10-23: the design round itself was pulled into the 2.1.0 train**
+   (task 31, P1 — the field feedback demands the public analysis + fix plan); what Step 2
+   implements is the finished design, revisited against fresh numbers.
 2. **B3 — lock striping / shallower deep-lock chains** (R-29 contention removal; the only
    approaches not yet rejected — F-2). Now also closes the **last open FLAKY.md row**
    (BTreeStress anomalies under full-suite load).

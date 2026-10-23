@@ -38,6 +38,15 @@ there for the full decision record before starting an item.
 | 26 | [verify-integrity-walk](26-verify-integrity-walk.md) | VERIFY | P1, engine, testing | 1–2 d | — (FP-5's verification core pulled from Step 3; backupTo/CLI stay 2.3.0) |
 | 27 | [jdk21-ci-matrix](27-jdk21-ci-matrix.md) | JDK21 | P2, ci, chore | 0.5 d | — (D-2 pulled: the baseline is JDK-21 numbers, the gate is 17-only) |
 | 28 | [javadoc-coverage](28-javadoc-coverage.md) | JAVADOC | P1, docs, chore | 3–5 d | — (Tier-1/Tier-2 split, parallelizable; closes the RELEASE-PLAN §3 doclint promise) |
+| 29 | [readme-landing-restructure](29-readme-landing-restructure.md) | LANDING | P0, docs | 1 d | — (**the field-feedback P0 track, runs FIRST**: what/when/when-not + 10-line example + comparison + write-numbers-with-plan above the fold) |
+| 30 | [benchmarks-context](30-benchmarks-context.md) | BMCONTEXT | P0, docs, performance | 0.5 d | 29 (the entry surface it complements) |
+| 31 | [write-path-analysis-design](31-write-path-analysis-design.md) | WRTPATH | P1, engine, performance | 2–3 sess | — (profile → bottleneck ledger → the W-4 design; **impl stays 2.2.0**; feeds 29/30's fix-plan links) |
+
+**The field-feedback track (added 2026-10-23 — "more important than new features"):**
+the P0 docs track executes in order **29 → 30**, with **31 (P1, ASAP)** running in
+parallel — its design/analysis is what 29/30 publish as the write-performance fix plan.
+The content for 29/30 already exists (DECISION-GUIDE, quickstart, canonical baseline);
+the failure was the entry surface, and these tasks fix the surface, not invent content.
 
 **MASTER-PLAN pulls (added 2026-10-23):** 25–27 are what the master-plan review judged
 train-safe — additive APIs and CI, no persisted-state surgery: FP-2 `explain()` (25), FP-5's
@@ -91,6 +100,9 @@ it starts).
   exposes — shipped; 26 after 19+23 whose semantics it mechanizes — shipped)
 - **Lane H (API docs):** 28 — Tier-1/Tier-2 split is parallelizable between developers;
   the doclint tightening is the deliverable, the prose can land incrementally
+- **Lane I (field-feedback P0/P1 — BEFORE new features):** **29 → 30** (P0, in order) ∥
+  **31** (P1, ASAP — the write-path analysis + W-4 design round pulled into this train;
+  implementation stays 2.2.0)
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary
