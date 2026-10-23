@@ -50,6 +50,39 @@ a warning means "re-measure on a quiet machine (`scripts/run-benchmarks.sh full`
 the discipline BENCHMARKS.md has always prescribed. A missing previous artifact (first runs,
 pruned history) skips the comparison silently. The gate job is unaffected.
 
+#### Design point — the N=50k boundary measurement (N50K, docs/tasks/2.1.0/20)
+
+The DECISION-GUIDE publishes a design point of 10⁴–10⁵ objects per class; this is its boundary
+measurement (probe-mode: plain-Java single run, task 13's conditions protocol via
+`scripts/run-benchmarks.sh n50k`; scenario budget 120 s each; fragment size 128; result set
+[`docs/perf/design-point-2026-10-23/`](perf/design-point-2026-10-23/)).
+
+| N | heap bytes/object | bulk load obj/s | range window hits |
+|---|---|---|---|
+| 5,000 | 1,988 | 5,532 | 0 |
+| 50,000 | 1,437 | 11,437 | 14,286 |
+
+| Scenario (probe mode, single run) | N=5 000 ops/s | N=50 000 ops/s | status |
+|---|---|---|---|
+| `indexedEquals` | 42,182.9 | 34,508.8 | ok |
+| `pointRead` | 41,526.9 | 67,788.5 | ok |
+| `readOnlyTx` | 80,219.5 | 59,117.4 | ok |
+| `saveDelete` | 67.5 | 7.0 | TIMEOUT at N=50k (the ceiling finding) |
+| `selectiveRange` | 5,218.9 | 110.0 | ok |
+
+
+**Reading (honest):** reads scale comfortably to 5×10⁴ — point reads, read-only transactions and
+indexed EQUALS stay in the same 10⁴–10⁵ ops/s band as at 5×10³. The heap numbers quantify the
+ceiling: **~1.4–2.0 KB of heap per object** (≈70–100 MB at 5×10⁴ for this entity) — heap ≈ working
+set until W-4, exactly as DECISION-GUIDE § losses states. **The wall is WRITES**: save+delete
+collapses **67.5 → 7.0 pairs/s** from 5×10³ to 5×10⁴ (a ~10× write-latency scaling, budget-timeout
+recorded) — unbatched write-tx/s at the top of the claimed range is tens, not hundreds; batched
+commits remain the way to bulk-write throughput (canonical `commitBatch`: objects/s RISES with
+batch). Verdict: **the 10⁴ end of the design point is fully confirmed; 10⁵ is confirmed for reads
+and for batched writes; unbatched per-object write tx at 10⁵ is the measured limit.** Probe-mode
+caveats: single-run numbers, and the N=5k phase runs first in the same JVM (the N=50k point/tx
+rows benefit from extra JIT warmth — treat cross-N deltas within ~1.5× as same-band).
+
 #### Canonical tables (generated; full mode; result set 2026-10-22-185216)
 
 #### `XdStorageCanonicalBenchmark`

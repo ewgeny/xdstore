@@ -38,8 +38,8 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 OUT="$RESULTS_ROOT/$STAMP-$MODE"
 
 case "$MODE" in
-  quick|full|sweep) ;;
-  *) echo "usage: $0 [quick|full|sweep] [--force]" >&2; exit 1 ;;
+  quick|full|sweep|n50k) ;;
+  *) echo "usage: $0 [quick|full|sweep|n50k] [--force]" >&2; exit 1 ;;
 esac
 
 mkdir -p "$OUT"
@@ -111,6 +111,20 @@ case "$MODE" in
       cp "$ROOT"/target/sweep/* "$OUT/" 2>/dev/null || true
     fi
     echo "results: $OUT (sweep json+csv)"
+    ;;
+
+  n50k)
+    # N50K (docs/tasks/2.1.0/20): the design-point probe — headline scenarios + heap-after-load
+    # at N=5k vs N=50k. Probe-mode methodology (plain-Java single run, sweep-harness family):
+    # heap MXBean snapshots need exact phase control, not JMH error bars. Each scenario is
+    # budget-capped (120s) INSIDE the probe; a budget overrun is recorded as the finding.
+    # Separate from quick/full — the <=15min quick budget is unaffected (task 20, acceptance).
+    java -Dlog4j.configurationFile="$LOG_CONF" -Xmx2g -cp "$CP" \
+      io.github.xdstorage.performance.XdStorageDesignPointProbe "$OUT" \
+      > "$OUT/design-point.log" 2>&1 || { tail -40 "$OUT/design-point.log"; exit 1; }
+    grep -E "^\[design-point\]" "$OUT/design-point.log" | tail -30 || true
+    echo "results: $OUT/design-point.json"
+    echo "render: python3 scripts/render-bench-baseline.py $OUT/design-point.json"
     ;;
 esac
 

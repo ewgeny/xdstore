@@ -12,7 +12,50 @@ import json
 import sys
 
 
+def render_design_point(paths):
+    """N50K (docs/tasks/2.1.0/20): the design-point probe JSON (a 'probe'-keyed document,
+    not a JMH array) -> the N=5k vs N=50k comparison tables + heap rows."""
+    runs = []
+    meta = {}
+    for path in paths:
+        with open(path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or data.get("probe") != "design-point":
+            continue
+        meta = data
+        runs.extend(data.get("runs", []))
+    if not runs:
+        return None
+
+    lines = []
+    lines.append("| N | heap bytes/object | bulk load obj/s | range window hits |")
+    lines.append("|---|---|---|---|")
+    for run in runs:
+        lines.append(f"| {run['n']:,} | {run['heap']['bytesPerObject']:,.0f} | "
+                     f"{run['bulkLoad']['objectsPerSec']:,.0f} | {run.get('rangeWindowHits', '—'):,} |")
+    lines.append("")
+
+    scen = {}
+    for run in runs:
+        for name, v in run["scenarios"].items():
+            scen.setdefault(name, {})[run["n"]] = (v["opsPerSec"], v["status"])
+    lines.append("| Scenario (probe mode, single run) | N=5 000 ops/s | N=50 000 ops/s | status |")
+    lines.append("|---|---|---|---|")
+    for name in sorted(scen):
+        s5 = scen[name].get(5000, ("—", ""))
+        s50 = scen[name].get(50000, ("—", ""))
+        status = "ok" if all("ok" in v[1] for v in scen[name].values()) else "TIMEOUT at N=50k (the ceiling finding)"
+        lines.append(f"| `{name}` | {s5[0]:,.1f} | {s50[0]:,.1f} | {status} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render(paths):
+    # a probe document renders as the design-point section, a JMH array as the family tables
+    with open(paths[0]) as f:
+        head = json.load(f)
+    if isinstance(head, dict) and head.get("probe") == "design-point":
+        return render_design_point(paths)
     families = {}
     for path in paths:
         with open(path) as f:

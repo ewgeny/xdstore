@@ -11,7 +11,9 @@ Compiled from the outside-architect evaluation ([ARCHITECT-EVALUATION.md](ARCHIT
 > graphs, not rows or bytes — with ACID transactions, declarative indexes and triggers,
 > in a human-readable folder, with zero native dependencies and zero servers.** The
 > design point is **10⁴–10⁵ objects per class** and **hundreds of write-transactions per
-> second** with indexed reads from thousands to hundreds of thousands of ops/s depending on
+> second** (batched commits; unbatched per-object writes at 10⁵ scale measure ~10¹–10² tx/s —
+> [measured](BENCHMARKS.md#design-point--the-n50k-boundary-measurement-n50k-docstasks21020))
+> with indexed reads from thousands to hundreds of thousands of ops/s depending on
 > cache residency; beyond that, choose RocksDB/MapDB and build the object layer yourself.
 
 ## How it compares (order-of-magnitude, the honest framing)
@@ -56,8 +58,10 @@ quiet machine, generated tables). The point is the *gaps*, not the digits.
    every commit pays the 2PC write-out. The index-journaling work (W-4) targets this; until
    it ships, the honest ceiling is **~10²–10³ write-tx/s**.
 2. **Heap ≈ working set.** The record cache holds the working set; there is no eviction
-   until disk-anchored scans ship (W-4). Fine at 10⁴–10⁵ objects/class; disqualifying
-   beyond that — for now.
+   until disk-anchored scans ship (W-4). Measured: **~1.4–2.0 KB heap per object** at
+   N=5k–50k ([design-point probe](BENCHMARKS.md#design-point--the-n50k-boundary-measurement-n50k-docstasks21020))
+   — fine at 10⁴–10⁵ objects/class (≈70–200 MB per 10⁵ objects for typical entities);
+   disqualifying beyond that — for now.
 3. **Single process per folder.** The storage folder is exclusively locked
    (EMBEDDING.md § Lifecycle). Read-only tooling operates on a copy/backup, not live.
 4. **Runtime wrapper codegen** needs a JDK (not JRE) and a writable `./gencode`

@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][N50K] Validate the published design point: headline scenarios at N=50k + heap-after-load"
 labels: [2.1.0-train, P1, performance, chore]
-status: open
+status: done
 ---
 
 ## Summary
@@ -45,11 +45,31 @@ guide's publication is the demand signal that pulls it in.
 
 ## Acceptance criteria
 
-- [ ] N=50k results + manifest archived under `docs/perf/` (the canonical layout).
-- [ ] BENCHMARKS.md design-point subsection generated from the result files.
-- [ ] DECISION-GUIDE.md design-point sentence cites the measurement (or is corrected).
-- [ ] The quick suite still fits its ≤15 min budget (N=50k phases are full-mode only, or
-      budgeted separately — state which).
+- [x] N=50k results + manifest archived under `docs/perf/design-point-2026-10-23/` (the
+      canonical layout: result JSON + run manifest with git rev/JDK/CPU/loadavg/flags).
+- [x] BENCHMARKS.md design-point subsection generated from the result files
+      (`scripts/render-bench-baseline.py` gained the probe-document branch).
+- [x] DECISION-GUIDE.md cites the measurement in both places — the positioning claim now
+      scopes "hundreds of write-tx/s" to batched commits (with the unbatched 10⁵ number as
+      the honest counter), and the heap≈working-set loss carries the measured
+      ~1.4–2.0 KB/object.
+- [x] The quick suite still fits its ≤15 min budget: the N=50k phases are a SEPARATE script
+      mode (`scripts/run-benchmarks.sh n50k`) — never part of quick/full; the probe's own
+      wall clock ≈ 3 min (both N phases, budget-capped scenarios inside).
+
+## Findings (the honest verdict, 2026-10-23 run)
+
+- **Reads scale to 5×10⁴**: point reads 41.5k→67.8k ops/s, read-only tx 80.2k→59.1k ops/s,
+  indexed EQUALS 42.2k→34.5k ops/s — same 10⁴–10⁵ band as at 5×10³.
+- **Heap ≈ working set, quantified**: ~1,988 B/object at 5×10³ and ~1,437 B/object at
+  5×10⁴ (≈70–100 MB per 5×10⁴ for this entity shape).
+- **The wall is unbatched WRITES**: save+delete collapses 67.5 → 7.0 pairs/s (≈10× scaling,
+  120s budget timeout recorded at 5×10⁴). Batched commits remain the bulk-write path
+  (canonical commitBatch: objects/s RISES with batch size).
+- Probe-run gotchas fixed along the way (recorded for reruns): a BETWEEN primary criterion
+  operates on the PRIMARY index field (indexFieldNames[0]) — the probe entity's indexed
+  field IS its primary; and an empty range result at small N is a valid answer — gating the
+  op counter on non-empty hits starved the 5k phase into a false TIMEOUT.
 
 Estimate: ~1–2 dev-days.
 
