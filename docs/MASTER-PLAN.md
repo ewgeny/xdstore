@@ -185,16 +185,20 @@ grouping is tags, not layout.
    snapshot-visible, shaping-agnostic). Composition suite `XdStorageQueryShapingTest` (12 tests,
    both id-index types).
 6. **T-3 gap-filling** — guided by the T-1 map.
-7. **BUG-A..D — the engine defects T-3a discovered join the train** (tasks 14–17, migrated
-   from the dissolved `docs/tasks/2.2.0/` directory on 2026-10-22). The "2.1.0 carries no
-   deep engine surgery" pinning is revised: **a defect discovered by a train's own test
-   estate ships with the train that discovered it** — these are fixes with acceptance-grade
+7. **BUG-A..E — the engine defects the train's own work discovered join the train** (tasks
+   14–18; A–C migrated from the dissolved `docs/tasks/2.2.0/` directory on 2026-10-22, E
+   discovered by the FP-11 example on 2026-10-23). The "2.1.0 carries no deep engine
+   surgery" pinning is revised: **a defect discovered by a train's own test estate ships
+   with the train that discovered it** — these are fixes with acceptance-grade
    `@Disabled` tests (un-disabling IS the acceptance), not feature surgery: BUG-A (15, P0)
-   structure-journal replay NPE strands a folder after structure update + reopen; BUG-C (17,
-   P0) auto-generated ids unreachable by id after reopen (id assigned at write-out, after the
-   tx index snapshot); BUG-B (16, P1, after BUG-A — the journal crash masks part of its repro)
-   objects unreachable by id after structure update on a fresh open; BUG-D (14, P2) the
-   `UUID_GENERATOR` field property never auto-generated — decide the contract, make it true.
+   structure-journal replay NPE strands a folder after structure update + reopen — **FIXED
+   `175b72a`**; BUG-C (17, P0) auto-generated ids unreachable by id after reopen —
+   **FIXED `3575ffb`**; BUG-D (14, P2) the `UUID_GENERATOR` field property never
+   auto-generated — **FIXED `d8d706f`**; BUG-B (16, P1) refined to name-based codegen
+   wrapper identity collision across entity generations — OPEN, W-4-class design decision;
+   **BUG-E (18, P0, OPEN)** search-index key types not restored at reopen — numeric
+   range/EQUALS seeks crash after a close/open cycle (`XdStorageSearchRangeReopenTest`
+   disabled).
 8. **FP-11 — decision-guide page** (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore +
    "when to choose XdStorage" + runnable example app): lands LAST so it describes the shipped
    2.1.0 (including range queries); fixes the README test-count staleness.

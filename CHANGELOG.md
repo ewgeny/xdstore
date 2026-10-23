@@ -69,25 +69,18 @@ Planned scope; items land here as they merge:
 
 ### Fixed (planned)
 
-The four engine defects the T-3a gap-fill surfaced, migrating from the 2.2.0 train into 2.1.0
-(2026-10-22): **a defect discovered by a train's own test estate ships with the train that
-discovered it.** Each ships with an acceptance-grade `@Disabled` test — un-disabling it is the
-fix's acceptance criterion.
+Still open from the defect train (**a defect discovered by a train's own work ships with the
+train that discovered it**; BUG-A/C/D are fixed — see [Fixed](#fixed) below):
 
-- **BUG-A** ([15](docs/tasks/2.1.0/15-commit-journal-replay-npe.md)) — commit-journal replay NPE
-  on the structure resource: after any `executeStructureUpdate(...)` + close/reopen cycle the
-  storage failed to open ("commit journal of resource .../structure/XdStorageClassStructure.yaml
-  cannot be replayed"), stranding the folder's data until the structure journal was cleared
-  manually.
-- **BUG-C** ([17](docs/tasks/2.1.0/17-auto-generated-id-reopen-addressability.md)) —
-  auto-generated ids were unreachable by id after a reopen: the id was assigned at write-out,
-  after the transaction's index snapshot, so the persisted index never learned it.
-- **BUG-B** ([16](docs/tasks/2.1.0/16-id-addressability-after-structure-update.md)) — objects of
-  non-system-loader classes were unreachable by id after a structure update on a freshly-opened
-  storage.
-- **BUG-D** ([14](docs/tasks/2.1.0/14-uuid-generator-field-property.md)) — the
-  `UUID_GENERATOR` field property never auto-generated values; the contract is being decided
-  and made true.
+- **BUG-B** ([16](docs/tasks/2.1.0/16-id-addressability-after-structure-update.md)) — refined:
+  the codegen wrapper identity is NAME-based, so two live generations of one entity FQCN
+  collide on one wrapper class; generation-aware wrapper identity is the design decision
+  to make.
+- **BUG-E** ([18](docs/tasks/2.1.0/18-bug-search-index-key-types-after-reopen.md)) — search-index
+  key types are not restored at reopen: after a close/open cycle, range and `EQUALS` seeks on a
+  **numeric** search index crash (`Long` bound vs raw-`String` persisted keys inside the B+Tree
+  node files). String-keyed indexes are unaffected. Discovered by the FP-11 example app; the
+  disabled `XdStorageSearchRangeReopenTest` is the fix's acceptance criterion.
 
 ### Changed (planned)
 

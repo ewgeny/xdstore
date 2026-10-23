@@ -34,6 +34,7 @@ Your JVM ──► IXdFileStorage facade ──► transactions (MVCC, 2PC commi
 16. [Current limitations](#current-limitations)
 17. [Building and testing](#building-and-testing)
 18. [Documentation and project layout](#documentation-and-project-layout)
+19. [Choosing XdStorage — the decision guide](https://github.com/evgeny-korolev/xdstore/blob/main/docs/DECISION-GUIDE.md)
 
 ## Features at a glance
 
@@ -795,7 +796,7 @@ Worth knowing before production use (details and remediation plan in
 ## Building and testing
 
 ```bash
-mvn test           # full suite (~700 tests, unit + integration + stress), single surefire fork with -Xmx2g
+mvn test           # full suite (unit + integration + stress), single surefire fork with -Xmx2g
 mvn install        # build the jar and install it locally
 mvn -Prelease -Dgpg.skip=true verify   # release-shaped build: binary + sources + javadoc jars
 ```
@@ -813,6 +814,10 @@ Notes:
 
 ## Documentation and project layout
 
+- [docs/DECISION-GUIDE.md](docs/DECISION-GUIDE.md) — when XdStorage is the right choice: the
+  competitive comparison, the design point, and the honest limits.
+- [examples/quickstart](examples/quickstart/README.md) — a runnable end-to-end sample
+  (open → tx → save → indexed query → range query → commit → reopen → shutdown).
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md) — JMH benchmark methodology and recorded results.
 - [docs/PERFORMANCE-RECOMMENDATIONS.md](docs/PERFORMANCE-RECOMMENDATIONS.md) — configuration-tuning
   study (B+tree `t`, fragment size, Hash vs B+Tree id index, search-index `t`): measured data, the

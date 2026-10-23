@@ -27,6 +27,7 @@ there for the full decision record before starting an item.
 | 15 | [commit-journal-replay-npe](15-commit-journal-replay-npe.md) | BUG-A | P0, engine, bug | 2–3 d | — |
 | 16 | [id-addressability-after-structure-update](16-id-addressability-after-structure-update.md) | BUG-B | P1, engine, bug | 1–2 d | 15 (where masked by the journal crash) |
 | 17 | [auto-generated-id-reopen-addressability](17-auto-generated-id-reopen-addressability.md) | BUG-C | P0, engine, bug | 2–3 d | — |
+| 18 | [bug-search-index-key-types-after-reopen](18-bug-search-index-key-types-after-reopen.md) | BUG-E | P0, engine, bug | 1–2 d | — (discovered by 12; disabled test `XdStorageSearchRangeReopenTest`) |
 
 **Bug-lane provenance (migrated 2026-10-22):** BUG-A/B/C were originally filed against a
 2.2.0 train under the "2.1.0 carries no deep engine surgery" pinning. The decision was
@@ -44,6 +45,7 @@ it starts).
 | BUG B (16) | load-by-id null after structure update on a freshly-opened storage (non-system-loader classes) | object unreachable | `XdStorageSchemaEvolutionTest` BUG-B tests |
 | BUG C (17) | auto-generated ids unreachable by id after reopen (id assigned at write-out, after the tx index snapshot) | object unreachable | `XdStorageIdGenerationContractTest.generatedIdsSurviveReopen` |
 | BUG D (14) | `UUID_GENERATOR` field property never auto-generates | contract never worked | contract decision + test in task 14 |
+| BUG E (18) | search-index key types not restored at reopen — numeric range/EQUALS seeks crash after a close/open cycle | queries crash post-reopen | `XdStorageSearchRangeReopenTest` (3 tests, disabled) — discovered by 12 |
 
 ## Execution lanes (independent — can run in parallel)
 

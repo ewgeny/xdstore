@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  XdStorage quickstart — a STANDALONE example project, intentionally OUTSIDE the library's
+  reactor build. It depends on the published io.github.xdstorage:xdstorage artifact exactly
+  the way a consumer would:
+      - 2.1.0 from Maven Central, or
+      - a locally built copy: run `mvn install -DskipTests` in the repository root first.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.xdstorage.examples</groupId>
+    <artifactId>xdstorage-quickstart</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>XdStorage Quickstart</name>
+    <description>Runnable end-to-end sample: open -> tx -> save -> indexed query -> range query -> commit -> reopen -> shutdown</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>8</maven.compiler.release>
+        <!-- one place to bump when a new XdStorage release lands -->
+        <xdstorage.version>2.1.0</xdstorage.version>
+        <junit.version>5.11.4</junit.version>
+    </properties>
+
+    <dependencies>
+        <!-- the only production dependency — the library itself (plus slf4j-api transitively) -->
+        <dependency>
+            <groupId>io.github.xdstorage</groupId>
+            <artifactId>xdstorage</artifactId>
+            <version>${xdstorage.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- pinned: Maven <=3.8's super-POM ships surefire 2.12.4 (no JUnit 5) and
+                 compiler 3.1 (no `release` support, defaults to source/target 5) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
