@@ -28,6 +28,16 @@ there for the full decision record before starting an item.
 | 16 | [id-addressability-after-structure-update](16-id-addressability-after-structure-update.md) | BUG-B | P1, engine, bug | 1–2 d | 15 (where masked by the journal crash) |
 | 17 | [auto-generated-id-reopen-addressability](17-auto-generated-id-reopen-addressability.md) | BUG-C | P0, engine, bug | 2–3 d | — |
 | 18 | [bug-search-index-key-types-after-reopen](18-bug-search-index-key-types-after-reopen.md) | BUG-E | P0, engine, bug | 1–2 d | — (discovered by 12; disabled test `XdStorageSearchRangeReopenTest`) |
+| 19 | [backup-restore-walkthrough](19-backup-restore-walkthrough.md) | BACKUP | P1, testing, docs | 0.5–1 d | — (one assertion waits for 18) |
+| 20 | [design-point-n50k-validation](20-design-point-n50k-validation.md) | N50K | P1, performance, chore | 1–2 d | 13 (the harness/protocol it extends) |
+| 21 | [adoption-docs-contract](21-adoption-docs-contract.md) | DOCSLINT | P2, docs, ci, chore | 0.5 d | 12 (the surface it keeps honest) |
+
+**Guide-derived tasks (added 2026-10-23):** 19–21 were compiled from
+[DECISION-GUIDE.md](../../DECISION-GUIDE.md) after its publication — each makes one sentence
+of the guide true or keeps it true: the backup claim (19), the published design point (20),
+and the anti-rot mechanism for the adoption surface itself (21). The big items the guide
+names as gaps (W-4, FP-3 AOT, FP-5 backup API) stay pinned to 2.2.0/2.3.0 — the guide
+documents them as future work; it does not re-plan them.
 
 **Bug-lane provenance (migrated 2026-10-22):** BUG-A/B/C were originally filed against a
 2.2.0 train under the "2.1.0 carries no deep engine surgery" pinning. The decision was
@@ -55,7 +65,9 @@ it starts).
   record their numbers into it, 11 asserts on its scenario list)** → 08 ∥ 09 → 10
 - **Lane E (bug fixes, engine):** 15 ∥ 17 ∥ 14 (independent surfaces: structure journal vs
   write-out id assignment vs the generator contract) → 16 after 15 (the journal crash masks
-  part of its repro)
+  part of its repro); 18 independent (P0 — numeric search indexes are dead after any reopen)
+- **Lane F (guide-derived adoption work):** 19 ∥ 20 ∥ 21 (independent; 20 after 13's harness
+  is in — it already is; 21 after 12, ditto)
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary
