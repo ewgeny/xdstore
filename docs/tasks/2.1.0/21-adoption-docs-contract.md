@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][DOCSLINT] Adoption-surface docs contract: links, cited benchmarks, and versions cannot rot"
 labels: [2.1.0-train, P2, docs, ci, chore]
-status: open
+status: done
 ---
 
 ## Summary
@@ -41,10 +41,27 @@ the adoption depends on. Cheap, boring, and it deletes a whole class of stale-cl
 
 ## Acceptance criteria
 
-- [ ] The lint test is green on the current tree (all three contract dimensions).
-- [ ] Deliberate breakage (rename a link target / cite a bogus scenario / bump the example
-      version) fails with a message naming file and fix — verified locally, then reverted.
-- [ ] `mvn clean test` impact: +1 fast test; BUILD SUCCESS verdict unchanged.
+- [x] The lint test is green on the current tree (all three contract dimensions; the cited-
+      scenario check additionally asserts a floor of 10 citations so a truncated numbers
+      table cannot silently pass).
+- [x] Deliberate breakage verified locally in all three dimensions — a renamed link target,
+      a bogus cited scenario, and a bumped example version each fail with a message naming
+      the file and the fix — then reverted; the lint went green again.
+- [x] `mvn clean test` impact: +3 fast tests (one per dimension — each reports
+      independently); BUILD SUCCESS verdict unchanged (782 → 785).
+
+## Implementation notes
+
+- `XdStorageAdoptionDocsContractTest` (default run, the T-2 source-walking pattern):
+  markdown links resolved against each document's own directory (http/https/mailto and
+  pure-anchor targets skipped — external liveness is out of scope); scenario citations
+  parsed from the guide's **numbers-table section only** (the rest of the guide backticks
+  ordinary words like `Map`/`cp -r` that are not citations; benchmark names are
+  lowercase-start camelCase, criterion operators like `BETWEEN` are filtered); versions
+  compared between the root pom's `<version>` and the quickstart's `<xdstorage.version>`
+  property — a mismatch means the example silently tests against a stale engine (the
+  failure message says exactly that).
+- Release=8 discipline: `String.trim()`, not `strip()` (the T-2 lesson recurred).
 
 Estimate: ~0.5 dev-day.
 
