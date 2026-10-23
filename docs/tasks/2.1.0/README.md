@@ -37,6 +37,7 @@ there for the full decision record before starting an item.
 | 25 | [explain-query-plan](25-explain-query-plan.md) | EXPLAIN | P1, search, engine, feature | 1–2 d | — (pulled from Step 4: the routing decision extracted, not forked) |
 | 26 | [verify-integrity-walk](26-verify-integrity-walk.md) | VERIFY | P1, engine, testing | 1–2 d | — (FP-5's verification core pulled from Step 3; backupTo/CLI stay 2.3.0) |
 | 27 | [jdk21-ci-matrix](27-jdk21-ci-matrix.md) | JDK21 | P2, ci, chore | 0.5 d | — (D-2 pulled: the baseline is JDK-21 numbers, the gate is 17-only) |
+| 28 | [javadoc-coverage](28-javadoc-coverage.md) | JAVADOC | P1, docs, chore | 3–5 d | — (Tier-1/Tier-2 split, parallelizable; closes the RELEASE-PLAN §3 doclint promise) |
 
 **MASTER-PLAN pulls (added 2026-10-23):** 25–27 are what the master-plan review judged
 train-safe — additive APIs and CI, no persisted-state surgery: FP-2 `explain()` (25), FP-5's
@@ -88,6 +89,8 @@ it starts).
   is in — it already is; 21 after 12, ditto)
 - **Lane G (master-plan pulls):** 25 ∥ 26 ∥ 27 (independent; 25 after the FP-1 routing it
   exposes — shipped; 26 after 19+23 whose semantics it mechanizes — shipped)
+- **Lane H (API docs):** 28 — Tier-1/Tier-2 split is parallelizable between developers;
+  the doclint tightening is the deliverable, the prose can land incrementally
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary

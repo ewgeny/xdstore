@@ -96,6 +96,11 @@ Planned scope; items land here as they merge:
   read-only integrity walk over a closed storage folder: sentinel validity, journal state,
   object counts, index-vs-data consistency — the after-a-power-loss recipe as one call.
 
+- **Javadoc coverage** (planned, [28](docs/tasks/2.1.0/28-javadoc-coverage.md)) — every
+  public method of the main tree documented (contract prose on the published API tier,
+  one-liners on the machinery tier) and the release profile's javadoc doclint enforced —
+  the published javadoc jar becomes the API reference and can no longer regress silently.
+
 ### Fixed (planned)
 
 Still open from the defect train (**a defect discovered by a train's own work ships with the
