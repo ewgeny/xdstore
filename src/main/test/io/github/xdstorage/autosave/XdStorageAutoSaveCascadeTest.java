@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -262,5 +263,46 @@ public class XdStorageAutoSaveCascadeTest {
         assertEquals(1, storage.load(EmbeddedOrder.class, o -> true, rtx).size(),
                 "the embedded child rides the parent's write as always");
         storage.commitTransaction(rtx);
+    }
+
+    @Test
+    @DisplayName("MAP shape: annotated Map VALUES cascade (keys are never candidates); id-field-less values are skipped")
+    public void mapValuesCascade() throws Exception {
+        open();
+        final MapHolder holder = new MapHolder();
+        holder.setId("map-1");
+        final Map<String, OrderLine> lines = new java.util.LinkedHashMap<>();
+        lines.put("sku-a", new OrderLine("ml-a", "sku-a"));   // keys are strings — never saved as objects
+        lines.put("sku-b", new OrderLine("ml-b", "sku-b"));
+        holder.setLinesBySku(lines);
+        holder.setNotes(new java.util.LinkedHashMap<>());
+
+        final IXdStorageTransaction tx = storage.beginTransaction(60_000L);
+        storage.save(holder, tx);
+        storage.commitTransaction(tx);
+
+        // the VALUES cascaded: both load by id; the map held exactly two
+        final IXdStorageTransaction rtx = storage.beginTransaction(60_000L);
+        assertNotNull(storage.load(OrderLine.class, "ml-a", rtx), "map value 1 cascaded");
+        assertNotNull(storage.load(OrderLine.class, "ml-b", rtx), "map value 2 cascaded");
+        assertEquals(2, storage.load(OrderLine.class, o -> true, rtx).size(),
+                "exactly the map's values persisted — keys are not candidates");
+        storage.commitTransaction(rtx);
+
+        // id-field-less values in a MAP field would be skipped loudly-quietly: a String has
+        // no id-field and no independent resource — the save succeeds without persisting it
+        final IXdStorageTransaction tx2 = storage.beginTransaction(60_000L);
+        final MapHolder notesHolder = new MapHolder();
+        notesHolder.setId("map-notes");
+        notesHolder.setLinesBySku(new java.util.LinkedHashMap<>());
+        final Map<String, String> notes = new java.util.LinkedHashMap<>();
+        notes.put("k", "plain string value");
+        notesHolder.setNotes(notes);
+        assertDoesNotThrow(() -> {
+            final IXdStorageTransaction ntx = storage.beginTransaction(60_000L);
+            storage.save(notesHolder, ntx);
+            storage.commitTransaction(ntx);
+        }, "a MAP field whose values carry no id-field saves without error (values are skipped)");
+        storage.commitTransaction(tx2);
     }
 }

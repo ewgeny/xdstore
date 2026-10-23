@@ -19,6 +19,7 @@ import io.github.xdstorage.transaction.XdStorageTransactionManager;
 import io.github.xdstorage.trigger.IXdStorageTrigger;
 import io.github.xdstorage.utils.XdStorageClassInfo;
 import io.github.xdstorage.utils.XdStorageFolderLock;
+import io.github.xdstorage.utils.XdStorageAutoSaveCascadeEngine;
 import io.github.xdstorage.utils.XdStorageObjectUtils;
 
 import java.util.ArrayList;
@@ -272,12 +273,38 @@ class XdStorage implements IXdFileStorage {
 
             final XdStorageTransaction tx = cast(transaction);
 
-            persistObject(object, tx);
+            final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
+
+            final XdStorageAbstractResourcesManager resourcesManager = services.getResourcesManager();
+            final IXdStorageSearchManager searchManager = services.getSearchManager();
+
+            final XdStoragePolicy policy = clInfo.getPolicy();
+            if (policy == XdStoragePolicy.StoreAsClassObjects) {
+                final IXdStorageIndexDaoResource resource = resourcesManager.lockIndexResource(clInfo, tx);
+                resource.insert(object, tx);
+
+                if (searchManager.hasIndex(object)) {
+                    searchManager.insert(object, tx);
+                }
+            } else if (policy == XdStoragePolicy.StoreAsSingleObject) {
+                final IXdStorageDaoResource referencesResource = resourcesManager.lockReferencesResource(clInfo, tx);
+                referencesResource.insertReference(object, tx);
+
+                final IXdStorageDaoResource resource = resourcesManager.lockObjectResource(object, tx);
+                resource.insert(object, tx);
+
+                if (searchManager.hasIndex(object)) {
+                    searchManager.insert(object, tx);
+                }
+            } else {
+                throw new XdStorageException("class " + cl.getName() + " must have policy " + XdStoragePolicy.StoreAsClassObjects + " or "
+                        + XdStoragePolicy.StoreAsSingleObject);
+            }
 
             log.debug("saved {} by tx {}", cl.getSimpleName(), transaction.getTransactionId());
 
             // AUTOSAVE (docs/tasks/2.1.0/22): cascade @XdStorageAutoSave children in the same tx
-            processAutoSave(object, tx);
+            XdStorageAutoSaveCascadeEngine.cascadeAfterPersist(object, tx, services, this);
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
@@ -1098,7 +1125,7 @@ class XdStorage implements IXdFileStorage {
                         + XdStoragePolicy.StoreAsSingleObject);
             }
             // AUTOSAVE (docs/tasks/2.1.0/22): cascade @XdStorageAutoSave children in the same tx
-            processAutoSave(object, tx);
+            XdStorageAutoSaveCascadeEngine.cascadeAfterPersist(object, tx, services, this);
         } finally {
             txManager.decrementActiveThreads(transaction.getTransactionId());
         }
@@ -1499,151 +1526,4 @@ class XdStorage implements IXdFileStorage {
                     + XdStoragePolicy.StoreAsSingleObject);
         }
     }
-
-    // =========================================================================
-    // AUTOSAVE (docs/tasks/2.1.0/22): @XdStorageAutoSave cascade-save. The cascade runs
-    // AFTER the parent's own persistence, inside the caller's transaction. Persist and
-    // cascade are SEPARATE phases: persistObject/updateObject is the plain policy dispatch
-    // (with the id-field guard), and processAutoSave walks the @XdStorageAutoSave fields of
-    // each persisted object through the once-per-operation visited set (IDENTITY-based,
-    // shared through the thread locale across the whole cascade — that is what makes
-    // reference cycles terminate and duplicates dedup). Child triggers, observers, id
-    // generation, rollback and MVCC behave exactly as for explicit saves.
-    // =========================================================================
-
-    private static final ThreadLocal<Set<Object>> AUTO_SAVE_VISITED = new ThreadLocal<>();
-
-    private static final ThreadLocal<Integer> AUTO_SAVE_DEPTH = ThreadLocal.withInitial(() -> 0);
-
-    private static final Map<Class<?>, List<java.lang.reflect.Field>> AUTO_SAVE_FIELD_CACHE =
-            new ConcurrentHashMap<>();
-
-    private static final Set<Class<?>> AUTO_SAVE_EMBEDDED_WARNED =
-            java.util.Collections.newSetFromMap(new ConcurrentHashMap<Class<?>, Boolean>());
-
-    /**
-     * The cascade entry, called at the tail of the public save/update dispatches. The
-     * visited set lives for exactly ONE top-level save/update (the depth counter detects
-     * the outermost call of a cascade and clears the set at its end) — a set that leaked
-     * across operations would silently skip every later cascade on the same thread.
-     */
-    private void processAutoSave(final Object object, final IXdStorageTransaction tx)
-            throws XdStorageException, XdStorageConnectionException {
-        final boolean outermost = AUTO_SAVE_DEPTH.get() == 0;
-        AUTO_SAVE_DEPTH.set(AUTO_SAVE_DEPTH.get() + 1);
-        try {
-            Set<Object> visited = AUTO_SAVE_VISITED.get();
-            if (visited == null) {
-                visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-                AUTO_SAVE_VISITED.set(visited);
-            }
-            cascadeAutoSaveFields(object, tx, visited);
-        } finally {
-            final int depth = AUTO_SAVE_DEPTH.get() - 1;
-            AUTO_SAVE_DEPTH.set(depth);
-            if (depth == 0) {
-                AUTO_SAVE_VISITED.remove();
-            }
-        }
-    }
-
-    /** Marks the object processed and cascade-upserts its annotated children (recursively). */
-    /** AUTOSAVE: the upsert half of the cascade — id null → insert (generated id backfills
-     * the same instance); id set → update if the index knows it, insert otherwise. */
-    private void persistOrUpsertObject(final Object child, final IXdStorageTransaction transaction)
-            throws XdStorageException, XdStorageConnectionException {
-        final Class<?> cl = XdStorageObjectUtils.getEntityClass(child.getClass());
-        final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
-        final Object id = clInfo.getIdField() != null ? clInfo.getIdField().get(child) : null;
-        if (id == null) {
-            persistObject(child, transaction);
-            return;
-        }
-        final XdStorageTransaction tx = cast(transaction);
-        final IXdStorageIndexDaoResource indexResource =
-                services.getResourcesManager().lockIndexResource(clInfo, tx);
-        if (indexResource.has(id, tx)) {
-            updateObject(child, tx);
-        } else {
-            persistObject(child, tx);
-        }
-    }
-
-    private void cascadeAutoSaveFields(final Object object, final IXdStorageTransaction tx,
-                                       final Set<Object> visited)
-            throws XdStorageException, XdStorageConnectionException {
-        final Object unwrapped = XdStorageObjectUtils.getWrappedObjectOrSameObject(object);
-        if (!visited.add(unwrapped)) {
-            return; // fully processed earlier in this operation (dedup + cycle guard)
-        }
-        final Class<?> entityClass = XdStorageObjectUtils.getEntityClass(unwrapped.getClass());
-        for (final java.lang.reflect.Field field : autoSaveFields(entityClass)) {
-            for (final Object child : autoSaveChildren(unwrapped, field)) {
-                final Object childUnwrapped = XdStorageObjectUtils.getWrappedObjectOrSameObject(child);
-                if (!visited.add(childUnwrapped)) {
-                    continue; // the same instance via two fields, or a cycle back-edge
-                }
-                final Class<?> childClass = XdStorageObjectUtils.getEntityClass(childUnwrapped.getClass());
-                final XdStoragePolicy childPolicy = XdStorageObjectUtils.getClassInfo(childClass).getPolicy();
-                if (childPolicy == XdStoragePolicy.StoreWithParentObject) {
-                    // the parent's own write already embeds StoreWithParentObject children —
-                    // a cascade upsert would fail (no independent resource); WARN once per class
-                    if (AUTO_SAVE_EMBEDDED_WARNED.add(childClass)) {
-                        log.warn("@XdStorageAutoSave field element {} uses policy StoreWithParentObject — "
-                                + "already embedded in the parent's file; cascade-save is a no-op for it",
-                                childClass.getName());
-                    }
-                    continue;
-                }
-                persistOrUpsertObject(childUnwrapped, tx);
-                cascadeAutoSaveFields(childUnwrapped, tx, visited);
-            }
-        }
-    }
-
-    /** The @XdStorageAutoSave fields of an entity class, inherited ones included (cached). */
-    private static List<java.lang.reflect.Field> autoSaveFields(final Class<?> entityClass) {
-        return AUTO_SAVE_FIELD_CACHE.computeIfAbsent(entityClass, cl -> {
-            final List<java.lang.reflect.Field> result = new ArrayList<>();
-            for (Class<?> c = cl; c != null && c != Object.class; c = c.getSuperclass()) {
-                for (final java.lang.reflect.Field field : c.getDeclaredFields()) {
-                    if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
-                        continue;
-                    }
-                    if (field.isAnnotationPresent(io.github.xdstorage.annotations.XdStorageAutoSave.class)) {
-                        field.setAccessible(true);
-                        result.add(field);
-                    }
-                }
-            }
-            return result;
-        });
-    }
-
-    /** The cascade candidates of one annotated field: collection elements or a single reference. */
-    private static List<Object> autoSaveChildren(final Object unwrapped, final java.lang.reflect.Field field) {
-        final List<Object> children = new ArrayList<>();
-        final Object value;
-        try {
-            value = field.get(unwrapped);
-        } catch (final IllegalAccessException e) {
-            throw new XdStorageRuntimeException("cannot read @XdStorageAutoSave field " + field.getName(), e);
-        }
-        if (value == null) {
-            return children;
-        }
-        if (value instanceof Collection) {
-            for (final Object element : (Collection<?>) value) {
-                if (element != null) {
-                    children.add(XdStorageObjectUtils.getWrappedObjectOrSameObject(element));
-                }
-            }
-        } else if (value.getClass().isArray()) {
-            // v1 scope: collections and single references — arrays are deliberately not cascaded
-        } else {
-            children.add(XdStorageObjectUtils.getWrappedObjectOrSameObject(value));
-        }
-        return children;
-    }
-
 }

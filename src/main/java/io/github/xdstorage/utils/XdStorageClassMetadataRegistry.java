@@ -85,6 +85,13 @@ public final class XdStorageClassMetadataRegistry {
             final Map<String, XdStorageObjectField> fields = XdStorageReflectionFieldScanner.scanFields(cl);
             newInfo.setFields(fields);
             newInfo.setIndexes(XdStorageClassIndexBuilder.buildIndexes(cl, fields));
+            // AUTOSAVE (docs/tasks/2.1.0/22): collect the @XdStorageAutoSave annotated fields
+            // (inherited included — the scanner walks superclasses) into the class info
+            for (final XdStorageObjectField field : fields.values()) {
+                if (XdStorageAutoSaveFieldInfo.isAutoSaveField(field.field)) {
+                    newInfo.addAutoSaveField(XdStorageAutoSaveFieldInfo.of(field));
+                }
+            }
 
             classesInfo.put(cl, newInfo);
             return newInfo;
