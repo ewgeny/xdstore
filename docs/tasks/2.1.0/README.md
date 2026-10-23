@@ -32,6 +32,7 @@ there for the full decision record before starting an item.
 | 20 | [design-point-n50k-validation](20-design-point-n50k-validation.md) | N50K | P1, performance, chore | 1–2 d | 13 (the harness/protocol it extends) |
 | 21 | [adoption-docs-contract](21-adoption-docs-contract.md) | DOCSLINT | P2, docs, ci, chore | 0.5 d | 12 (the surface it keeps honest) |
 | 22 | [autosave-cascade-children](22-autosave-cascade-children.md) | AUTOSAVE | P1, engine, feature | 2–4 d | — (mini-spike first: hook point + deferred-id interplay) |
+| 23 | [power-loss-recovery](23-power-loss-recovery.md) | PWRLOSS | P0, engine, testing, docs | 2–3 d | — (the "electricity-lost" incident: recovery matrix + recipe + the durableWrites default decision) |
 
 **Guide-derived tasks (added 2026-10-23):** 19–21 were compiled from
 [DECISION-GUIDE.md](../../DECISION-GUIDE.md) after its publication — each makes one sentence
@@ -65,9 +66,11 @@ it starts).
 - **Lane C (engine/search):** **13 first (ASAP — the canonical benchmark suite; tasks 08/09/10
   record their numbers into it, 11 asserts on its scenario list)** → 08 ∥ 09 → 10; 22
   (AUTOSAVE — independent: mini-spike, then feature work)
-- **Lane E (bug fixes, engine):** 15 ∥ 17 ∥ 14 (independent surfaces: structure journal vs
+- **Lane E (bug fixes & data safety, engine):** 15 ∥ 17 ∥ 14 (independent surfaces: structure journal vs
   write-out id assignment vs the generator contract) → 16 after 15 (the journal crash masks
-  part of its repro); 18 independent (P0 — numeric search indexes are dead after any reopen)
+  part of its repro); 18 independent (P0 — numeric search indexes are dead after any reopen);
+  23 independent (P0 — the power-loss incident: recovery matrix + recipe + the
+  `durableWrites` default decision)
 - **Lane F (guide-derived adoption work):** 19 ∥ 20 ∥ 21 (independent; 20 after 13's harness
   is in — it already is; 21 after 12, ditto)
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
