@@ -67,6 +67,13 @@ Planned scope; items land here as they merge:
   acceptance-grade disabled test in docs/tasks/2.1.0/06; the facade happy/failure-path audit
   (T-3b) remains open.
 
+- **@XdStorageAutoSave** (planned, [22](docs/tasks/2.1.0/22-autosave-cascade-children.md)) —
+  cascade-save for independent children: a field-level annotation on the parent; on parent
+  `save`/`update` the annotated children (`StoreAsClassObjects` / `StoreAsSingleObject`) are
+  cascade-upserted in the same transaction (generated ids backfill the same instances;
+  transitive through child annotations, cycle-safe). Removed children are NOT deleted;
+  cascade-delete is a deliberately deferred feature.
+
 ### Fixed (planned)
 
 Still open from the defect train (**a defect discovered by a train's own work ships with the

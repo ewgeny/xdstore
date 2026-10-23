@@ -204,6 +204,13 @@ grouping is tags, not layout.
    2.1.0 (including range queries); fixes the README test-count staleness.
 9. **D-4 — JMH regression alert** (nightly smoke persists per-scenario numbers; warn on >25%
    drop) — nightly-side, lands anywhere after task 13 fixes the scenario list.
+10. **AUTOSAVE — `@XdStorageAutoSave` cascade-save for independent children** (task 22,
+    maintainer's feature): field-level annotation on the parent; cascade-UPSERT of
+    `StoreAsClassObjects`/`StoreAsSingleObject` children in the caller's transaction on
+    parent save/update — orchestration over the existing per-object save path, no
+    persisted-format change (train-safe). Mandatory mini-spike: hook point + the
+    deferred-id/back-reference interplay (the BUG-C lesson). Cascade-delete explicitly
+    deferred with its own design round.
 
 **2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
 recovery, JMH vs baselines, fresh-clone README walkthrough) → tag `v2.1.0`.
