@@ -71,6 +71,22 @@ current code, stated so embedding surprises are design-time, not production-time
   storages: open once with `acceptMissingEofSentinel(true)` and let the first commit rewrite the files.
 - Stale `*.tmp` files from a previous crash are swept at open.
 
+### Backup and restore
+
+The tested operability contract: **close the storage (`shutdown()`), copy the folder with
+plain file operations, open the copy** under a new storage name. Every read answers from the
+copy: object counts, load-by-id, indexed EQUALS and range queries across all storage policies
+(the executable proof: `XdStorageBackupRestoreWalkthroughTest` in the reliability suite).
+
+- The `.xdstorage.lock` FILE travels with the backup and is harmless — a clean `shutdown()`
+  releases the OS file lock; the copy re-acquires its own. (A stale lock file from an unclean
+  shutdown is equally harmless — also pinned by the test.) What must NOT be copied is an
+  **open** folder: the exclusive OS lock blocks same-machine copies, and a copied-while-open
+  folder has no defined content state.
+- No export/import step, no format conversion — the copy IS a restorable backup. For
+  scheduled backups: close (or snapshot from a second machine while the first is closed),
+  `cp -r`, reopen.
+
 ## Observability
 
 - Logging: the library logs through **SLF4J** (`org.slf4j.Logger`). The jar ships **no logging

@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][BACKUP] Backup/restore walkthrough: prove 'cp -r while closed' as a tested guarantee"
 labels: [2.1.0-train, P1, testing, docs]
-status: open
+status: done
 ---
 
 ## Summary
@@ -43,10 +43,26 @@ task pins their composition under the one operation every ops engineer will perf
 
 ## Acceptance criteria
 
-- [ ] The walkthrough test is green ×2 (BUILD SUCCESS verdict).
-- [ ] EMBEDDING.md documents the procedure and links the test.
-- [ ] The decision guide's operability sentence links the new subsection.
-- [ ] No engine code changes (test + docs only).
+- [x] The walkthrough test is green ×2 (BUILD SUCCESS verdict).
+- [x] EMBEDDING.md documents the procedure and links the test (§ Backup and restore).
+- [x] The decision guide's operability sentence links the new subsection.
+- [x] No engine code changes (test + docs only).
+
+## Implementation notes
+
+- **One assumption corrected by the run**: the task said "the original's lock file must not
+  travel" — factually wrong for this engine. The lock FILE remains after a clean shutdown
+  (what shutdown releases is the exclusive OS file lock), so a copied folder travels with a
+  harmless lock file and opens cleanly. The test pins the REAL contract: lock file present
+  while open; release proven by re-opening the original; the copy carries the file and opens;
+  a stale lock file (unclean shutdown) is equally harmless (second test).
+- The copied storage is verified across all three policies: class fragments (ships + crew
+  child, load-by-id + scan + String-keyed EQUALS), single-object (map payload), parent +
+  `StoreWithParentObject` child (count + load-by-id), plus the numeric-keyed index range +
+  count (BUG-E semantics travel with the copy).
+- Fixture gotchas: the engine's cloner needs no-arg-constructible collections (a fixture
+  using `Arrays.asList` broke the save — wrap in `ArrayList`); each entity's index name is
+  its own contract (the BUG-E acceptance entity's index is `range_idx`, not `by_score`).
 
 Estimate: ~0.5–1 dev-day.
 

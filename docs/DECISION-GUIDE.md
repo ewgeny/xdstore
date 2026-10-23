@@ -80,7 +80,8 @@ quiet machine, generated tables). The point is the *gaps*, not the digits.
   depending on residency — BENCHMARKS § Canonical, `loadById_indexBaseline`,
   `searchByPrimaryEquals`).
 - **Operability matters**: files you can inspect, a folder you can back up with `cp -r`
-  while closed, no server, no native library.
+  while closed ([tested guarantee](EMBEDDING.md#backup-and-restore)), no server, no native
+  library.
 - You want **ACID + snapshot reads + triggers without a DBA**, and lazy loading/id
   generation semantics ORM gives you — without ORM's runtime cost and schema.
 - Java 8 bytecode or a no-native-lib constraint rules out SQLite/RocksDB/LMDB.
