@@ -34,6 +34,17 @@ there for the full decision record before starting an item.
 | 22 | [autosave-cascade-children](22-autosave-cascade-children.md) | AUTOSAVE | P1, engine, feature | 2–4 d | — (mini-spike first: hook point + deferred-id interplay) |
 | 23 | [power-loss-recovery](23-power-loss-recovery.md) | PWRLOSS | P0, engine, testing, docs | 2–3 d | — (the "electricity-lost" incident: recovery matrix + recipe + the durableWrites default decision) |
 | 24 | [journal-file-naming](24-journal-file-naming.md) | JRNLNAME | P1, engine, bug | 0.5–1 d | — (single choke point; the 2.0.0-upgrade read-compat test is the careful part) |
+| 25 | [explain-query-plan](25-explain-query-plan.md) | EXPLAIN | P1, search, engine, feature | 1–2 d | — (pulled from Step 4: the routing decision extracted, not forked) |
+| 26 | [verify-integrity-walk](26-verify-integrity-walk.md) | VERIFY | P1, engine, testing | 1–2 d | — (FP-5's verification core pulled from Step 3; backupTo/CLI stay 2.3.0) |
+| 27 | [jdk21-ci-matrix](27-jdk21-ci-matrix.md) | JDK21 | P2, ci, chore | 0.5 d | — (D-2 pulled: the baseline is JDK-21 numbers, the gate is 17-only) |
+
+**MASTER-PLAN pulls (added 2026-10-23):** 25–27 are what the master-plan review judged
+train-safe — additive APIs and CI, no persisted-state surgery: FP-2 `explain()` (25), FP-5's
+verification core `verify()` (26), and D-2's JDK-21 matrix (27). **Explicitly NOT pulled:**
+W-4 + B3 (2.2.0 — deep engine surgery; the train's amendment admits fixes, not feature
+surgery), FP-3 AOT (2.3.0 — a multi-session maven-plugin effort would push the train out by
+weeks), FP-5 `backupTo` + FP-6 CLI (2.3.0), FP-7/8/9/10/12 (demand-driven / post-FP-3 by
+their own rules).
 
 **Guide-derived tasks (added 2026-10-23):** 19–21 were compiled from
 [DECISION-GUIDE.md](../../DECISION-GUIDE.md) after its publication — each makes one sentence
@@ -75,6 +86,8 @@ it starts).
   read-compat — land before the 2.x on-disk base grows)
 - **Lane F (guide-derived adoption work):** 19 ∥ 20 ∥ 21 (independent; 20 after 13's harness
   is in — it already is; 21 after 12, ditto)
+- **Lane G (master-plan pulls):** 25 ∥ 26 ∥ 27 (independent; 25 after the FP-1 routing it
+  exposes — shipped; 26 after 19+23 whose semantics it mechanizes — shipped)
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary

@@ -211,6 +211,15 @@ grouping is tags, not layout.
     persisted-format change (train-safe). Mandatory mini-spike: hook point + the
     deferred-id/back-reference interplay (the BUG-C lesson). Cascade-delete explicitly
     deferred with its own design round.
+11. **JRNLNAME** (task 24), **PWRLOSS** (task 23), **BACKUP** (19), **N50K** (20),
+    **DOCSLINT** (21) — the incident- and guide-derived additions, tracked in the train
+    README.
+12. **MASTER-PLAN PULLS (2026-10-23 review — what the later steps can safely give this
+    train):** **FP-2 `explain()`** (task 25) and **FP-5's verification core `verify()`**
+    (task 26) pulled from Steps 4/3 — additive, read-only surfaces with no persisted-state
+    change; **D-2's JDK-21 CI matrix** (task 27) — never train-tracked before. Everything
+    else stays pinned: W-4 + B3 (Step 2 — deep surgery), FP-3 AOT + FP-5 `backupTo` +
+    FP-6 CLI (Step 3 — multi-session), FP-7/8/9/10/12 (demand-driven / post-FP-3).
 
 **2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
 recovery, JMH vs baselines, fresh-clone README walkthrough) → tag `v2.1.0`.
@@ -262,7 +271,7 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 | Order | Work | Effort | Unlocks | Release |
 |---|---|---|---|---|
 | 0 | Step 0: A2 + E-1..E-6 + D-3 → **2.0.0** — **DONE: shipped 2026-10-21** | 1–2 sess | Everything public | **2.0.0** |
-| 1 | **2.1.0 train:** Track L (log hygiene) + Track T (coverage & grouping) + BENCH (task 13, benchmark unification) + B2 + FP-1 (phase 1) + **BUG-A..D (tasks 14–17, migrated from 2.2.0)** + FP-11 + D-4 — **IN PROGRESS (pom at 2.1.0; L, T-1/T-2, B2, FP-1a/1b done)** | 4–6 sess | Quiet library default; a measured, grouped test estate; query expressiveness; read-heavy workloads; **no data-stranding defects** | **2.1.0** |
+| 1 | **2.1.0 train:** Track L + Track T + BENCH + B2 + FP-1 + **BUG-A..E** + **PWRLOSS/JRNLNAME/BACKUP/N50K/DOCSLINT** + AUTOSAVE + **master-plan pulls: FP-2 explain (25), FP-5-core verify (26), D-2 JDK-21 matrix (27)** — **IN PROGRESS (pom at 2.1.0)** | 5–7 sess | Quiet library default; a measured, grouped test estate; query expressiveness + plan visibility; read-heavy workloads; **no data-stranding defects; self-service integrity verification** | **2.1.0** |
 | 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | **2.2.0** |
 | 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.3.0 |
 | 4 | FP-2/7/8/9/10/12 ecosystem train | 1–2 sess each | Mainstream adoption surface | 2.x→3.0 |

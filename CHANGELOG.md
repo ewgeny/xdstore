@@ -83,6 +83,13 @@ Planned scope; items land here as they merge:
   un-checkpointed commits survive the upgrade. The journal content stays YAML for every
   storage format (an XML storage's `Order.xml` carries `Order-journal.yaml`).
 
+- **`explain()`** (planned, [25](docs/tasks/2.1.0/25-explain-query-plan.md)) — query-plan
+  visibility: the plan the engine would take (index used, seek vs ordered range walk vs
+  scan, bound shape, post-filter criteria, fallback reason) without executing the query.
+- **`verify(folder)`** (planned, [26](docs/tasks/2.1.0/26-verify-integrity-walk.md)) — a
+  read-only integrity walk over a closed storage folder: sentinel validity, journal state,
+  object counts, index-vs-data consistency — the after-a-power-loss recipe as one call.
+
 ### Fixed (planned)
 
 Still open from the defect train (**a defect discovered by a train's own work ships with the
