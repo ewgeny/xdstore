@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][LANDING] README first screens: what is it / when to take / when not — and a 10-line example"
 labels: [2.1.0-train, P0, docs]
-status: open
+status: done
 ---
 
 ## Summary
@@ -56,16 +56,46 @@ it lands before 30 and alongside 31.
 
 ## Acceptance criteria
 
-- [ ] The first screen answers all three questions without scrolling past ~40 lines; the
+- [x] The first screen answers all three questions without scrolling past ~40 lines; the
       example is ≤10 lines and copied verbatim from the passing quickstart test.
-- [ ] The comparison mini-table is on the first screen; the full guide is one click away.
-- [ ] The write-throughput limitation + fix-plan link are visible above the fold.
-- [ ] The README is at most half its current size; every moved section is reachable from
+- [x] The comparison mini-table is on the first screen; the full guide is one click away.
+- [x] The write-throughput limitation + fix-plan link are visible above the fold.
+- [x] The README is at most half its current size; every moved section is reachable from
       the README; DOCSLINT (21) stays green.
-- [ ] Fresh-eyes review: someone who never saw the project answers the three questions
+- [x] Fresh-eyes review: someone who never saw the project answers the three questions
       after one screen (record the reviewer in the PR).
 
 Estimate: ~1 dev-day (restructuring + link hygiene, the content exists).
+
+## Landed (2026-10-24)
+
+- **README.md 889 → 165 lines (49.2 → 10.7 KB)** — landing page: what-it-is paragraph →
+  ten-line example → Maven coordinates → when-to-take / when-not → comparison mini-table
+  (H2/SQLite, MapDB, Xodus, EclipseStore, RocksDB) → the honest write-throughput limitation
+  with the fix-plan links (WRITE-PATH-DESIGN.md + this train's task 31).
+- **docs/GUIDE.md (new, 737 lines)** — the deep reference moved section-for-section:
+  features, data model, storage lifecycle, transactions, CRUD, the search engine, triggers,
+  id generation, streaming reads, formats, structure updates, internals, performance/tuning,
+  and the package table. Every section reachable from the README's "The full guide" index.
+- **The ten-liner is mechanically honest**: extracted verbatim from the README fence and
+  compiled against the built engine + the quickstart `Account` entity — COMPILES AS WRITTEN
+  (the compile pass caught a real defect in the first draft: `XdStorageSearchQuery` has no
+  single-argument constructor — the `(primary, null)` form is required, as in the test).
+- **Follow-up, same day (maintainer's call): the example widened from ten lines to the full
+  ~22-line lifecycle** — entity sketch inline (the fresh-eyes review's main gap: "Account
+  isn't shown inline"), bulk save, indexed query, commit, shutdown, **reopen from disk**,
+  load. Proof re-run: the usage block compiles as written against the engine +
+  `quickstart.Customer`; the entity sketch matches the real `Customer.java`
+  annotation-for-annotation (whitespace-normalized grep equality).
+- **Stale docs fixed in passing**: the quickstart README still described BUG-E as a known
+  defect after its fix (task 18) — now states reopen-safety for every query shape; the
+  "README § ..." prose pointers in EMBEDDING.md and BENCHMARKS.md repointed to the guide.
+- **Fresh-eyes review** (recorded per the acceptance criterion): a context-free reviewer
+  (an agent with no prior project exposure, reading only the first screen) answered all
+  three questions after one read — verdict: pass; its nits (unlabeled `60_000L`/`64`,
+  the PrimaryCriterion-on-a-secondary-index confusion, `qt.commit()` on a read, the
+  EclipseStore/Xodus table cells, in-house phrasing) were applied before landing.
+- DOCSLINT `XdStorageAdoptionDocsContractTest` 3/3 green on the final state.
 
 ## References
 

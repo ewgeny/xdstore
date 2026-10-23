@@ -102,12 +102,18 @@ Planned scope; items land here as they merge:
   one-liners on the machinery tier) and the release profile's javadoc doclint enforced —
   the published javadoc jar becomes the API reference and can no longer regress silently.
 
-- **The evaluator-facing docs track** (planned, [29](docs/tasks/2.1.0/29-readme-landing-restructure.md)
-  / [30](docs/tasks/2.1.0/30-benchmarks-context.md)) — README first screens answer
-  what/when-to-take/when-not with a ≤10-line example and the comparison table; BENCHMARKS
-  gains the field context; the write-throughput limitation is stated up front **with the
-  fix plan** ([31](docs/tasks/2.1.0/31-write-path-analysis-design.md) — the write-path
-  analysis and the W-4 design round, pulled into this train; implementation in 2.2.0).
+- **The README is a landing page** (landed,
+  [29](docs/tasks/2.1.0/29-readme-landing-restructure.md)) — the first screen answers
+  what-it-is / when-to-take-it / when-not, carries a ~twenty-line example (entity sketch + save + query +
+  reopen) copied line-for-line
+  from the green quickstart test, the comparison mini-table vs the close relatives, and the
+  honest write-throughput limitation **with the fix plan**
+  ([docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md)). The deep reference moved
+  section-for-section to [docs/GUIDE.md](docs/GUIDE.md) (the README halved); the quickstart
+  example's stale known-defect note (BUG-E, fixed in this train) was corrected. Still
+  planned: [30](docs/tasks/2.1.0/30-benchmarks-context.md) — the field context on
+  BENCHMARKS; [31](docs/tasks/2.1.0/31-write-path-analysis-design.md) — the write-path
+  analysis and the W-4 design round the README links (implementation in 2.2.0).
 
 ### Fixed (planned)
 

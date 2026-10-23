@@ -49,12 +49,11 @@ The pom depends on exactly one production artifact — `io.github.xdstorage:xdst
   lifecycle `INFO` lines (EMBEDDING.md § Observability).
 - **Durability** is process-crash-safe by default (atomic rename); power-loss safety is
   `XdStorageConfig.builder().durableWrites(true)` at ~8× write cost (BENCHMARKS.md).
-- **Known defect (BUG-E, [docs/tasks/2.1.0/18](../../docs/tasks/2.1.0/18-bug-search-index-key-types-after-reopen.md)):**
-  range/`EQUALS` seeks on a **numeric** search index crash after a storage reopen (the
-  persisted keys come back as raw Strings). The quickstart therefore asserts its range
-  query before the close/open cycle and re-queries the String-keyed index after it; the
-  disabled `XdStorageSearchRangeReopenTest` in the library suite is the fix's acceptance
-  test. Writing, reading by id and String-keyed queries across a reopen are unaffected.
+- **Reopen is safe for every query shape.** The test deliberately re-runs the range and
+  count queries **after** the close/open cycle: search-index key types are restored to the
+  indexed field's type at reopen (BUG-E, fixed —
+  [docs/tasks/2.1.0/18](../../docs/tasks/2.1.0/18-bug-search-index-key-types-after-reopen.md);
+  before the fix, numeric range/`EQUALS` seeks crashed after a reopen).
 
 ## Where to go next
 

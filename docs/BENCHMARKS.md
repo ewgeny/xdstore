@@ -195,7 +195,7 @@ XdStorageSearchEngineBenchmark.searchByScanNotEqualsPrimary      thrpt   1506 op
 **Reading (honest):** a selective upper-bounded range runs ~15× the scan it replaces — the walk
 terminates past the upper bound and fetches only the matching objects, while the scan visits and
 reads every record. `IN` behaves like a selective walk. A **lower-bound-only** range (`GT`/`GTE`) and a
-**wide** range degrade toward scan cost by design — documented in README § Search engine; the walk
+**wide** range degrade toward scan cost by design — documented in the guide (docs/GUIDE.md) § Search engine; the walk
 starts at the first leaf because the engine deliberately avoids vertical descents for
 duplicate-bearing trees (the R-46 invariant). Quick-mode rows: 9 → 13 (the nightly row assertion is a
 lower bound and stays valid).
@@ -215,7 +215,7 @@ XdStorageSearchEngineBenchmark.searchByPrimaryBetweenWide           thrpt  12588
 **Reading (honest):** ~25% ahead of the unbounded same-window range — the pagination win grows with
 the page/window ratio and is bounded by the per-object fetch cost (the walk itself is a minor share).
 DESC pages do NOT get this win: the leaf chain is singly linked, so DESC must collect the full match
-set before it can slice from the tail (documented in README § Search engine). Quick-mode rows: 13 → 14
+set before it can slice from the tail (documented in the guide, docs/GUIDE.md § Search engine). Quick-mode rows: 13 → 14
 (the nightly row assertion is a lower bound and stays valid).
 
 **Reading:**
