@@ -104,16 +104,20 @@ Planned scope; items land here as they merge:
 
 - **The README is a landing page** (landed,
   [29](docs/tasks/2.1.0/29-readme-landing-restructure.md)) — the first screen answers
-  what-it-is / when-to-take-it / when-not, carries a ~twenty-line example (entity sketch + save + query +
-  reopen) copied line-for-line
-  from the green quickstart test, the comparison mini-table vs the close relatives, and the
-  honest write-throughput limitation **with the fix plan**
+  what-it-is / when-to-take-it / when-not, carries a ~twenty-line example (entity sketch + save +
+  query + reopen) copied line-for-line from the green quickstart test, the comparison mini-table
+  vs the close relatives, and the honest write-throughput limitation **with the fix plan**
   ([docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md)). The deep reference moved
   section-for-section to [docs/GUIDE.md](docs/GUIDE.md) (the README halved); the quickstart
-  example's stale known-defect note (BUG-E, fixed in this train) was corrected. Still
-  planned: [30](docs/tasks/2.1.0/30-benchmarks-context.md) — the field context on
-  BENCHMARKS; [31](docs/tasks/2.1.0/31-write-path-analysis-design.md) — the write-path
-  analysis and the W-4 design round the README links (implementation in 2.2.0).
+  example's stale known-defect note (BUG-E, fixed in this train) was corrected.
+- **Benchmarks in context** (landed,
+  [30](docs/tasks/2.1.0/30-benchmarks-context.md)) — BENCHMARKS.md § In context states what the
+  numbers measure (ACID multi-resource commits of typed graphs, not raw KV ops) and frames the
+  canonical baseline against the field with sourced, dated public figures (RocksDB, Chronicle Map,
+  LMDB, MapDB — marketing claims labeled); every canonical scenario family gained an "in real
+  terms" reading; the write numbers carry the same limitation + fix-plan link as the README.
+  Still planned: [31](docs/tasks/2.1.0/31-write-path-analysis-design.md) — the write-path
+  analysis and the W-4 design round both pages link (implementation in 2.2.0).
 
 ### Fixed (planned)
 

@@ -24,20 +24,54 @@ JDK, CPU model, loadavg, config flags inside `manifest.json`).
   (`performance/sweep/XdStorageConfigSweep`) stays a separate harness by design (PERF §2) —
   run it via `scripts/run-benchmarks.sh sweep`; its numbers are never merged into JMH tables.
 
+#### In context — what these numbers measure, and the field frame (BMCONTEXT, docs/tasks/2.1.0/30)
+
+These are numbers for **embedded, transactional object persistence**: every operation runs inside an
+ACID transaction committed across multiple resource files (data + id index + search index), with MVCC
+snapshot reads, triggers and typed object graphs — not raw key-value ops over a map. The field frame
+from public materials, order-of-magnitude and workload-dependent (origin + date for every figure in
+§ Field-frame sources below): RocksDB's own wiki benchmarks measure 10⁴–10⁶ simple ops/s by workload
+(~52K *sustained writes*/s in a CPU-bound in-memory test); Chronicle Map's README advertises "millions
+of operations per second"; LMDB's sizing guide runs ~336k ops/s with the database memory-resident on 32
+cores; MapDB lands 10³–10⁵ ops/s depending on mode. **None of those figures buys what an XdStorage
+operation buys**: a single-op rate over a byte map or an off-heap map is not an ACID multi-resource
+commit of a typed object graph with secondary/child indexes, in-commit triggers and snapshot isolation.
+The honest use of this page is therefore the gaps WITHIN XdStorage's own scenarios (below); the
+cross-product numbers frame the order of magnitude only — workload, hardware and op semantics differ,
+and some figures are marketing claims (labeled as such). Where the engine deliberately does not compete
+today: **sustained >10³ write-transactions/s** — the write family's reading below states the measured
+gap and links the fix plan.
+
 #### Reading the CORE scenarios (honest)
 
 - `readOnlyTx` 63.6k ops/s — begin → load(id) → commit, everything cache-resident: the B2
   read-only short path as a permanent, re-runnable scenario (B2's original sweep numbers
   measured N=5000–40000 on the Hash path; this scenario pins the pattern into the suite).
+  **In real terms:** ~16 µs per read transaction — request-scoped transactions are a safe
+  default, not something to pool or amortize.
 - `writeDataHeavy` journal on/off: 370 vs 348 ops/s — the journal is ~neutral on this
   fragment-heavy shape at 1s iterations (the W-3 addendum's index-heavy verdict stands;
-  treat the delta as within quick-run noise, re-measure before quoting).
+  treat the delta as within quick-run noise, re-measure before quoting). **In real
+  terms:** ~2.7 ms per data-heavy write transaction — batch small objects, pass explicit
+  timeouts, and let batching carry the throughput (next bullet).
 - `writeDurable` on/off: 47 vs 367 ops/s — **the fsync costs ~8×** on this shape: the S-2
   number, finally canonically recorded. `durableWrites` is off by default; turn it on when
-  the durability requirement outweighs write throughput.
+  the durability requirement outweighs write throughput. **In real terms:** this is the
+  price of surviving a power loss (crash safety is free; power-loss safety is not).
 - `commitBatch` 10/100/500/1000: 116/35/15/11 tx/s — but in OBJECTS/s the curve RISES
   (1.2k → 3.5k → 7.5k → 11k): batching amortizes the commit; the per-tx fixed cost dominates
-  small batches.
+  small batches. **In real terms:** the same 11k objects/s that costs 9 seconds one-by-one
+  at batch-10 costs ~1 second at batch-1000 — batch size is the single biggest write knob
+  an embedder controls.
+
+**The write gap, stated with the plan** (the same limitation the README publishes): writes are
+**commit-bound at ~10²–10³ write-tx/s** — indexed save+delete ~731 ops/s, data-heavy ~370 tx/s, and at
+the 5×10⁴ design point unbatched pairs collapse to ~7/s (§ Design point below). That is two to three
+orders below KV stores, and it is design scope, not accident: data files journal O(delta) per commit
+since W-3, while the id-index and search-index paths still rewrite their files whole. **The fix plan is
+public**: the write-path analysis, the bottleneck ledger and the index-journaling design round
+([docs/WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md); tracked as
+[docs/tasks/2.1.0/31](tasks/2.1.0/31-write-path-analysis-design.md), implementation targeted at 2.2.0).
 
 #### Nightly regression watch (D-4, docs/tasks/2.1.0/11)
 
@@ -79,7 +113,10 @@ collapses **67.5 → 7.0 pairs/s** from 5×10³ to 5×10⁴ (a ~10× write-laten
 recorded) — unbatched write-tx/s at the top of the claimed range is tens, not hundreds; batched
 commits remain the way to bulk-write throughput (canonical `commitBatch`: objects/s RISES with
 batch). Verdict: **the 10⁴ end of the design point is fully confirmed; 10⁵ is confirmed for reads
-and for batched writes; unbatched per-object write tx at 10⁵ is the measured limit.** Probe-mode
+and for batched writes; unbatched per-object write tx at 10⁵ is the measured limit.** **In real
+terms:** 50k objects of a typical entity cost ~70–100 MB of heap and read at tens of thousands of
+ops/s — inside the envelope; the same dataset written one object per transaction is where the wall
+is. Probe-mode
 caveats: single-run numbers, and the N=5k phase runs first in the same JVM (the N=50k point/tx
 rows benefit from extra JIT warmth — treat cross-N deltas within ~1.5× as same-band).
 
@@ -118,6 +155,52 @@ rows benefit from extra JIT warmth — treat cross-N deltas within ~1.5× as sam
 | `searchByScanNullPrimaryFieldCriterion` | — | 15,537 ± 10,123 |
 | `updateShipRenameSearchKey` | — | 1,858 ± 399 |
 
+**In real terms, by scenario group (the canonical search family):**
+
+- **Point lookups** (`loadById_indexBaseline` 215k, `searchByPrimaryEquals` 228k): ~4–5 µs/op —
+  request-scoped keyed access is effectively free, and a secondary/child criterion on the fetched
+  record (`…WithFieldCriterion` 221k, `…WithChildCriterion` 224k) adds ~0%: index the fields you
+  filter on and the filter rides along at no extra cost.
+- **OR branches** (`searchByOrTwoPrimaries` 183k): near-linear — each extra `EQUALS` branch is one
+  more tree lookup.
+- **Selective ranges** (`searchByPrimaryBetweenSelective` 24k, `searchByPrimaryIn` 22.8k,
+  `searchByPrimaryGT` 15k) and **paged ranges** (`…PagedLimit50` 15.5k): thousands of filtered pages
+  per second; on an ascending single-criterion walk the limit is pushed down (the walk stops at the
+  page end — ~25% ahead of the unbounded same-window range). Wide windows (`…BetweenWide` 11.4k)
+  and lower-bound-only ranges degrade toward the walk's fetch cost by design.
+- **Scan paths** (`searchByScanNotEqualsPrimary` 1.6k, `searchByScanNullPrimaryFieldCriterion` 15.5k):
+  both are O(dataset) on the index walk — every index record is visited. The 10× gap between them is
+  the matched-record fetch, not the walk: `NOT_EQUALS "@@none@@"` matches essentially every ship and
+  fetches the whole dataset, while the null-primary query scans the same index but its
+  `tonnage EQUALS 7` filter (tonnage = `i % 50` in the dataset) matches ~2 of each band's 100 ships
+  and fetches almost nothing. Reporting-tier operations either way — fine for dashboards, wrong for
+  request paths.
+- **Writes through the indexed facade** (`saveAndDeleteIndexedShipWithCrew` 731,
+  `updateShipRenameSearchKey` 1.9k): ~0.5–1.4 ms per write transaction including the 2PC over data +
+  id index + search index — commit-bound; the gap and the fix plan are stated above.
+
+#### Field-frame sources (the public figures cited in § In context)
+
+Vendor/third-party published, workload-dependent, quoted for order-of-magnitude framing only — not
+like-for-like comparisons (different op semantics, hardware, configurations; marketing claims labeled
+as such):
+
+- **RocksDB** — the project's own wiki, *In Memory Workload Performance Benchmarks*
+  (github.com/facebook/rocksdb/wiki, page revision dated 2022-11): ~52K *sustained writes*/s in a
+  CPU-bound in-memory workload; Get-path workloads run in the millions of ops/s. Band: 10⁴–10⁶ simple
+  ops/s by workload and hardware.
+- **Chronicle Map** — official README (github.com/OpenHFT/Chronicle-Map, accessed 2026-10): "Millions
+  of operations per second, with low and stable microsecond latencies for reads and writes" (vendor
+  claim); the vendor's product page adds "up to 30 million updates/sec on a 16-core server"
+  (chronicle.software, marketing figure, undated).
+- **LMDB** — Symas sizing guide (symas.com, accessed 2026-10): ~336k ops/s with the database resident
+  in RAM on a 32-core box; the official benchmark suite is published at lmdb.tech/bench; the
+  lmdbjava benchmark set (github.com/lmdbjava/benchmarks, run 2016-06) found LMDB the random-read
+  leader among Java-accessible stores.
+- **MapDB** — official benchmarks page (mapdb.org/benchmarks, undated six-map comparison); the same
+  lmdbjava set (2016-06) measured MapDB ~1.5× slower than LMDB on random gets; community figures put
+  disk-backed write throughput around 10⁴ ops/s (Stack Overflow, 2014, a single anecdote — the
+  weakest of the four; treat MapDB as 10³–10⁵ ops/s by mode).
 
 ---
 

@@ -126,6 +126,10 @@ Conditions: 2026-10-22, JDK 21, quiet 24-core Linux box, WARN-console logging, Y
 full manifest in `docs/perf/canonical-baseline-2026-10-22/`. Re-run:
 `bash scripts/run-benchmarks.sh full`.
 
+Every number above has its field frame and a per-family "in real terms" reading on
+[BENCHMARKS.md](BENCHMARKS.md) (§ In context — what the figures measure, the sourced
+order-of-magnitude cross-product comparisons, and the write-gap fix plan).
+
 ## Where to go next
 
 - [README.md](../README.md) — the full guide (data model, transactions, search engine).

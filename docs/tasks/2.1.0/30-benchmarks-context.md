@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][BMCONTEXT] Benchmarks in context: the field comparison the numbers need"
 labels: [2.1.0-train, P0, docs, performance]
-status: open
+status: done
 ---
 
 ## Summary
@@ -45,13 +45,38 @@ must carry the context, because that is where a skeptical reader looks for it.
 
 ## Acceptance criteria
 
-- [ ] The context header + field frame live on BENCHMARKS.md, linked from DECISION-GUIDE
+- [x] The context header + field frame live on BENCHMARKS.md, linked from DECISION-GUIDE
       (which links back — one story, two entry points).
-- [ ] Every canonical scenario family has its "in real terms" line.
-- [ ] All cited external figures carry sources and dates; nothing invented.
-- [ ] DOCSLINT (21) stays green.
+- [x] Every canonical scenario family has its "in real terms" line.
+- [x] All cited external figures carry sources and dates; nothing invented.
+- [x] DOCSLINT (21) stays green.
 
 Estimate: ~0.5 dev-day (framing and citations; the measurements exist).
+
+## Landed (2026-10-24)
+
+- **§ In context** on BENCHMARKS.md: what the numbers measure (ACID multi-resource commits of
+  typed graphs, MVCC, triggers — not raw KV ops), the sourced order-of-magnitude field frame
+  (RocksDB / Chronicle Map / LMDB / MapDB), and the honest framing: not like-for-like, the
+  useful signal is the gaps within XdStorage's own scenarios; the engine deliberately does not
+  compete at sustained >10³ write-tx/s today.
+- **Per-family "in real terms"** completed: the CORE block (readOnlyTx ~16 µs, data-heavy
+  ~2.7 ms/tx, durableWrites = the price of power-loss safety, commitBatch objects/s) gained an
+  embedder sentence each; the canonical search table gained a per-group list (point lookups
+  ~4–5 µs, OR near-linear, selective/paged ranges, scan paths, indexed-facade writes); the N50K
+  reading gained its one-liner.
+- **The write-gap paragraph** states the measured gap with the public fix plan
+  (WRITE-PATH-DESIGN.md + task 31), mirroring the README's honest-limitation block (task 29).
+- **§ Field-frame sources** carries origin + date for every external figure: RocksDB wiki
+  (2022-11, ~52K sustained writes/s CPU-bound in-memory), Chronicle Map README (accessed
+  2026-10, "millions of operations per second"; vendor page undated), LMDB Symas sizing guide
+  (accessed 2026-10, ~336k ops/s @32-core) + lmdbjava set (2016-06), MapDB benchmarks page +
+  community figures (labeled weakest). Marketing claims labeled as such.
+- Verified against the benchmark source before claiming: the 10× scan-vs-scan gap is the
+  matched-record fetch (NOT_EQUALS fetches ~all ships; the tonnage = i % 50 filter matches ~2 of
+  each band's 100), not a walk difference.
+- DECISION-GUIDE § The numbers, in one table links back to BENCHMARKS § In context.
+- DOCSLINT `XdStorageAdoptionDocsContractTest` 3/3 green on the final state.
 
 ## References
 
