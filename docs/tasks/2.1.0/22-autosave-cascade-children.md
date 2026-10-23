@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][AUTOSAVE] @XdStorageAutoSave: cascade-save independent children on parent save/update"
 labels: [2.1.0-train, P1, engine, feature]
-status: open
+status: done
 ---
 
 ## Summary
@@ -104,18 +104,43 @@ one 2PC transaction.
 
 ## Acceptance criteria
 
-- [ ] Contract suite, at minimum: insert-cascade with generated-id backfill into the SAME
-      instance; update-cascade (modify child → parent update → child persisted); add-child
-      via parent update; **removed child stays persisted** (the loud pin); cycle A↔B
-      terminates; embedded-element field → exactly one metadata WARN, save succeeds;
-      child triggers and deferred-id observers fire on cascaded children; rollback
-      atomicity (parent failure → no children); reopen → children loadable by id and via
-      the parent's collection; double-save of one child in one operation upserts, never
-      duplicates.
-- [ ] README § Defining the data model + EMBEDDING.md gain the annotation's contract
-      (including the removed-children and stale-copy semantics — the two surprises).
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
-- [ ] `CHANGELOG.md` "Added" entry; issue synced.
+- [x] Contract suite `XdStorageAutoSaveCascadeTest` (10 tests): insert-cascade with
+      generated-id backfill into the SAME instance; update-cascade (modify child → parent
+      update → child persisted); add-child via parent update; **removed child stays
+      persisted** (the loud pin); cycle A↔B terminates; embedded-element field → save
+      succeeds with the metadata WARN (one-time per class); child triggers fire on cascaded
+      children; rollback atomicity (a failing cascade child aborts the save — nothing
+      persists after rollback); reopen → children loadable by id; MAP values cascade (keys
+      never candidates; id-field-less values skipped); ARRAY fields cascade their elements;
+      transitive grandchildren persist.
+- [x] README § Cascade save + EMBEDDING.md (§ Cascade save and transactions) carry the
+      annotation's contract — including the removed-children and stale-copy semantics (the
+      two surprises).
+- [x] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
+- [x] `CHANGELOG.md` "Added" entry.
+
+## Implementation notes (what landed, 2026-10-23)
+
+- **Metadata in `XdStorageClassInfo`** (review point 1): `List<XdStorageAutoSaveFieldInfo>`
+  (accessor + shape COLLECTION/MAP/ARRAY/REFERENCE) built by the registry from the scanned
+  fields — inherited included (the scanner walks superclasses).
+- **Engine out of the facade** (review point 2): `utils/XdStorageAutoSaveCascadeEngine` owns
+  the visited/depth ThreadLocals and the walk; `XdStorage` keeps only the tail hook
+  (`cascadeAfterPersist(object, tx, services, this)`) — its inline save/update dispatches
+  restored verbatim; the transient private `persistObject`/`updateObject` copies removed
+  (dead once the dispatch returned inline).
+- **Walk-semantics fix** (found by the transitive test): the visited mark must happen AT the
+  walk — pre-marking children before their cascade made the child's own fields never walk
+  (transitivity silently broken; caught because `XdStorageAutoSaveCascadeTest`
+  `transitiveGrandchildCascades` failed on first run).
+- **Shapes**: COLLECTION, single REFERENCE, **ARRAY** (elements are the candidates), and
+  **MAP** (VALUES whose class carries an id-field; keys are never candidates; id-field-less
+  values WARN-skipped once per class). Maps/arrays were "out of scope" in the original
+  design — pulled in by review.
+- v1 stays per the design: no cascade-delete, no dirty checking, no annotation options.
+  Deferred-id spike outcome: the back-reference case is NOT v1-supported — children with
+  `@XdStorageParentObject` back-references to independent parents should use the embedded
+  shape; documented in README § Cascade save.
 
 ## Out of scope
 

@@ -22,7 +22,7 @@ import java.util.Map;
 public final class XdStorageAutoSaveFieldInfo {
 
     public enum Shape {
-        COLLECTION, MAP, REFERENCE
+        COLLECTION, MAP, ARRAY, REFERENCE
     }
 
     private final XdStorageObjectField accessor;
@@ -50,7 +50,7 @@ public final class XdStorageAutoSaveFieldInfo {
         return field.isAnnotationPresent(XdStorageAutoSave.class);
     }
 
-    /** Shape from the declared field type: Collection → COLLECTION, Map → MAP, else REFERENCE. */
+    /** Shape from the declared field type: Collection → COLLECTION, Map → MAP, array → ARRAY, else REFERENCE. */
     public static XdStorageAutoSaveFieldInfo of(final XdStorageObjectField accessor) {
         final Class<?> declared = accessor.field.getType();
         final Shape shape;
@@ -58,6 +58,8 @@ public final class XdStorageAutoSaveFieldInfo {
             shape = Shape.COLLECTION;
         } else if (Map.class.isAssignableFrom(declared)) {
             shape = Shape.MAP;
+        } else if (declared.isArray()) {
+            shape = Shape.ARRAY;
         } else {
             shape = Shape.REFERENCE;
         }
@@ -78,6 +80,14 @@ public final class XdStorageAutoSaveFieldInfo {
         }
         if (shape == Shape.COLLECTION) {
             for (final Object element : (Collection<?>) value) {
+                if (element != null) {
+                    children.add(element);
+                }
+            }
+        } else if (shape == Shape.ARRAY) {
+            // array elements are the child objects; the array itself is never a graph node
+            for (int i = 0; i < java.lang.reflect.Array.getLength(value); ++i) {
+                final Object element = java.lang.reflect.Array.get(value, i);
                 if (element != null) {
                     children.add(element);
                 }

@@ -303,9 +303,11 @@ Contract (pinned by `XdStorageAutoSaveCascadeTest`):
   collections — dirty checking is a future optimization);
 - an element class under `StoreWithParentObject` is a no-op with a metadata WARN (already
   embedded in the parent's file);
-- v1 covers collections and single references; Maps/arrays are not cascaded. A child with a
-  parent back-reference should use the standard embedded shape (§ Parent references and lazy
-  children) — the cascade is for independent children.
+- shapes: collections, single references, **arrays**, and **Maps** (a MAP-typed field
+  cascades its VALUES that carry an id-field — the keys are never candidates; id-field-less
+  values are WARN-skipped). A child with a parent back-reference should use the standard
+  embedded shape (§ Parent references and lazy children) — the cascade is for independent
+  children.
 
 ### Parent references and lazy children
 

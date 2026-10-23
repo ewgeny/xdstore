@@ -91,8 +91,11 @@ public final class XdStorageAutoSaveCascadeEngine {
         for (final XdStorageAutoSaveFieldInfo info : clInfo.getAutoSaveFields()) {
             for (final Object child : info.childrenOf(unwrapped)) {
                 final Object childUnwrapped = XdStorageObjectUtils.getWrappedObjectOrSameObject(child);
-                if (!visited.add(childUnwrapped)) {
-                    continue; // same instance via two fields, or a cycle back-edge
+                // dedup + cycle guard: the mark happens here, and the recursive walk below
+                // is what opens the child's OWN fields — pre-marking before save would make
+                // the child's cascade walk early-return and break transitivity (observed)
+                if (visited.contains(childUnwrapped)) {
+                    continue;
                 }
                 final Class<?> childClass = XdStorageObjectUtils.getEntityClass(childUnwrapped.getClass());
                 final XdStorageClassInfo childInfo = XdStorageObjectUtils.getClassInfo(childClass);
@@ -104,6 +107,7 @@ public final class XdStorageAutoSaveCascadeEngine {
                                 + "already embedded in the parent's file; cascade-save is a no-op for it",
                                 childClass.getName());
                     }
+                    visited.add(childUnwrapped);
                     continue;
                 }
                 if (info.getShape() == Shape.MAP) {
@@ -115,6 +119,7 @@ public final class XdStorageAutoSaveCascadeEngine {
                                     + "skipped by the cascade (only id-field-bearing value objects are saved)",
                                     childClass.getName());
                         }
+                        visited.add(childUnwrapped);
                         continue;
                     }
                 }

@@ -24,6 +24,10 @@ public class XdStorageClassInfo {
 
     private Map<String, XdStorageSearchIndex> indexes = new HashMap<>();
 
+    // AUTOSAVE (docs/tasks/2.1.0/22): the @XdStorageAutoSave annotated fields of this class,
+    // built by the metadata registry from the scanned fields (inherited included)
+    private final java.util.List<XdStorageAutoSaveFieldInfo> autoSaveFields = new java.util.ArrayList<>();
+
     public XdStorageClassInfo() {
     }
 
@@ -70,10 +74,6 @@ public class XdStorageClassInfo {
     void setIdField(XdStorageObjectIdField idField) {
         this.idField = idField;
     }
-
-    // AUTOSAVE (docs/tasks/2.1.0/22): the @XdStorageAutoSave annotated fields of this class,
-    // built by the metadata registry from the scanned fields (inherited included)
-    private final java.util.List<XdStorageAutoSaveFieldInfo> autoSaveFields = new java.util.ArrayList<>();
 
     public java.util.List<XdStorageAutoSaveFieldInfo> getAutoSaveFields() {
         return autoSaveFields;

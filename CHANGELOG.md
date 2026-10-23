@@ -47,8 +47,9 @@ Planned scope; items land here as they merge:
   `@XdStorageAutoSave` field annotation: cascade-save of independent-policy children on
   parent save/update, in the caller's transaction with triggers/observers/id-generation and
   rollback identical to explicit saves; cycles terminate, duplicates dedup, removed children
-  stay persisted (loudly documented — cascade-delete is out of scope). README § Cascade save
-  + EMBEDDING carry the contract; `XdStorageAutoSaveCascadeTest` pins it.
+  stay persisted (loudly documented — cascade-delete is out of scope). Shapes: collections,
+  single references, arrays, and MAP values with an id-field (keys are never candidates).
+  README § Cascade save + EMBEDDING carry the contract; `XdStorageAutoSaveCascadeTest` pins it.
 - **BENCH** — the benchmark estate unified: `scripts/run-benchmarks.sh [quick|full|sweep]`
   is the one entry point under a documented conditions protocol (quiet-load gate, WARN-console
   benchmark logging config, YAML format, JSON results + run manifests); the CORE scenarios

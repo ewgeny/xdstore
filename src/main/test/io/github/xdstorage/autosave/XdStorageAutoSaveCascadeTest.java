@@ -305,4 +305,51 @@ public class XdStorageAutoSaveCascadeTest {
         }, "a MAP field whose values carry no id-field saves without error (values are skipped)");
         storage.commitTransaction(tx2);
     }
+
+    @Test
+    @DisplayName("ARRAY shape: an annotated OrderLine[] field cascades its elements")
+    public void arrayFieldCascades() throws Exception {
+        open();
+        final Order order = order("arr-1");
+        order.setLines(new ArrayList<>());
+        order.setExtraLines(new OrderLine[]{
+                new OrderLine("arr-x", "x"),
+                new OrderLine("arr-y", "y")});
+
+        final IXdStorageTransaction tx = storage.beginTransaction(60_000L);
+        storage.save(order, tx);
+        storage.commitTransaction(tx);
+
+        final IXdStorageTransaction rtx = storage.beginTransaction(60_000L);
+        assertNotNull(storage.load(OrderLine.class, "arr-x", rtx), "array element 1 cascaded");
+        assertNotNull(storage.load(OrderLine.class, "arr-y", rtx), "array element 2 cascaded");
+        assertEquals(2, storage.load(OrderLine.class, o -> true, rtx).size(),
+                "exactly the array's elements persisted");
+        storage.commitTransaction(rtx);
+    }
+
+    @Test
+    @DisplayName("transitivity: a grandchild reached through a cascaded child's own @XdStorageAutoSave persists")
+    public void transitiveGrandchildCascades() throws Exception {
+        open();
+        final OrderLine line = new OrderLine("tr-line", "sku");
+        final LineNote note = new LineNote();
+        note.setId("note-1");
+        note.setText("transitive");
+        line.setNotes(new ArrayList<>(Collections.singletonList(note)));
+
+        final Order order = new Order();
+        order.setId("tr-order");
+        order.setLines(new ArrayList<>(Collections.singletonList(line)));
+
+        final IXdStorageTransaction tx = storage.beginTransaction(60_000L);
+        storage.save(order, tx);
+        storage.commitTransaction(tx);
+
+        final IXdStorageTransaction rtx = storage.beginTransaction(60_000L);
+        final LineNote loaded = storage.load(LineNote.class, "note-1", rtx);
+        storage.commitTransaction(rtx);
+        assertNotNull(loaded, "the grandchild persisted through the transitive cascade");
+        assertEquals("transitive", loaded.getText());
+    }
 }
