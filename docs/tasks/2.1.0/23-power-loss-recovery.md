@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][PWRLOSS] Power-loss recovery: the verified recovery matrix, the recipe, and the durableWrites default decision"
 labels: [2.1.0-train, P0, engine, testing, docs]
-status: open
+status: done
 ---
 
 ## Summary
@@ -78,13 +78,45 @@ report exists elsewhere (email, another tracker), link it in a comment.
 
 ## Acceptance criteria
 
-- [ ] The matrix test is green ×2 and every cell asserts a defined outcome (no silently
-      partial opens anywhere).
-- [ ] EMBEDDING.md carries the recovery recipe; the decision guide's durability notes link it.
-- [ ] The `durableWrites` default is DECIDED and implemented or documented (either way,
-      CHANGELOG "Changed" carries it — a default flip is a user-facing change).
-- [ ] Checkpoint-on-shutdown: shipped or explicitly deferred with a size note.
-- [ ] Full suite green (BUILD SUCCESS verdict).
+- [x] The matrix test is green ×2 and every cell asserts a defined outcome (no silently
+      partial opens anywhere — every opened cell re-validates identity consistency; the
+      accept-recovery mode's null placeholder entries and its raw-NPE rough edge are pinned
+      as documented, LOUD recovery-mode behavior).
+- [x] EMBEDDING.md carries the recovery recipe (§ After a power loss — the matrix table +
+      the 3-step recipe + the default decision); the decision guide's losses list links it.
+- [x] The `durableWrites` default is DECIDED: **(a) KEPT OFF** — see the decision record.
+- [x] Checkpoint-on-shutdown: **explicitly deferred** with a size note (below).
+- [x] Full suite green (BUILD SUCCESS verdict).
+
+## Decision record (2026-10-23)
+
+**`durableWrites` default: KEPT OFF (option a).** The data: flipping on costs the measured
+~8× on writes (BENCHMARKS § Canonical: 47 vs 367 ops/s wide-entity; the canonical
+`saveAndDeleteIndexedShipWithCrew` 731 ops/s would fall to double digits), which would
+falsify the published "hundreds of write-transactions per second" envelope for every default
+configuration; and the shipped recovery story is sound — the matrix shows every simulated
+truncation ends in a clean open with a WARN or a loud sentinel refusal, never a
+silently-partial open. The trade-off is now DOCUMENTED at both adoption surfaces
+(DECISION-GUIDE § losses item 2; EMBEDDING § After a power loss) with the flip as the
+one-line escalation for durability-sensitive embedders. W-4's re-architecture should revisit.
+
+**Checkpoint-on-clean-shutdown: DEFERRED to W-4's train.** Sizing found it is NOT a trigger
+point + tests: there is no manager-level API to iterate all cached resources (the
+`checkpointIfJournalTooBig` machinery is private, per-resource, and threshold-driven), the
+eviction/canonical-instance interplay needs its own tests, and the B2 read-only fast path
+(no write-outs) must stay intact. Deferred with this note per the task's escape hatch.
+
+## Findings (the observed matrix, 2026-10-23 probes + pinned test)
+
+- The engine stores REDUNDANT entity copies (the search-index B+Tree nodes carry full
+  entities), so a torn data journal is masked — reads keep working from the intact tree.
+  Documented as observed redundancy, NOT a durability guarantee.
+- Tree/index METADATA damage (id_index tree, tree nodes) fails LOUDLY — strict mode refuses
+  at open/use; accept-mode opens for verification (the scan may throw a raw NPE over a
+  damaged address layer — a documented rough edge of the legacy recovery mode, never a
+  wrong answer).
+- Structure journals torn → clean open (the designed lost-tail semantics).
+- Stale lock files (unclean shutdown) never strand a folder (S-3 re-acquire).
 
 Estimate: 2–3 dev-days (the matrix is the bulk; the two decisions are maintainer calls).
 

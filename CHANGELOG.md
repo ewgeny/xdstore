@@ -79,6 +79,15 @@ Planned scope; items land here as they merge:
 Still open from the defect train (**a defect discovered by a train's own work ships with the
 train that discovered it**; BUG-A/C/D are fixed — see [Fixed](#fixed) below):
 
+- **PWRLOSS** ([23](docs/tasks/2.1.0/23-power-loss-recovery.md)) — the power-loss story is
+  now a verified matrix, a documented recipe, and an explicit default decision: every file
+  class × truncation point × config ends in a clean open with a WARN or a loud sentinel
+  refusal — **never a silently-partial open** (`XdStoragePowerLossRecoveryMatrixTest`); the
+  after-a-power-loss recovery recipe lives in EMBEDDING.md. **The `durableWrites` default was
+  re-decided and KEPT OFF**: the ~8× write cost would falsify the published throughput
+  envelope; the recovery recipe + the one-line `durableWrites(true)` escalation cover the
+  durability-sensitive embedder (EMBEDDING § After a power loss). Checkpoint-on-clean-shutdown
+  is deferred to W-4's train with a size note.
 - **BUG-B** ([16](docs/tasks/2.1.0/16-id-addressability-after-structure-update.md)) — refined:
   the codegen wrapper identity is NAME-based, so two live generations of one entity FQCN
   collide on one wrapper class; generation-aware wrapper identity is the design decision

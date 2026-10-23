@@ -71,7 +71,36 @@ current code, stated so embedding surprises are design-time, not production-time
   storages: open once with `acceptMissingEofSentinel(true)` and let the first commit rewrite the files.
 - Stale `*.tmp` files from a previous crash are swept at open.
 
-### Backup and restore
+### After a power loss
+
+The default configuration is **process-crash safe (atomic rename), not power-loss safe** —
+power loss additionally loses the OS page cache, so a "successfully written" file can come
+back with its tail missing. The verified behavior matrix
+(`XdStoragePowerLossRecoveryMatrixTest` — simulated by truncation, every cell pinned):
+
+| Damage (simulated) | Outcome with defaults | Recovery |
+|---|---|---|
+| commit journal tail torn | **opens clean** (lost-tail WARN; records after the cut discarded by design) | none — recent commits since the cut are lost |
+| index/tree metadata (`index.yaml`, tree files) torn | **fails LOUDLY at open/use** (sentinel refusal) | reopen once with `XdStorageConfig.builder().acceptMissingEofSentinel(true)` and verify your objects; rebuild indexes if reads misbehave |
+| structure files/journals torn | opens clean (the same lost-tail semantics) | none |
+| redundant copies (the search tree holds entity copies) | a torn data journal is masked — reads keep working | none (do not rely on this: it is redundancy, not a guarantee) |
+
+**What is lost:** everything since the last durable point — with `durableWrites=false`
+(the default) that is unbounded (the OS page cache is lost with the power); with
+`durableWrites=true` (fsync per commit, measured ~8× write cost — BENCHMARKS § Canonical)
+the loss shrinks to nothing.
+
+**The recipe:** (1) reopen normally — most damage opens clean or fails loudly; (2) on a loud
+`TRUNCATED` sentinel failure, reopen once with `acceptMissingEofSentinel(true)` — the storage
+opens with the readable prefix and rewrites files on the next commit (expect partial content:
+verify critical objects); (3) if the lost tail is unacceptable, restore from backup
+(§ Backup and restore) instead of accepting the truncation.
+
+**The `durableWrites` default is OFF by explicit decision** (2.1.0 re-decision, docs/tasks/
+2.1.0/23): the ~8× write cost would falsify the published throughput envelope, and the
+matrix shows the default path never opens silently-partial. Flip
+`XdStorageConfig.builder().durableWrites(true)` when power-loss durability matters more than
+write throughput — that is exactly the incident class the flag exists for.
 
 The tested operability contract: **close the storage (`shutdown()`), copy the folder with
 plain file operations, open the copy** under a new storage name. Every read answers from the

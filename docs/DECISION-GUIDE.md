@@ -57,14 +57,18 @@ quiet machine, generated tables). The point is the *gaps*, not the digits.
    at ~370 tx/s (BENCHMARKS § Canonical, `saveAndDeleteIndexedShipWithCrew`, `writeDataHeavy`);
    every commit pays the 2PC write-out. The index-journaling work (W-4) targets this; until
    it ships, the honest ceiling is **~10²–10³ write-tx/s**.
-2. **Heap ≈ working set.** The record cache holds the working set; there is no eviction
+2. **Power loss loses recent commits by default.** Default writes are crash-safe, not
+   power-loss-safe; flip `durableWrites(true)` (~8× write cost) when fsync-grade durability
+   matters. The verified recovery matrix and the after-a-power-loss recipe:
+   [EMBEDDING.md § After a power loss](EMBEDDING.md#after-a-power-loss).
+3. **Heap ≈ working set.** The record cache holds the working set; there is no eviction
    until disk-anchored scans ship (W-4). Measured: **~1.4–2.0 KB heap per object** at
    N=5k–50k ([design-point probe](BENCHMARKS.md#design-point--the-n50k-boundary-measurement-n50k-docstasks21020))
    — fine at 10⁴–10⁵ objects/class (≈70–200 MB per 10⁵ objects for typical entities);
    disqualifying beyond that — for now.
-3. **Single process per folder.** The storage folder is exclusively locked
+4. **Single process per folder.** The storage folder is exclusively locked
    (EMBEDDING.md § Lifecycle). Read-only tooling operates on a copy/backup, not live.
-4. **Runtime wrapper codegen** needs a JDK (not JRE) and a writable `./gencode`
+5. **Runtime wrapper codegen** needs a JDK (not JRE) and a writable `./gencode`
    (EMBEDDING.md § Codegen requirements). The AOT build-time-generation fix (FP-3) is on the
    roadmap; until then, containers must ship a JDK.
 5. **Adoption maturity**: single-maintainer project, first public release 2026-10. Judge the
