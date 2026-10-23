@@ -74,6 +74,15 @@ Planned scope; items land here as they merge:
   transitive through child annotations, cycle-safe). Removed children are NOT deleted;
   cascade-delete is a deliberately deferred feature.
 
+### Changed (planned)
+
+- **Journal file naming** (planned, [24](docs/tasks/2.1.0/24-journal-file-naming.md)) —
+  journal files are named `<base>-journal.yaml` (suffix, not stacked extension):
+  `Order-1.yaml` no longer carries an `Order-1.yaml.journal.yaml` twin. 2.0.0-era folders
+  are migrated automatically: legacy-named journals are replayed and renamed at open —
+  un-checkpointed commits survive the upgrade. The journal content stays YAML for every
+  storage format (an XML storage's `Order.xml` carries `Order-journal.yaml`).
+
 ### Fixed (planned)
 
 Still open from the defect train (**a defect discovered by a train's own work ships with the
