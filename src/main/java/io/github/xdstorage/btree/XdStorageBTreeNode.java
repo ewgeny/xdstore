@@ -1593,6 +1593,62 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * BUG-E (docs/tasks/2.1.0/18): the key-type restore walk — the structural mirror of
+     * {@link #read} (iterative leaf-chain walk, per-node read lock, stub resolution), but
+     * mutating the LIVE key objects in place instead of feeding snapshots to a viewer:
+     * each key's {@code value} is restored to the indexed class's primary index field type
+     * and its {@code objectId} to the entity id-field type. Reference writes are atomic;
+     * a concurrent reader either sees the old (String — the pre-fix CCE) or the restored
+     * key, never a torn one.
+     */
+    public void restoreSearchKeyTypes(final IXdStorageBTreeNode toUnlock, final IXdStorage storage,
+                                      final IXdStorageTransaction transaction,
+                                      final java.util.function.UnaryOperator<Object> keyRestorer)
+            throws XdStorageException, XdStorageConnectionException {
+        XdStorageBTreeNode current = this;
+        IXdStorageBTreeNode previous = toUnlock;
+        try {
+            while (current != null) {
+                current.lockRead(transaction);
+                try {
+                    if (current.getKeys().size() != current.getObjects().size()) {
+                        throw new XdStorageException("cannot handle index node, because it is not leaf node");
+                    }
+                    if (previous != null) {
+                        previous.unlockRead();
+                        previous = null;
+                    }
+                    final List<Comparable> liveKeys = current.getKeys();
+                    for (int i = 0; i < liveKeys.size(); ++i) {
+                        // in-place slot replacement (same size, under the node read lock) —
+                        // the restorer decides whether the key needs re-typing
+                        liveKeys.set(i, (Comparable) keyRestorer.apply(liveKeys.get(i)));
+                    }
+                    // BUG-E: the OBJECTS side (the search-index records) round-trips the same
+                    // way — their primaryIndexValue/id are Object-declared and come back as
+                    // raw Strings; the criterion layer compares the records, not just the keys
+                    final List<Object> liveObjects = current.getObjects();
+                    for (int i = 0; i < liveObjects.size(); ++i) {
+                        liveObjects.set(i, keyRestorer.apply(liveObjects.get(i)));
+                    }
+                    current.loadThisNode(storage, transaction);
+                } catch (final Throwable unwind) {
+                    if (current.isReadLocked()) {
+                        current.unlockRead();
+                    }
+                    throw unwind;
+                }
+                previous = current;
+                current = current.getNextTreeNodeOnThisLevel();
+            }
+        } finally {
+            if (previous != null) {
+                previous.unlockRead();
+            }
+        }
+    }
+
     public void read(final IXdStorageBTreeNode toUnlock, final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
         // R-59: обход цепочки листьев ИТЕРАЦИОНЕН (см. зеркальный комментарий в find):
         // рекурсия по next давала кадр стека на каждый лист и падала

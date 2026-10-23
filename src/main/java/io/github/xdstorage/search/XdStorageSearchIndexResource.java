@@ -188,6 +188,8 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         if (tree == null || keyTree == null) {
             throw new XdStorageException("Сбой инициализации индексной структуры: деревья поиска не найдены");
         }
+        restoreSearchKeyTypesIfNeeded(tree, storage, transaction);
+        restoreSearchKeyTypesIfNeeded(keyTree, storage, transaction);
 
         // Идемпотентность: search-insert вызывается на КАЖДОМ save() объекта. Повторная
         // запись уже проиндексированного объекта — no-op (обратная запись в key-дереве есть).
@@ -265,6 +267,8 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         if (tree == null) {
             throw new XdStorageException("object with idgeneration " + record.getId() + " does not exists");
         }
+        restoreSearchKeyTypesIfNeeded(keyTree, storage, transaction);
+        restoreSearchKeyTypesIfNeeded(tree, storage, transaction);
 
         if ((oldPrimaryFieldValue == null && newPrimaryFieldValue == null)
                 || (oldPrimaryFieldValue != null && oldPrimaryFieldValue.equals(newPrimaryFieldValue))) {
@@ -301,6 +305,8 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
             return;
         }
 
+        restoreSearchKeyTypesIfNeeded(keyTree, storage, transaction);
+
         final List<Object> findResult = keyTree.find((Comparable) record.getId(), storage, transaction);
         if (findResult.isEmpty()) {
             return;
@@ -318,6 +324,7 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         if (tree == null) {
             return;
         }
+        restoreSearchKeyTypesIfNeeded(tree, storage, transaction);
 
         final XdStorageSearchIndexKey searchIndexKey = new XdStorageSearchIndexKey(oldHashIndexRecord.getValue(), oldHashIndexRecord.getObjectId(), XdStorageSearchIndexOperationType.Insert);
         tree.delete(searchIndexKey, storage, transaction);
@@ -342,5 +349,26 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
     @Override
     public IXdStorageSearchIndexDaoResource getDao() {
         return this;
+    }
+
+    /**
+     * BUG-E (docs/tasks/2.1.0/18): the resource's OWN tree instances (insert/update/delete/
+     * watch load them independently of the search manager) need the same one-time key-type
+     * restore after a reopen — otherwise the first DELETE/INSERT seek on a numeric search
+     * index crashes on raw-String persisted keys. The CAS once-guard lives on the tree
+     * instance, so duplicate invocations across instances converge on the canonical nodes.
+     */
+    private void restoreSearchKeyTypesIfNeeded(final XdStorageBTree tree, final IXdStorage storage,
+                                               final XdStorageTransaction transaction)
+            throws XdStorageException, XdStorageConnectionException {
+        final XdStorageSearchIndex searchIndex = objectClInfo.getIndexes().get(indexName);
+        if (searchIndex == null || searchIndex.getPrimaryField() == null) {
+            return;
+        }
+        tree.restoreSearchKeyTypes(
+                io.github.xdstorage.utils.XdStorageKeyTypeRestore.searchEntryRestorer(
+                        searchIndex.getPrimaryField().field.getType(),
+                        objectClInfo.getIdField().field.getType()),
+                storage, transaction);
     }
 }

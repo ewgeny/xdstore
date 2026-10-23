@@ -202,30 +202,15 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
      * lookup then misses loudly instead of corrupting the cache with a wrong-typed key).
      */
     private Object restoreKeyValueType(final Object key) {
-        if (key == null) {
-            return null;
-        }
         // BUG-C: the authority is the ENTITY's id-field type — this resource's own
         // `clInfo`/`idField` describe the RECORD class (XdStorageHashIndexRecord.objectId,
         // declared Object), which would silently restore nothing
-        Class<?> keyClass = objectClInfo.getIdField().field.getType();
-        if (keyClass == long.class) keyClass = Long.class;
-        if (keyClass == int.class) keyClass = Integer.class;
-        if (keyClass == double.class) keyClass = Double.class;
-        if (keyClass == float.class) keyClass = Float.class;
-        if (keyClass == boolean.class) keyClass = Boolean.class;
-        if (keyClass.isInstance(key)) {
-            return key;
+        final Object restored = io.github.xdstorage.utils.XdStorageKeyTypeRestore.restore(
+                key, objectClInfo.getIdField().field.getType());
+        if (restored != key) {
+            log.debug("restored id-index key type: {} -> {}", key, restored);
         }
-        if (key instanceof String || key instanceof Number || key instanceof Boolean) {
-            try {
-                return new XdStorageDefaultSimpleTypeHelper().simpleTypeFromString(keyClass, key.toString());
-            } catch (final RuntimeException e) {
-                log.warn("cannot restore id-index key {} to {} — kept as-is (lookups by the app id will miss)",
-                        key, keyClass.getName(), e);
-            }
-        }
-        return key;
+        return restored;
     }
 
     public void performFirstPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {

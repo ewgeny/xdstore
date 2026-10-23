@@ -76,11 +76,17 @@ train that discovered it**; BUG-A/C/D are fixed — see [Fixed](#fixed) below):
   the codegen wrapper identity is NAME-based, so two live generations of one entity FQCN
   collide on one wrapper class; generation-aware wrapper identity is the design decision
   to make.
-- **BUG-E** ([18](docs/tasks/2.1.0/18-bug-search-index-key-types-after-reopen.md)) — search-index
-  key types are not restored at reopen: after a close/open cycle, range and `EQUALS` seeks on a
-  **numeric** search index crash (`Long` bound vs raw-`String` persisted keys inside the B+Tree
-  node files). String-keyed indexes are unaffected. Discovered by the FP-11 example app; the
-  disabled `XdStorageSearchRangeReopenTest` is the fix's acceptance criterion.
+- **BUG-E** ([18](docs/tasks/2.1.0/18-bug-search-index-key-types-after-reopen.md)) — FIXED:
+  search-index key types are restored at reopen. After a close/open cycle, range, `EQUALS` and
+  `count` on a **numeric** search index crashed (`Long` bound vs raw-`String` persisted keys and
+  records inside the B+Tree node files). The fix walks each search tree ONCE per reopen
+  (CAS-guarded, same lock discipline as the read walk) and restores the key values to the indexed
+  class's primary index field type, the object pointers to the entity id-field type, and the index
+  records' `primaryIndexValue`/id — the type authority is the declared field type (the BUG-C
+  lesson, now a shared `XdStorageKeyTypeRestore` utility). No migration: on-disk keys were always
+  written typed. String-keyed indexes were unaffected, which is why every earlier reopen
+  regression missed it. Discovered by the FP-11 example app; its quickstart asserts range + count
+  after the reopen again.
 
 ### Changed (planned)
 

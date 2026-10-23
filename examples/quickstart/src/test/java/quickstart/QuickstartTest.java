@@ -104,13 +104,18 @@ public class QuickstartTest {
             final Customer c3 = storage.load(Customer.class, "c-3", reopenTx);
             assertEquals("Clara", c3.getName(), "the object survived the close/open cycle");
 
-            // EQUALS on the String-keyed index still answers from persisted state.
-            // (KNOWN DEFECT, pinned as BUG-E — docs/tasks/2.1.0/18: range/count on a
-            // NUMERIC search index after a reopen crashes on raw-String keys. The two
-            // assertions above used to run here too; they come back the day task 18
-            // lands — see XdStorageSearchRangeReopenTest in the library's suite.)
+            // EQUALS on the String-keyed index answers from persisted state...
             assertEquals(Arrays.asList("c-1", "c-3", "c-5"),
                     queryCountry(storage, "DE"), "the index answered from persisted state");
+
+            // ...and so do RANGE and COUNT on the numeric index (BUG-E — docs/tasks/2.1.0/18 —
+            // used to crash here: the persisted search keys came back as raw Strings; the
+            // reopen path restores them to the indexed field's type, one walk per tree).
+            assertEquals(Arrays.asList("a-3", "a-4", "a-5", "a-6", "a-7"),
+                    accountIds(storage, midBalances).stream().sorted().collect(Collectors.toList()),
+                    "BETWEEN after the reopen: keys restored to the indexed field's type");
+            assertEquals(5L, storage.count(Account.class, "by_balance", midBalances, reopenTx),
+                    "count after the reopen: the same walk, the same answer");
             storage.commitTransaction(reopenTx);
         } catch (final RuntimeException e) {
             storage.rollbackTransaction(reopenTx);

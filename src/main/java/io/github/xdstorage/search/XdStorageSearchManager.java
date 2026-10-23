@@ -416,6 +416,7 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
 
         final XdStorageBTree tree = storage.load(XdStorageBTree.class, searchBTreeId, transaction);
         if (tree != null) {
+            restoreSearchKeyTypesIfNeeded(tree, clInfo, index, storage, transaction);
             // FP-1b: ORDER BY / LIMIT / OFFSET request the shaping-aware evaluation, which
             // preserves the order of the ordered walk in the returned list; the legacy path
             // keeps its exact behavior (unordered map values).
@@ -450,6 +451,7 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
         if (tree == null) {
             return 0L;
         }
+        restoreSearchKeyTypesIfNeeded(tree, clInfo, index, storage, transaction);
 
         final AtomicLong matched = new AtomicLong();
         evaluateCriterions(query, transaction, clInfo, index, policy, storage, tree,
@@ -507,6 +509,25 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
         if (!notEquals.isEmpty()) {
             handleNotEqualsPrimaryCriterions(transaction, clInfo, index, policy, result, notEquals);
         }
+    }
+
+    /**
+     * BUG-E (docs/tasks/2.1.0/18): after a reopen the search-index tree keys come back from
+     * the node YAML as raw Strings (the key field is declared Object) and the first typed
+     * seek crashes. The tree restores ONCE per instance (the CAS flag is on the tree) — the
+     * type authority is the indexed class: the PRIMARY index field for the key value (the
+     * B+tree's ordering key, the first `indexFieldNames` entry) and the id field for the
+     * object pointer.
+     */
+    private void restoreSearchKeyTypesIfNeeded(final XdStorageBTree tree, final XdStorageClassInfo clInfo,
+                                               final XdStorageSearchIndex index, final IXdStorage storage,
+                                               final XdStorageTransaction transaction)
+            throws XdStorageException, XdStorageConnectionException {
+        final Class<?> keyValueType = index.getPrimaryField().field.getType();
+        final Class<?> objectIdType = clInfo.getIdField().field.getType();
+        tree.restoreSearchKeyTypes(
+                io.github.xdstorage.utils.XdStorageKeyTypeRestore.searchEntryRestorer(keyValueType, objectIdType),
+                storage, transaction);
     }
 
     /** FP-1a: the range-operator family routed to the ordered bounded walk. */

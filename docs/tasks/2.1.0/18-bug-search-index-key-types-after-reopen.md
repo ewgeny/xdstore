@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][BUG-E] Search-index key types are not restored at reopen: numeric range/EQUALS seeks crash"
 labels: [2.1.0-train, P0, engine, bug]
-status: open
+status: done
 ---
 
 ## Summary
@@ -69,10 +69,29 @@ after-reopen range+count, after-reopen EQUALS). **Un-disabling it IS the accepta
 
 ## Acceptance criteria
 
-- [ ] `XdStorageSearchRangeReopenTest` un-disabled and green (all 3 tests).
-- [ ] The FP-11 quickstart asserts range + count AFTER its reopen again (green).
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
-- [ ] `CHANGELOG.md` "Fixed" entry updated from "(planned)".
+- [x] `XdStorageSearchRangeReopenTest` un-disabled and green (all 3 tests).
+- [x] The FP-11 quickstart asserts range + count AFTER its reopen again (green — against the
+      locally installed fixed library; the quickstart resolves `xdstorage.version` 2.1.0 from
+      the local repo, so `mvn -DskipTests install` precedes its test run).
+- [x] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
+- [x] `CHANGELOG.md` "Fixed" entry updated.
+
+## Implementation notes (what landed)
+
+- The restore lives ONE layer deeper than BUG-C's: the search-index keys ride the B+Tree node
+  files, so the walk lives in the tree — `XdStorageBTree.restoreSearchKeyTypes(UnaryOperator)`.
+  CAS once-guard on the tree instance (canonical → survives the storage's lifetime), prewarm,
+  then a leaf-chain walk with the read walk's exact lock discipline — **including the
+  tree-read-lock coupling on entry** (the walk releases it after the first node lock; missing
+  that produced an `IllegalMonitorStateException` on the first run).
+- The hook is a `UnaryOperator<Object>` applied to BOTH the keys and the objects (records) of
+  every leaf — the btree layer stays search-agnostic; the SEARCH manager owns the type
+  authority (primary index field + entity id field) and the instanceof branches.
+- **The records matter as much as the keys**: after the keys were restored, the range still
+  failed — the criterion layer compares `XdStorageSearchIndexRecord.primaryIndexValue`, which
+  round-trips as a raw String exactly like the keys. Both sides restored.
+- `XdStorageKeyTypeRestore` (utils) — the shared declared-field-type conversion, extracted from
+  BUG-C's private helper (the hash id-index resource now delegates to it).
 
 Estimate: 1–2 dev-days.
 

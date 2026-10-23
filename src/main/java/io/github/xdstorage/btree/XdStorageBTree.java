@@ -67,6 +67,14 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
 
     private final XdStorageReadWriteLock lock = new XdStorageReadWriteLock();
 
+    // BUG-E (docs/tasks/2.1.0/18): the search-index keys live in the node YAML files and
+    // come back from a reopen as raw Strings (the key field is declared Object) — the first
+    // typed seek crashes (Long bound vs String key). The restore walks the leaf chain ONCE
+    // per tree instance; this flag is the once-guard (the canonical instance lives for the
+    // storage's lifetime, so the flag does too).
+    private final java.util.concurrent.atomic.AtomicBoolean searchKeysTypeRestored =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     // R-56: детектор структурных мутаций. structureVersion инкрементируется на входе в
     // каждую мутацию (insert/delete/update), activeMutations считает мутации «в полете».
     // Валидатор сэмплирует пару (version, active) до/между/после двух своих обходов:
@@ -576,6 +584,40 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
             }
         } while (retryFind.get());
         return result == null ? Collections.emptyList() : result;
+    }
+
+    /**
+     * BUG-E (docs/tasks/2.1.0/18): restores every search-index key's {@code value} to the
+     * indexed class's PRIMARY index field type and its {@code objectId} to the entity's
+     * id-field type — after a reopen the generic YAML reader has them as raw Strings (the
+     * key fields are declared Object), and the first typed seek crashes with a CCE. Runs
+     * ONCE per tree instance (CAS-guarded; O(N) one-time per open), delegating the walk to
+     * the first leaf (same lock discipline as {@link #read}).
+     */
+    public void restoreSearchKeyTypes(final java.util.function.UnaryOperator<Object> keyRestorer,
+                                      final IXdStorage storage, final IXdStorageTransaction transaction)
+            throws XdStorageException, XdStorageConnectionException {
+        if (searchKeysTypeRestored.getAndSet(true)) {
+            return;
+        }
+        lockWrite(transaction);
+        XdStorageBTreeNode chainStart;
+        try {
+            chainStart = firstLeaf;
+        } finally {
+            unlockWrite();
+        }
+        if (chainStart != null) {
+            chainStart = prewarmLeafChain(chainStart, storage, transaction);
+        }
+        // the walk's lock-coupling contract (mirror of read()): the TREE read lock is held
+        // on entry and released by the walk itself after the first node lock is taken
+        lockRead(transaction);
+        if (chainStart == null) {
+            unlockRead();
+            return;
+        }
+        chainStart.restoreSearchKeyTypes(this, storage, transaction, keyRestorer);
     }
 
     public void read(final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
