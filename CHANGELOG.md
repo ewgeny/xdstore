@@ -119,6 +119,13 @@ Planned scope; items land here as they merge:
   Still planned: [31](docs/tasks/2.1.0/31-write-path-analysis-design.md) — the write-path
   analysis and the W-4 design round both pages link (implementation in 2.2.0).
 
+- **Index journaling (W-4a/c)** (planned, [32](docs/tasks/2.1.0/32-w4-write-path-implementation.md),
+  design in [W4-DESIGN.md](W4-DESIGN.md)) — the hash id-index (the default) joins the commit
+  journal: O(N)-per-commit full-file rewrite becomes O(delta), removing the write scaling
+  wall across the 10⁴–10⁵ design point; checkpoint on clean shutdown bounds every journal.
+  Flag-gated (`indexJournalWrites`), soaked, then defaulted. Search-tree logical-op journal
+  (W-4b) and disk-anchored scans (W-4d) follow their gates.
+
 ### Fixed (planned)
 
 Still open from the defect train (**a defect discovered by a train's own work ships with the

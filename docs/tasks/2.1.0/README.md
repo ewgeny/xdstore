@@ -41,6 +41,7 @@ there for the full decision record before starting an item.
 | 29 | [readme-landing-restructure](29-readme-landing-restructure.md) | LANDING | P0, docs | 1 d | — (**the field-feedback P0 track, runs FIRST**: what/when/when-not + 10-line example + comparison + write-numbers-with-plan above the fold) |
 | 30 | [benchmarks-context](30-benchmarks-context.md) | BMCONTEXT | P0, docs, performance | 0.5 d | 29 (the entry surface it complements) |
 | 31 | [write-path-analysis-design](31-write-path-analysis-design.md) | WRTPATH | P1, engine, performance | 2–3 sess | — (profile → bottleneck ledger → the W-4 design; **impl stays 2.2.0**; feeds 29/30's fix-plan links) |
+| 32 | [w4-write-path-implementation](32-w4-write-path-implementation.md) | W4 | P0, engine, performance, feature | W-4a 2–3 sess + W-4c 1 sess (in-train); W-4b next; W-4d gated | 31 (the governing [W4-DESIGN.md](../../W4-DESIGN.md)); before-numbers FIRST |
 
 **The field-feedback track (added 2026-10-23 — "more important than new features"):**
 the P0 docs track executes in order **29 → 30**, with **31 (P1, ASAP)** running in
@@ -101,8 +102,9 @@ it starts).
 - **Lane H (API docs):** 28 — Tier-1/Tier-2 split is parallelizable between developers;
   the doclint tightening is the deliverable, the prose can land incrementally
 - **Lane I (field-feedback P0/P1 — BEFORE new features):** **29 → 30** (P0, in order) ∥
-  **31** (P1, ASAP — the write-path analysis + W-4 design round pulled into this train;
-  implementation stays 2.2.0)
+  **31 → 32** (the write-path track: analysis/design DONE — W4-DESIGN.md; the W-4a+c
+  implementation now in-train per the architect decision, W-4b follows W-4a's soak, W-4d
+  decision-gated — may complete in 2.2.0)
 - **Lane D (docs, last):** 12 — after the query pack lands, so it describes what ships.
 
 ## Label glossary

@@ -225,8 +225,13 @@ grouping is tags, not layout.
     context)** runs before new features; and **the W-4 DESIGN ROUND is pulled into this
     train** as task 31 (P1, ASAP) — profile the write path, ledger the bottlenecks by
     measured share, produce the solution design (index journaling + disk-anchored scans +
-    checkpointing) and publish the fix plan in the README. **The W-4 IMPLEMENTATION stays
-    2.2.0** — the train gains the analysis and the public plan, not the surgery.
+    checkpointing) and publish the fix plan in the README. **AMENDED
+    same day (architect execution of task 31): the analysis and design are DONE
+    ([W4-DESIGN.md](W4-DESIGN.md) — the wall is the hash id-index's O(N) full-file rewrite;
+    BTree id-index is already near-delta at t=64), and the W-4a+c IMPLEMENTATION is pulled
+    into this train as task 32 (P0) — W-4b follows W-4a's soak, W-4d stays decision-gated
+    (2.2.0 if the RC timeline demands). The design-before-code rule is intact: task 32
+    implements a finished design, not a sketch.
 
 **2.1.0 exit:** RC protocol per RELEASE-PLAN §2 (full suite ×3 green, kill-9/torn-journal
 recovery, JMH vs baselines, fresh-clone README walkthrough) → tag `v2.1.0`.
