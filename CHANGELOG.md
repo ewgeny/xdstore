@@ -43,6 +43,12 @@ Planned scope; items land here as they merge:
   follow-up for the `OFFSET` re-walk cost.
 - **FP-11** — decision-guide page (comparison vs MapDB/Xodus/RocksDB/Chronicle/EclipseStore)
   + runnable example app.
+- **AUTOSAVE** ([22](docs/tasks/2.1.0/22-autosave-cascade-children.md)) — the
+  `@XdStorageAutoSave` field annotation: cascade-save of independent-policy children on
+  parent save/update, in the caller's transaction with triggers/observers/id-generation and
+  rollback identical to explicit saves; cycles terminate, duplicates dedup, removed children
+  stay persisted (loudly documented — cascade-delete is out of scope). README § Cascade save
+  + EMBEDDING carry the contract; `XdStorageAutoSaveCascadeTest` pins it.
 - **BENCH** — the benchmark estate unified: `scripts/run-benchmarks.sh [quick|full|sweep]`
   is the one entry point under a documented conditions protocol (quiet-load gate, WARN-console
   benchmark logging config, YAML format, JSON results + run manifests); the CORE scenarios

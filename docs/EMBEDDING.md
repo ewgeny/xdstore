@@ -71,6 +71,14 @@ current code, stated so embedding surprises are design-time, not production-time
   storages: open once with `acceptMissingEofSentinel(true)` and let the first commit rewrite the files.
 - Stale `*.tmp` files from a previous crash are swept at open.
 
+### Cascade save and transactions
+
+`@XdStorageAutoSave` on a parent's child field cascades an upsert of the annotated children
+inside the parent's save/update call — same transaction, same 2PC atomicity, child triggers
+and observers fire as for explicit saves, and a failed cascade aborts the save. Removed
+children are NOT deleted; re-save re-upserts every annotated child. Full contract:
+README § Cascade save; executable proof: `XdStorageAutoSaveCascadeTest`.
+
 ### After a power loss
 
 The default configuration is **process-crash safe (atomic rename), not power-loss safe** —

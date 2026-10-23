@@ -272,6 +272,41 @@ private String name;
   to assign). A custom generator SPI implements `IXdStorageIdGenerator` — its `generate`
   receives the entity class and the running transaction.
 
+### Cascade save — `@XdStorageAutoSave`
+
+Marks a parent's child-object field for cascade-save: when the parent is saved or updated,
+the annotated children under independent policies (`StoreAsClassObjects`, `StoreAsSingleObject`)
+are cascade-upserted in the same transaction — triggers, observers, id generation and rollback
+behave exactly as for explicit saves.
+
+```java
+@XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsClassObjects)
+public class Order {
+    @XdStorageObjectId private String id;
+    @XdStorageAutoSave private List<OrderLine> lines;   // OrderLine: StoreAsClassObjects too
+    @XdStorageAutoSave private Delivery delivery;       // single reference works as well
+}
+```
+
+Contract (pinned by `XdStorageAutoSaveCascadeTest`):
+
+- child id `null` → insert; a generated id backfills the **same instance**; id set → update
+  if the index knows it, insert otherwise (upsert);
+- the child's own `@XdStorageAutoSave` fields cascade further — cycles (A→B→A) terminate;
+  the same instance via two fields saves once;
+- rollback is automatic (one transaction): a failed cascade aborts the save — nothing persists;
+- **removed children are NOT deleted** — a child taken out of the collection keeps its
+  independent resource (cascade-delete is deliberately out of scope);
+- AutoSave persists what the field holds — no merging of foreign changes (MVCC governs
+  conflicts as for explicit saves);
+- re-save re-upserts every annotated child (idempotent, write-amplifying for wide
+  collections — dirty checking is a future optimization);
+- an element class under `StoreWithParentObject` is a no-op with a metadata WARN (already
+  embedded in the parent's file);
+- v1 covers collections and single references; Maps/arrays are not cascaded. A child with a
+  parent back-reference should use the standard embedded shape (§ Parent references and lazy
+  children) — the cascade is for independent children.
+
 ### Parent references and lazy children
 
 - `@XdStorageParentObject` on a field marks the back-reference to the owning object; it is populated when
