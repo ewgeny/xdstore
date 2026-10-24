@@ -273,7 +273,11 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 - **FP-2** `explain()` for queries (plan + records visited + elapsed; P1)
 - **FP-7** Spring Boot starter (autoconfiguration, config properties, lifecycle bean; P2)
 - **FP-8** `xdstorage-micrometer` module (amends F-7; P2)
-- **FP-9** binary compact format as non-default SPI (post-W-4, if profiling justifies; P2)
+- **FP-9** binary compact format as non-default SPI (post-W-4; gate = task 33's
+  serialization-share measurement — the OPTIMIZATION-PROPSAL-01 demand signal)
+- **FP-13** after-commit asynchronous listeners (the OPTIMIZATION-PROPSAL-01 async-trigger
+  idea, re-framed): event hooks that run AFTER the commit, never inside it — the in-commit
+  veto contract stays untouched; failure = logged, never rollback. Demand-driven.
 - **FP-10** encryption-at-rest SPI (P3)
 - **FP-12** native-image + JDK 21 virtual-threads CI jobs (extends D-2; meaningful the day
   FP-3 lands)
@@ -288,7 +292,7 @@ an embedder) — the frozen-items inventory exists precisely to prevent speculat
 | 1 | **2.1.0 train:** Track L + Track T + BENCH + B2 + FP-1 + **BUG-A..E** + **PWRLOSS/JRNLNAME/BACKUP/N50K/DOCSLINT** + AUTOSAVE + **master-plan pulls: FP-2 explain (25), FP-5-core verify (26), D-2 JDK-21 matrix (27)** — **IN PROGRESS (pom at 2.1.0)** | 5–7 sess | Quiet library default; a measured, grouped test estate; query expressiveness + plan visibility; read-heavy workloads; **no data-stranding defects; self-service integrity verification** | **2.1.0** |
 | 2 | W-4 (B1/F-3) + B3 | 3–5 sess | Large datasets; ≥10× writes; zero stress flakes | **2.2.0** |
 | 3 | FP-3 AOT + FP-5/FP-6 ops tooling | 2–3 sess | JRE/native-image deployments; operability | 2.3.0 |
-| 4 | FP-2/7/8/9/10/12 ecosystem train | 1–2 sess each | Mainstream adoption surface | 2.x→3.0 |
+| 4 | FP-2/7/8/9/10/12/13 ecosystem train | 1–2 sess each | Mainstream adoption surface | 2.x→3.0 |
 
 **Release-train decision (corrected 2026-10-21; bug-lane amendment 2026-10-22):** 2.1.0 is
 the post-release hardening train — it deliberately carries no deep engine *feature* surgery

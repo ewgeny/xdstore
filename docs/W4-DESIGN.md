@@ -129,7 +129,11 @@ read path (scans iterating records not in cache must re-anchor to base+journal),
 the riskiest surface in the engine. v1 design sketch: LRU over committed, unlocked,
 non-infra records; a scan that meets an evicted record re-loads it from the base file
 (+ journal replay state already in memory); the per-transaction materialization budget
-(W-2) already bounds the clone side. **Decision point in W-4d's own design note**: land in
+(W-2) already bounds the clone side. **Design-round input (OPTIMIZATION-PROPSAL-01, see its
+analysis file): off-heap caching** (Direct ByteBuffers / FFM — the MapDB/Chronicle approach)
+is the alternative to on-heap LRU; the release=8 bytecode constraint rules out the modern
+FFM API and makes DirectByteBuffer lifecycle management fragile on 8, so the round must weigh
+it honestly against this on-heap sketch before choosing. **Decision point in W-4d's own design note**: land in
 this train only if W-4a/b land cleanly and the heap data (task 20's N50K results) demands
 it — otherwise it is 2.2.0's opening item.
 
