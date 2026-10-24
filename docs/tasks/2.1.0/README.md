@@ -43,12 +43,24 @@ there for the full decision record before starting an item.
 | 31 | [write-path-analysis-design](31-write-path-analysis-design.md) | WRTPATH | P1, engine, performance | 2–3 sess | — (profile → bottleneck ledger → the W-4 design; **impl stays 2.2.0**; feeds 29/30's fix-plan links) |
 | 33 | [binary-format-feasibility](33-binary-format-feasibility.md) | BINFEAS | P2, docs, performance | 0.5–1 d | — (the OPTIMIZATION-PROPOSAL-01 demand signal; FP-9's gate) |
 | 32 | [w4-write-path-implementation](32-w4-write-path-implementation.md) | W4 | P0, engine, performance, feature | W-4a 2–3 sess + W-4c 1 sess (in-train); W-4b next; W-4d gated | 31 (the governing [W4-DESIGN.md](../../W4-DESIGN.md)); before-numbers FIRST |
+| 34 | [cache-commit-protocol-audit](34-cache-commit-protocol-audit.md) | CACHE2PC | P2, engine, bug | 0.5–1 d | — (found by 28: phase-1/2 duplication + legacy rollback order) |
+| 35 | [silent-failure-hazards-codegen-observer-cloner](35-silent-failure-hazards-codegen-observer-cloner.md) | SILENTFAIL | P2, engine, bug | 1–1.5 d | — (found by 28: three swallow-and-continue paths) |
+| 36 | [structure-update-correctness](36-structure-update-correctness.md) | STRUCTFIX | P2, engine, bug | 1 d | — (found by 28; extends the 16 defect family) |
+| 37 | [yaml-reader-strictness](37-yaml-reader-strictness.md) | YAMLREAD | P2, engine, bug | 1–1.5 d | — (found by 28: corruption must fail loudly) |
+| 38 | [index-resource-contracts](38-index-resource-contracts.md) | IDXCONTRACT | P2, engine, tech-debt | 1 d | — (found by 28: implementations vs declared contracts) |
+| 39 | [message-hygiene-dead-params](39-message-hygiene-dead-params.md) | MSGHYGIENE | P2, chore, tech-debt | 0.5 d | — (found by 28; grep tests before touching asserted messages) |
 
 **The field-feedback track (added 2026-10-23 — "more important than new features"):**
 the P0 docs track executes in order **29 → 30**, with **31 (P1, ASAP)** running in
 parallel — its design/analysis is what 29/30 publish as the write-performance fix plan.
 The content for 29/30 already exists (DECISION-GUIDE, quickstart, canonical baseline);
 the failure was the entry surface, and these tasks fix the surface, not invent content.
+
+**Javadoc-campaign findings (added 2026-10-24):** 34–39 are the doc/code mismatches the
+28-javadoc-coverage campaign surfaced (the agents documented the code with fresh eyes and
+reported what the code does differently from what any reader would assume). All are P2:
+fix-with-test work on engine internals, no embedder-facing API change, no persisted-state
+migration. Lane-parallel with everything; 39 is the mechanical one to sweep last.
 
 **MASTER-PLAN pulls (added 2026-10-23):** 25–27 are what the master-plan review judged
 train-safe — additive APIs and CI, no persisted-state surgery: FP-2 `explain()` (25), FP-5's
