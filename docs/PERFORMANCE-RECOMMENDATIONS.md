@@ -1,5 +1,13 @@
 # XdStorage — Performance Study & Configuration Recommendations (YAML format)
 
+> **THIRD-EDITION UPDATE 2026-10-24 (W-4a/B2): the two biggest findings below are
+> RESOLVED and the defaults moved.** §5.3's read-only-transaction wall is FIXED (B2: the
+> no-change commit skip — 0.63–0.74 ms/op flat to N=40k; canonical `readOnlyTx` 78.5k
+> ops/s). The commit-bound write wall is LARGELY FIXED (W-4a: the hash id-index commit
+> journal, default ON — canonical writes 8.9–24× faster, small-write cost flat across the
+> design point; see BENCHMARKS § Before/after W-4a and docs/perf/w4a-write-scaling.md).
+> The §8 config guidance below reflects the W-3/W-4a defaults.
+>
 > **BENCH (docs/tasks/2.1.0/13): the numbers in this document are EDITION-SPECIFIC STUDY
 > DATA, not the canonical baseline.** They were measured under this study's own conditions
 > (per-section; see PERF §2 methodology and §9's logging admission). The canonical, current
@@ -32,7 +40,9 @@ Harness: `io.github.xdstorage.performance.sweep.XdStorageConfigSweep` (test sour
 | **B+Tree fill factor `t` (id index)** | **t = 32…128, measured optimum t = 64** — **APPLIED as the engine default**: both annotations' `t()` defaults changed 500 → 64 (bulk insert 49.6k ops/s, 3.7 ms commits, cold find 87 µs/op, delete-all 183 ms). **Never below 8.** The annotation default **t = 500 is ~12× slower on inserts** at N=5000 and pays a 14 ms cold first find. |
 | **Fragment size** | **128–512 objects per fragment** (≈ 55–225 KB per fragment file for ~430 B entities). Measured optimum **128** — **APPLIED as the engine default**: `XdStorageProvider.DEFAULT_FRAGMENT_SIZE = 128` + `newOrGetFileStorage(name, folder[, config])` overloads. Avoid fragment files > ~1 MB (whole-file-rewrite write amplification) and < ~10 KB (per-file overhead, cold-scan penalty). |
 | **Search index `t`** | **t = 64** — **APPLIED** (same annotation default change) — best indexed-insert (8.9k ops/s), best cold search (134 µs/op vs 163 at t=8); the t=500 default is **5× slower on indexed inserts** and pays 34 ms on the first cold query. Query latency is otherwise t-insensitive; keep primary criteria `EQUALS`. |
-| **Storage config** | Defaults are sound for OLTP-ish embedding: `durableWrites=false` for throughput, **turn it on when power-loss durability matters**; `journalWrites` (W-1) is the candidate fix for the commit-bound write path; `workerPoolSize=15` fits a 24-core box; tx timeout 3 s default is tight for bulk batches — pass explicit timeouts (harness uses 120 s for 500-object batches). |
+| **Storage config** | Defaults are sound for OLTP-ish embedding: `durableWrites=false` for throughput, **turn it on when power-loss durability matters**; `journalWrites` (W-1, default ON) and `indexJournalWrites` (W-4a, default ON) removed the
+  commit-bound write wall — the write-scaling measurements live in BENCHMARKS § Before/after W-4a
+  and docs/perf/w4a-write-scaling.md; `workerPoolSize=15` fits a 24-core box; tx timeout 3 s default is tight for bulk batches — pass explicit timeouts (harness uses 120 s for 500-object batches). |
 | ~~**P0 blocker**~~ **RESOLVED (R-53)** | B+Tree-backed structures were unreadable after storage re-open (Hash id index unaffected). Fixed in `cf36f7f`, regression-covered by `XdStorageW2ReopenBTreeTest`; history and verification in [§6](#6-btree-re-open-blocker-resolved-and-verified-r-53). |
 
 ---
@@ -213,6 +223,13 @@ The Hash number also explains the frag-sweep column collapse at frag=2048/8192 (
   ~40 ops/s ceiling per storage at N≈5000 with the Hash index regardless of fragment size.
 * Candidate fixes for the optimization backlog: cheaper no-change commit path (skip 2PC record
   iteration for read-only transactions), or the W-1 journal infra for cheaper commit bookkeeping.
+
+> **RESOLVED (UPDATE 2026-10-24):** the first candidate shipped as B2 (docs/tasks/2.1.0/08) —
+> a no-change transaction commits through a cheap release path: **0.63–0.74 ms/op flat up to
+> N=40 000 on the Hash path, zero write-outs** (the ~25 ms figure no longer reproduces), and
+> the canonical `readOnlyTx` scenario measures **78.5k ops/s** (BENCHMARKS § Canonical).
+> The BTree-vs-Hash read-tx gap in §7.1's table is an edition-specific artifact of the same
+> fixed defect.
   This is the **top optimization candidate** for read-heavy workloads.
 
   **UPDATE 2026-10-22 (2.1.0 train, B2) — RESOLVED/VERIFIED:** the figure no longer reproduces at
@@ -339,7 +356,9 @@ Both are restart-safe now (R-53) — the choice is a genuine workload trade-off:
 * **Pick Hash** when cold-read latency after restart matters most (one fragment load vs a tree
   descent: 52 vs 87 µs/op), when the entity count per class is modest, or when operational
   simplicity (a dozen files per class vs a hundred) and the equality-only contract are acceptable.
-  Its known weak spot: the ~25 ms read-transaction overhead at N≈5000 (§5.3).
+  Its historical weak spot — the ~25 ms read-transaction overhead at N≈5000 (§5.3) — is
+  FIXED by B2 (docs/tasks/2.1.0/08): both id-index types now commit read-only transactions
+  through the same cheap path.
 * **Pick B+Tree t=64** for insert-heavy pipelines (2.1× throughput), high-rate per-op-read
   services (14× less commit-protocol overhead), and anything that needs ordered traversal of keys.
 * Either way: **t = 32…128 if B+Tree**, fragment 128–512 for both, and re-measure at production
@@ -350,15 +369,20 @@ Both are restart-safe now (R-53) — the choice is a genuine workload trade-off:
 All knobs live in `XdStorageConfig.builder()` (defaults reproduce pre-config behavior):
 
 1. **`durableWrites`** — keep **off** for dev/batch throughput, **on** whenever the machine can lose
-   power (each commit gains an fsync of the resource file + parent dir; measured cost is one
-   fsync per written file — significant with small fragments/many files at low `t`, modest at
-   frag 128–512). Process-crash safety is unconditional (atomic rename); this knob is about
-   power-loss.
-2. **`journalWrites` / `journalCheckpointBytes`** (W-1, YAML-only) — off by default. The §5 data
-   explains when the journal pays: workloads with **frequent small commits to large resources**
-   (big fragments, wide classes) spend their time rewriting whole fragment files; the append-only
-   journal converts those into sequential appends. Enable for commit-bound write-heavy storage with
-   fragment files ≥ ~1 MB; keep the 16 MB checkpoint default.
+   power (each commit gains an fsync of the resource file + parent dir). Process-crash safety is
+   unconditional (atomic rename); this knob is about power-loss. **UPDATE 2026-10-24 (post-W-4a):
+   on the canonical write shape the fsync cost is now ~107×** (82 vs 8,812 ops/s — BENCHMARKS §
+   Canonical) — the non-fsync path got 24× faster while fsync binds, so the lever is bigger than
+   the ~8× this study measured; a clean shutdown checkpoints every journal (W-4c), which shrinks
+   the no-fsync loss window.
+2. **`journalWrites` / `indexJournalWrites` / `journalCheckpointBytes`** (W-1/W-4a, YAML-only) —
+   **both default ON since W-3/W-4a** (task 32): data-class commits AND hash id-index commits are
+   O(delta) journal appends, and a clean shutdown checkpoints every journal. The §5 data explains
+   what they replaced: whole-file rewrites per commit (the write-scaling wall — 64.9 ms/tx at
+   N=50k before W-4a, 0.13 ms/tx after; docs/perf/w4a-write-scaling.md). Turn a journal OFF only
+   for bulk-batch shapes where a giant single transaction makes the delta format's constant visible
+   (~1.8× on a 50k-object single commit — docs/perf/w4a-write-scaling.md honest notes); keep the
+   16 MB checkpoint default.
 3. **`defaultTransactionTimeoutMillis`** — the 3 s default is tight for batch writes: a single
    500-object commit at t=2 measured ~129 ms warm, delete-all passes run seconds at low `t`, and
    cold caches with bigger graphs will exceed 3 s (the engine's own BTree loader warns about exactly

@@ -649,8 +649,9 @@ Measured cost model (JMH, JDK 17, reference box; full numbers and methodology in
 - Range primaries walk the ordered index with early termination: a selective upper-bounded range
   (tight `BETWEEN`, `IN`) runs ~15× the scan it replaces; lower-bound-only (`GT`/`GTE`) and wide
   ranges degrade toward scan cost by design.
-- Writes are commit-bound (each commit rewrites the touched resource files): rename ~75 ops/s,
-  save+delete ~39 ops/s; the facade save+load+commit flow ~127 ops/s.
+- Writes are commit-bound: the canonical shapes measure rename ~2.0k ops/s, save+delete ~752 ops/s
+  (flat at small N), data-heavy writes ~3.1k–9k tx/s since W-4a index journaling — the
+  75/39/127 figures of the TRACE era are historical (BENCHMARKS § history).
 - A read-only transaction (begin → load → commit) costs <1 ms/op, flat in dataset size
   (0.63–0.74 ms/op from N=5000 to N=40000, zero file write-outs) — high-rate per-op read
   transactions are safe.

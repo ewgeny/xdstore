@@ -84,8 +84,9 @@ The current development version (2.1.0) is not yet released; build it from sourc
   trying to delete.
 - Scale fits **10⁴–10⁵ objects per class** (a few GB of folder at most; the measured working-set cost is
   ~1.4–2 KB heap per object).
-- Writes stay **≤ ~10²–10³ transactions/s**; reads are point-lookup-heavy (indexed reads measure
-  10³–10⁵ ops/s).
+- Writes run **~10³ transactions/s** journaled (measured ~3.1k–9k tx/s on the canonical shapes,
+  the small-write cost flat across the design point); reads are point-lookup-heavy (indexed reads
+  measure 10³–10⁵ ops/s).
 - **Operability matters**: files you can `cat`, `grep` and diff in code review, `cp -r` backups while
   closed, no DBA, no native library, Java 8 bytecode.
 - You want **ACID + snapshot reads + triggers without a server** — ORM-like semantics without ORM's
