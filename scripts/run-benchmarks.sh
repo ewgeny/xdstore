@@ -64,8 +64,8 @@ cat > "$OUT/manifest.json" << EOF
   "dateUtc": "$STAMP",
   "gitRev": "$GIT_REV",
   "gitDirtyFiles": $GIT_DIRTY,
-  "jdk": "$JDK_VERSION",
-  "cpuModel": "$CPU_MODEL",
+  "jdk": "${JDK_VERSION//\"/\\\"}",
+  "cpuModel": "${CPU_MODEL//\"/\\\"}",
   "loadavg1m": $LOADAVG,
   "maxLoadavg": $MAX_LOADAVG,
   "loadGateForced": $([ "$FORCE" = "--force" ] && echo true || echo false),
@@ -73,6 +73,7 @@ cat > "$OUT/manifest.json" << EOF
   "format": "YAML",
   "configFlags": {
     "journalWrites": "default true (writeDataHeavy A/B overrides via @Param)",
+    "indexJournalWrites": "default true (W-4a: the hash id-index commit journal)",
     "durableWrites": "default false (writeDurable A/B overrides via @Param)",
     "fragmentSize": 25,
     "note": "canonical CORE scenarios are fragment-heavy by design (disclosed)"

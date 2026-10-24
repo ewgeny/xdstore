@@ -118,17 +118,19 @@ The full table (LMDB, Chronicle Map, H2 MVStore), the sourced order-of-magnitude
 
 ## The honest limitation: write throughput
 
-Writes are the project's known weak spot — measured, and being fixed. Every commit rewrites the
-touched resource files, so writes are **commit-bound at ~10²–10³ tx/s** (indexed save+delete ~731 ops/s,
-data-heavy writes ~370 tx/s; batched commits raise objects/s from 1.2k to 11k). That is two to three
-orders below KV stores, and it is design scope, not accident: data files are journaled (O(delta) per
-commit), while the id-index and search-index paths still rewrite their files whole. **The fix plan is
-public and in flight** — the write-path analysis and the index-journaling design live in
-[docs/WRITE-PATH-DESIGN.md](docs/WRITE-PATH-DESIGN.md); the work package tracking the analysis/design
-round (implementation targets the next minor release) is
-[docs/tasks/2.1.0/31](docs/tasks/2.1.0/31-write-path-analysis-design.md). Also know before adopting:
-power-loss safety is opt-in (`durableWrites(true)`, ~8× write cost) — by default commits are
-process-crash-safe. Every limit, with numbers:
+Writes were the project's known weak spot — measured, and **the main fix has landed in 2.1.0**
+(W-4a, index journaling): the small-write cost is now **flat 0.13–0.27 ms/tx from 10³ to 5·10⁴
+objects** (it degraded linearly to 64.9 ms/tx at 5·10⁴ before), and the canonical write shapes
+measure **~3.1k tx/s journal-off / ~9k tx/s journal-on** on data-heavy writes (was 348/370).
+That is still one to two orders below raw KV stores, and one path remains whole-file: the search
+key-tree rewrites (the rename/update scenario, W-4b pending — measured ~2.0k ops/s, +9%).
+**The analysis, design, and measurements are public**:
+[docs/W4-DESIGN.md](docs/W4-DESIGN.md),
+[docs/perf/w4a-write-scaling.md](docs/perf/w4a-write-scaling.md), the full before/after
+canonical delta in [docs/BENCHMARKS.md](docs/BENCHMARKS.md). Also know before adopting:
+power-loss safety is opt-in (`durableWrites(true)`, ~107× write cost on the canonical shape —
+fsync binds; by default commits are process-crash-safe, and a clean shutdown checkpoints every
+journal). Every limit, with numbers:
 DECISION-GUIDE § ["Where XdStorage loses today"](docs/DECISION-GUIDE.md#where-xdstorage-loses-today-read-before-committing).
 
 ## The full guide

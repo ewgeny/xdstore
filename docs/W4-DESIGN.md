@@ -2,7 +2,10 @@
 
 Status: **W-4a + W-4c IMPLEMENTED (2026-10-23, task 32)** — index journaling is the
 default write path; gate numbers in docs/perf/w4a-write-scaling.md (small write at N=50k:
-64.9 → 0.13 ms/tx, the ≤3× gate met at 0.48×). W-4b/W-4d remain gated as designed.
+64.9 → 0.13 ms/tx, the ≤3× gate met at 0.48×) — **canonically confirmed 2026-10-24**:
+the full JMH re-run puts `writeDataHeavy` at 8,967 ops/s journal-on / 3,098 journal-off
+(was 370/348 — 24×/8.9×), `commitBatch` objects/s flat ~24k–31k at every batch size, reads
+flat within noise; the full before/after delta lives in BENCHMARKS.md § Before/after W-4a. W-4b/W-4d remain gated as designed.
 Design delivered by task 31 (docs/tasks/2.1.0/31); the implementation task is
 [docs/tasks/2.1.0/32](tasks/2.1.0/32-w4-write-path-implementation.md).
 Supersedes the W-4 sections of [WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md) (W-1..W-3 remain

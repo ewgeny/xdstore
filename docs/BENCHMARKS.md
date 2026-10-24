@@ -5,202 +5,122 @@
 **This is the single source of truth for performance numbers.** Every table below is GENERATED
 from full-run JMH JSON by `scripts/render-bench-baseline.py` — never hand-typed — and binds to
 the archived result set + run manifest in
-[`docs/perf/canonical-baseline-2026-10-22/`](perf/canonical-baseline-2026-10-22/) (git rev,
-JDK, CPU model, loadavg, config flags inside `manifest.json`).
+[`docs/perf/canonical-baseline-2026-10-24/`](perf/canonical-baseline-2026-10-24/) (git rev
+`dffaf9b`, JDK 21.0.7, CPU model, loadavg 0.54, config flags inside `manifest.json`).
 
 - **Run:** `bash scripts/run-benchmarks.sh [quick|full|sweep]` — the ONE entry point. It owns
   the conditions protocol: quiet-machine loadavg gate, WARN-console logging with no hot-path
   file I/O (`docs/perf/benchmark-log4j2.xml`, passed explicitly — immune to the suite's config
   reshuffles), YAML format, disclosed config flags, JSON results + manifest.
-- **Conditions of the archived baseline:** 2026-10-22, JDK 21.0.7, 24-core box, loadavg 0.91
-  (gate-enforced), WARN-console logging (the pre-2026-10-22 numbers ran under TRACE console
-  logging — see PERF study §9 — and are **superseded**; kept below as labeled history).
+- **Conditions of this baseline:** 2026-10-24, JDK 21.0.7, 24-core box, loadavg 0.54
+  (gate-enforced), WARN-console logging. **This is the first post-W-4a baseline:** the hash
+  id-index commit journal is DEFAULT ON (task 32), so the write scenarios carry the fix —
+  the 2026-10-22 set
+  ([`docs/perf/canonical-baseline-2026-10-22/`](perf/canonical-baseline-2026-10-22/)) is the
+  before-picture and is preserved for the comparison below.
 - **Quick-mode budget:** the task's cap is ≤ 15 min for the whole quick suite; the FULL run
-  measured **2m21s** wall clock (2026-10-22, the archived baseline). Quick runs are strictly
-  cheaper (1 iteration per scenario).
-- **Families:** `XdStorageCanonicalBenchmark` (the CORE scenarios this task introduced) and
-  `XdStorageSearchEngineBenchmark` (the search family; the FP-1a/FP-1b per-feature sections
-  below are ABSORBED into the canonical table). The plain-Java config sweep
-  (`performance/sweep/XdStorageConfigSweep`) stays a separate harness by design (PERF §2) —
-  run it via `scripts/run-benchmarks.sh sweep`; its numbers are never merged into JMH tables.
+  measured **~2.5 min** wall clock (2026-10-24). Quick runs are strictly cheaper (1 iteration
+  per scenario).
+- **Families:** `XdStorageCanonicalBenchmark` (the CORE scenarios) and
+  `XdStorageSearchEngineBenchmark` (the search-engine scenario family). The plain-Java config
+  sweep (`performance/sweep/XdStorageConfigSweep`) stays a separate harness by design (PERF
+  §2) — run it via `scripts/run-benchmarks.sh sweep`; its numbers are never merged into JMH
+  tables.
 
-#### In context — what these numbers measure, and the field frame (BMCONTEXT, docs/tasks/2.1.0/30)
+#### Reading the CORE scenarios (honest — post-W-4a vs the 2026-10-22 baseline)
 
-These are numbers for **embedded, transactional object persistence**: every operation runs inside an
-ACID transaction committed across multiple resource files (data + id index + search index), with MVCC
-snapshot reads, triggers and typed object graphs — not raw key-value ops over a map. The field frame
-from public materials, order-of-magnitude and workload-dependent (origin + date for every figure in
-§ Field-frame sources below): RocksDB's own wiki benchmarks measure 10⁴–10⁶ simple ops/s by workload
-(~52K *sustained writes*/s in a CPU-bound in-memory test); Chronicle Map's README advertises "millions
-of operations per second"; LMDB's sizing guide runs ~336k ops/s with the database memory-resident on 32
-cores; MapDB lands 10³–10⁵ ops/s depending on mode. **None of those figures buys what an XdStorage
-operation buys**: a single-op rate over a byte map or an off-heap map is not an ACID multi-resource
-commit of a typed object graph with secondary/child indexes, in-commit triggers and snapshot isolation.
-The honest use of this page is therefore the gaps WITHIN XdStorage's own scenarios (below); the
-cross-product numbers frame the order of magnitude only — workload, hardware and op semantics differ,
-and some figures are marketing claims (labeled as such). Where the engine deliberately does not compete
-today: **sustained >10³ write-transactions/s** — the write family's reading below states the measured
-gap and links the fix plan.
+- **The write wall is gone (W-4a, task 32).** `writeDataHeavy`: 3,098 ops/s with the data
+  journal OFF and **8,967 ops/s with it ON** — was 348/370. The hash id-index commit journal
+  removed the O(N) full-file index rewrite from every write commit; both journal arms benefit
+  (8.9× / 24×), and the journal-ON arm now wins ~2.9× on this shape (both paths are delta
+  appends; the OFF arm still pays checkpoint rewrites).
+- **`writeDurable` OFF 8,812 / ON 82 ops/s — the fsync multiplier is now ~107×** (was ~8×):
+  the non-fsync path got 24× faster while the fsync path is bound by per-file fsyncs.
+  `durableWrites` remains off by default; the honest statement is that it is now an even
+  bigger lever than before.
+- **`commitBatch`: the per-commit fixed cost is gone.** 2,435 / 310 / 62 / 31 tx/s at batch
+  10/100/500/1000 (was 116/35/15/11) — but in OBJECTS/s the curve is now **flat**: ~24k–31k
+  objects/s at every batch size (was 1.2k→11k). Batching is no longer required for
+  throughput; it remains useful for latency-sensitive small writes.
+- **`readOnlyTx` 78.5k ops/s** (was 63.6k, +23% — within the noise band, and read-only
+  transactions do not touch index resources; flat is the honest reading).
+- **Search family flat within noise; `updateShipRenameSearchKey` +9%** (1,858 → 2,028): the
+  rename path rewrites search key-tree nodes, which W-4a does not cover — the W-4b
+  logical-op journal is the designed fix and is the next write-path phase.
+- `saveAndDeleteIndexedShipWithCrew` +3% (731 → 752) — flat as expected: the benchmark
+  dataset is tiny (N≈400), where the wall was invisible. **The scaling evidence lives in
+  [`docs/perf/w4a-write-scaling.md`](perf/w4a-write-scaling.md): the small-write cost at
+  N=50 000 went 64.9 → 0.13 ms/tx (~500×), now flat across the design point.**
 
-#### Reading the CORE scenarios (honest)
+#### Before/after W-4a (the index journal) — full canonical delta
 
-- `readOnlyTx` 63.6k ops/s — begin → load(id) → commit, everything cache-resident: the B2
-  read-only short path as a permanent, re-runnable scenario (B2's original sweep numbers
-  measured N=5000–40000 on the Hash path; this scenario pins the pattern into the suite).
-  **In real terms:** ~16 µs per read transaction — request-scoped transactions are a safe
-  default, not something to pool or amortize.
-- `writeDataHeavy` journal on/off: 370 vs 348 ops/s — the journal is ~neutral on this
-  fragment-heavy shape at 1s iterations (the W-3 addendum's index-heavy verdict stands;
-  treat the delta as within quick-run noise, re-measure before quoting). **In real
-  terms:** ~2.7 ms per data-heavy write transaction — batch small objects, pass explicit
-  timeouts, and let batching carry the throughput (next bullet).
-- `writeDurable` on/off: 47 vs 367 ops/s — **the fsync costs ~8×** on this shape: the S-2
-  number, finally canonically recorded. `durableWrites` is off by default; turn it on when
-  the durability requirement outweighs write throughput. **In real terms:** this is the
-  price of surviving a power loss (crash safety is free; power-loss safety is not).
-- `commitBatch` 10/100/500/1000: 116/35/15/11 tx/s — but in OBJECTS/s the curve RISES
-  (1.2k → 3.5k → 7.5k → 11k): batching amortizes the commit; the per-tx fixed cost dominates
-  small batches. **In real terms:** the same 11k objects/s that costs 9 seconds one-by-one
-  at batch-10 costs ~1 second at batch-1000 — batch size is the single biggest write knob
-  an embedder controls.
+Generated by comparing the archived result sets (2026-10-22 vs 2026-10-24, same machine
+class, same protocol). Deltas beyond the error bars are marked; everything else is honest
+noise.
 
-**The write gap, stated with the plan** (the same limitation the README publishes): writes are
-**commit-bound at ~10²–10³ write-tx/s** — indexed save+delete ~731 ops/s, data-heavy ~370 tx/s, and at
-the 5×10⁴ design point unbatched pairs collapse to ~7/s (§ Design point below). That is two to three
-orders below KV stores, and it is design scope, not accident: data files journal O(delta) per commit
-since W-3, while the id-index and search-index paths still rewrite their files whole. **The fix plan is
-public**: the write-path analysis, the bottleneck ledger and the index-journaling design round
-([docs/WRITE-PATH-DESIGN.md](WRITE-PATH-DESIGN.md); tracked as
-[docs/tasks/2.1.0/31](tasks/2.1.0/31-write-path-analysis-design.md), implementation targeted at 2.2.0).
-
-#### Nightly regression watch (D-4, docs/tasks/2.1.0/11)
-
-Every nightly the smoke's quick scores are persisted as workflow artifacts (`jmh-scores-latest`
-= last nightly wins; `jmh-scores-<date>` dated copies, 90-day retention) and compared against
-the previous nightly's scores. Any scenario **>25% slower** emits a `::warning::` annotation,
-and the full delta table lands in the job summary. Semantics: **detection, not gating** — the
-alert never fails the run. Quick-mode single-iteration numbers on shared runners are noisy:
-a warning means "re-measure on a quiet machine (`scripts/run-benchmarks.sh full`)", exactly
-the discipline BENCHMARKS.md has always prescribed. A missing previous artifact (first runs,
-pruned history) skips the comparison silently. The gate job is unaffected.
-
-#### Design point — the N=50k boundary measurement (N50K, docs/tasks/2.1.0/20)
-
-The DECISION-GUIDE publishes a design point of 10⁴–10⁵ objects per class; this is its boundary
-measurement (probe-mode: plain-Java single run, task 13's conditions protocol via
-`scripts/run-benchmarks.sh n50k`; scenario budget 120 s each; fragment size 128; result set
-[`docs/perf/design-point-2026-10-23/`](perf/design-point-2026-10-23/)).
-
-| N | heap bytes/object | bulk load obj/s | range window hits |
+| Scenario | before (10-22) ops/s | after (10-24) ops/s | delta |
 |---|---|---|---|
-| 5,000 | 1,988 | 5,532 | 0 |
-| 50,000 | 1,437 | 11,437 | 14,286 |
+| `commitBatch` batchSize=10 | 116 | 2,435 | **+2005%** |
+| `commitBatch` batchSize=100 | 35 | 310 | **+788%** |
+| `commitBatch` batchSize=1000 | 11 | 31 | +192% |
+| `commitBatch` batchSize=500 | 15 | 62 | +308% |
+| `loadById_indexBaseline` | — | 215,095 | 231,033 | +7% |
+| `readOnlyTx` | — | 63,574 | 78,509 | +23% |
+| `saveAndDeleteIndexedShipWithCrew` | — | 731 | 752 | +3% (flat; tiny N) |
+| `searchByOrTwoPrimaries` | — | 183,305 | 184,424 | +1% |
+| `searchByPrimaryBetweenPagedLimit50` | — | 15,539 | 17,846 | +15% |
+| `searchByPrimaryBetweenSelective` | — | 23,974 | 24,191 | +1% |
+| `searchByPrimaryBetweenWide` | — | 11,351 | 12,484 | +10% |
+| `searchByPrimaryEquals` | — | 228,154 | 226,828 | -1% |
+| `searchByPrimaryEqualsWithChildCriterion` | — | 223,649 | 226,502 | +1% |
+| `searchByPrimaryEqualsWithFieldCriterion` | — | 220,661 | 229,752 | +4% |
+| `searchByPrimaryGT` | — | 15,054 | 14,312 | -5% |
+| `searchByPrimaryIn` | — | 22,758 | 22,427 | -1% |
+| `searchByScanNotEqualsPrimary` | — | 1,563 | 1,569 | +0% |
+| `searchByScanNullPrimaryFieldCriterion` | — | 15,537 | 16,428 | +6% |
+| `updateShipRenameSearchKey` | — | 1,858 | 2,028 | +9% (W-4b pending) |
+| `writeDataHeavy` | journalWrites=false | 348 | 3,098 | **+790%** |
+| `writeDataHeavy` | journalWrites=true | 370 | 8,967 | **+2321%** |
+| `writeDurable` | durableWrites=false | 367 | 8,812 | **+2301%** |
+| `writeDurable` | durableWrites=true | 47 | 82 | +74% |
 
-| Scenario (probe mode, single run) | N=5 000 ops/s | N=50 000 ops/s | status |
-|---|---|---|---|
-| `indexedEquals` | 42,182.9 | 34,508.8 | ok |
-| `pointRead` | 41,526.9 | 67,788.5 | ok |
-| `readOnlyTx` | 80,219.5 | 59,117.4 | ok |
-| `saveDelete` | 67.5 | 7.0 | TIMEOUT at N=50k (the ceiling finding) |
-| `selectiveRange` | 5,218.9 | 110.0 | ok |
-
-
-**Reading (honest):** reads scale comfortably to 5×10⁴ — point reads, read-only transactions and
-indexed EQUALS stay in the same 10⁴–10⁵ ops/s band as at 5×10³. The heap numbers quantify the
-ceiling: **~1.4–2.0 KB of heap per object** (≈70–100 MB at 5×10⁴ for this entity) — heap ≈ working
-set until W-4, exactly as DECISION-GUIDE § losses states. **The wall is WRITES**: save+delete
-collapses **67.5 → 7.0 pairs/s** from 5×10³ to 5×10⁴ (a ~10× write-latency scaling, budget-timeout
-recorded) — unbatched write-tx/s at the top of the claimed range is tens, not hundreds; batched
-commits remain the way to bulk-write throughput (canonical `commitBatch`: objects/s RISES with
-batch). Verdict: **the 10⁴ end of the design point is fully confirmed; 10⁵ is confirmed for reads
-and for batched writes; unbatched per-object write tx at 10⁵ is the measured limit.** **In real
-terms:** 50k objects of a typical entity cost ~70–100 MB of heap and read at tens of thousands of
-ops/s — inside the envelope; the same dataset written one object per transaction is where the wall
-is. Probe-mode
-caveats: single-run numbers, and the N=5k phase runs first in the same JVM (the N=50k point/tx
-rows benefit from extra JIT warmth — treat cross-N deltas within ~1.5× as same-band).
-
-#### Canonical tables (generated; full mode; result set 2026-10-22-185216)
+#### Canonical tables (generated; full mode; result set 2026-10-24-031106)
 
 #### `XdStorageCanonicalBenchmark`
 
 | Scenario | Params | ops/s ± error |
 |---|---|---|
-| `commitBatch` | batchSize=10 | 116 ± 342 |
-| `commitBatch` | batchSize=100 | 35 ± 111 |
-| `commitBatch` | batchSize=1000 | 11 ± 33 |
-| `commitBatch` | batchSize=500 | 15 ± 47 |
-| `readOnlyTx` | — | 63,574 ± 29,042 |
-| `writeDataHeavy` | journalWrites=false | 348 ± 980 |
-| `writeDataHeavy` | journalWrites=true | 370 ± 1,100 |
-| `writeDurable` | durableWrites=false | 367 ± 1,148 |
-| `writeDurable` | durableWrites=true | 47 ± 62 |
+| `commitBatch` | batchSize=10 | 2,435 ± 8,792 |
+| `commitBatch` | batchSize=100 | 310 ± 371 |
+| `commitBatch` | batchSize=1000 | 31 ± 83 |
+| `commitBatch` | batchSize=500 | 62 ± 77 |
+| `readOnlyTx` | — | 78,509 ± 79,052 |
+| `writeDataHeavy` | journalWrites=false | 3,098 ± 1,764 |
+| `writeDataHeavy` | journalWrites=true | 8,967 ± 17,668 |
+| `writeDurable` | durableWrites=false | 8,812 ± 9,680 |
+| `writeDurable` | durableWrites=true | 82 ± 84 |
 
 #### `XdStorageSearchEngineBenchmark`
 
 | Scenario | Params | ops/s ± error |
 |---|---|---|
-| `loadById_indexBaseline` | — | 215,095 ± 34,159 |
-| `saveAndDeleteIndexedShipWithCrew` | — | 731 ± 160 |
-| `searchByOrTwoPrimaries` | — | 183,305 ± 32,016 |
-| `searchByPrimaryBetweenPagedLimit50` | — | 15,539 ± 5,289 |
-| `searchByPrimaryBetweenSelective` | — | 23,974 ± 10,520 |
-| `searchByPrimaryBetweenWide` | — | 11,351 ± 6,391 |
-| `searchByPrimaryEquals` | — | 228,154 ± 106,985 |
-| `searchByPrimaryEqualsWithChildCriterion` | — | 223,649 ± 52,541 |
-| `searchByPrimaryEqualsWithFieldCriterion` | — | 220,661 ± 52,125 |
-| `searchByPrimaryGT` | — | 15,054 ± 7,031 |
-| `searchByPrimaryIn` | — | 22,758 ± 8,185 |
-| `searchByScanNotEqualsPrimary` | — | 1,563 ± 366 |
-| `searchByScanNullPrimaryFieldCriterion` | — | 15,537 ± 10,123 |
-| `updateShipRenameSearchKey` | — | 1,858 ± 399 |
+| `loadById_indexBaseline` | — | 231,033 ± 58,923 |
+| `saveAndDeleteIndexedShipWithCrew` | — | 752 ± 437 |
+| `searchByOrTwoPrimaries` | — | 184,424 ± 123,346 |
+| `searchByPrimaryBetweenPagedLimit50` | — | 17,846 ± 14,747 |
+| `searchByPrimaryBetweenSelective` | — | 24,191 ± 5,833 |
+| `searchByPrimaryBetweenWide` | — | 12,484 ± 8,526 |
+| `searchByPrimaryEquals` | — | 226,828 ± 114,674 |
+| `searchByPrimaryEqualsWithChildCriterion` | — | 226,502 ± 111,977 |
+| `searchByPrimaryEqualsWithFieldCriterion` | — | 229,752 ± 32,698 |
+| `searchByPrimaryGT` | — | 14,312 ± 16,607 |
+| `searchByPrimaryIn` | — | 22,427 ± 11,859 |
+| `searchByScanNotEqualsPrimary` | — | 1,569 ± 365 |
+| `searchByScanNullPrimaryFieldCriterion` | — | 16,428 ± 12,713 |
+| `updateShipRenameSearchKey` | — | 2,028 ± 612 |
 
-**In real terms, by scenario group (the canonical search family):**
-
-- **Point lookups** (`loadById_indexBaseline` 215k, `searchByPrimaryEquals` 228k): ~4–5 µs/op —
-  request-scoped keyed access is effectively free, and a secondary/child criterion on the fetched
-  record (`…WithFieldCriterion` 221k, `…WithChildCriterion` 224k) adds ~0%: index the fields you
-  filter on and the filter rides along at no extra cost.
-- **OR branches** (`searchByOrTwoPrimaries` 183k): near-linear — each extra `EQUALS` branch is one
-  more tree lookup.
-- **Selective ranges** (`searchByPrimaryBetweenSelective` 24k, `searchByPrimaryIn` 22.8k,
-  `searchByPrimaryGT` 15k) and **paged ranges** (`…PagedLimit50` 15.5k): thousands of filtered pages
-  per second; on an ascending single-criterion walk the limit is pushed down (the walk stops at the
-  page end — ~25% ahead of the unbounded same-window range). Wide windows (`…BetweenWide` 11.4k)
-  and lower-bound-only ranges degrade toward the walk's fetch cost by design.
-- **Scan paths** (`searchByScanNotEqualsPrimary` 1.6k, `searchByScanNullPrimaryFieldCriterion` 15.5k):
-  both are O(dataset) on the index walk — every index record is visited. The 10× gap between them is
-  the matched-record fetch, not the walk: `NOT_EQUALS "@@none@@"` matches essentially every ship and
-  fetches the whole dataset, while the null-primary query scans the same index but its
-  `tonnage EQUALS 7` filter (tonnage = `i % 50` in the dataset) matches ~2 of each band's 100 ships
-  and fetches almost nothing. Reporting-tier operations either way — fine for dashboards, wrong for
-  request paths.
-- **Writes through the indexed facade** (`saveAndDeleteIndexedShipWithCrew` 731,
-  `updateShipRenameSearchKey` 1.9k): ~0.5–1.4 ms per write transaction including the 2PC over data +
-  id index + search index — commit-bound; the gap and the fix plan are stated above.
-
-#### Field-frame sources (the public figures cited in § In context)
-
-Vendor/third-party published, workload-dependent, quoted for order-of-magnitude framing only — not
-like-for-like comparisons (different op semantics, hardware, configurations; marketing claims labeled
-as such):
-
-- **RocksDB** — the project's own wiki, *In Memory Workload Performance Benchmarks*
-  (github.com/facebook/rocksdb/wiki, page revision dated 2022-11): ~52K *sustained writes*/s in a
-  CPU-bound in-memory workload; Get-path workloads run in the millions of ops/s. Band: 10⁴–10⁶ simple
-  ops/s by workload and hardware.
-- **Chronicle Map** — official README (github.com/OpenHFT/Chronicle-Map, accessed 2026-10): "Millions
-  of operations per second, with low and stable microsecond latencies for reads and writes" (vendor
-  claim); the vendor's product page adds "up to 30 million updates/sec on a 16-core server"
-  (chronicle.software, marketing figure, undated).
-- **LMDB** — Symas sizing guide (symas.com, accessed 2026-10): ~336k ops/s with the database resident
-  in RAM on a 32-core box; the official benchmark suite is published at lmdb.tech/bench; the
-  lmdbjava benchmark set (github.com/lmdbjava/benchmarks, run 2016-06) found LMDB the random-read
-  leader among Java-accessible stores.
-- **MapDB** — official benchmarks page (mapdb.org/benchmarks, undated six-map comparison); the same
-  lmdbjava set (2016-06) measured MapDB ~1.5× slower than LMDB on random gets; community figures put
-  disk-backed write throughput around 10⁴ ops/s (Stack Overflow, 2014, a single anecdote — the
-  weakest of the four; treat MapDB as 10³–10⁵ ops/s by mode).
+> Error bars are JMH 3-iteration scores on a shared machine — wide by design; the
+> before/after deltas above are quoted against the same protocol on the same box.
 
 ---
 
