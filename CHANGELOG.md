@@ -18,6 +18,14 @@ Planned scope; items land here as they merge:
 
 ### Added (planned)
 
+- **`verify(folder)`** ([26](docs/tasks/2.1.0/26-verify-integrity-walk.md)) — a read-only
+  integrity walk over a storage folder (the after-a-power-loss recipe, mechanized): per-file
+  EOF-sentinel state and entry counts, journal state and torn-tail detection, per-class data
+  objects vs id-index entries, the format marker, orphaned journals, stale `.tmp` litter, and
+  a live folder lock (reported IN USE, never refused). Verdict `OK` / `WARNINGS` (damage the
+  engine tolerates by design) / `CORRUPT` (truncated v2 files, unparseable files, count
+  mismatches). Never repairs, never opens a storage, never takes the lock; corruption is
+  detected on copies in the test suite — the folder is byte-identical after a verify.
 - **B2** — read-only transaction commit path, verified and pinned by tests: no-change
   transactions commit through a cheap release path (no 2PC record iteration, zero file
   write-outs); measured 0.6–0.7 ms/op per read transaction at N=5000–40000 on the Hash path

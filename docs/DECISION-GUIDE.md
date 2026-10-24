@@ -70,7 +70,10 @@ quiet machine, generated tables). The point is the *gaps*, not the digits.
    — fine at 10⁴–10⁵ objects/class (≈70–200 MB per 10⁵ objects for typical entities);
    disqualifying beyond that — for now.
 4. **Single process per folder.** The storage folder is exclusively locked
-   (EMBEDDING.md § Lifecycle). Read-only tooling operates on a copy/backup, not live.
+   (EMBEDDING.md § Lifecycle). Read-only tooling operates on a copy/backup, not live —
+   except `XdStorageProvider.verify(folder)`, the read-only integrity walk (VERIFY, 2.1.0):
+   it takes no lock and reports a live storage as IN USE ("results unreliable") instead of
+   refusing, so a folder can be checked before deciding on recovery.
 5. **Runtime wrapper codegen** needs a JDK (not JRE) and a writable `./gencode`
    (EMBEDDING.md § Codegen requirements). The AOT build-time-generation fix (FP-3) is on the
    roadmap; until then, containers must ship a JDK.

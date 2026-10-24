@@ -43,6 +43,40 @@ public class XdStorageProvider {
 
     private static Lock lock = new ReentrantLock();
 
+    /**
+     * VERIFY (docs/tasks/2.1.0/26): a read-only integrity walk over a storage folder —
+     * the mechanized after-a-power-loss recipe (EMBEDDING.md § After a power loss).
+     *
+     * <p>Per engine-owned file: the S-1 EOF-sentinel state (truncated base vs intact),
+     * journal presence/state/record-count (torn tails named), and structural entry counts;
+     * per class: data objects vs id-index entries (enforced on clean folders — with
+     * journals present the counts reconcile at replay); folder-level: the format marker,
+     * orphaned journals, stale {@code .tmp} litter, and a live folder lock (reported —
+     * "results unreliable" — never refused).
+     *
+     * <p>Boundaries: never repairs, never opens a storage, never takes the folder lock —
+     * a stale/traveled {@code .lock} does not block a verify (the task-19 lock semantics).
+     * The B+tree key-set reconciliation stays FP-5's scope (2.3.0); this walk checks the
+     * tree files' sentinels and reports their entry counts.
+     *
+     * @param folder the storage folder (open or closed; open is reported as "in use")
+     * @return the report; {@link XdStorageVerifyReport#isOk()} answers "nothing to act on"
+     */
+    public static XdStorageVerifyReport verify(final String folder) {
+        return io.github.xdstorage.utils.XdStorageFolderVerifier.verify(new File(folder));
+    }
+
+    /** See {@link #verify(String)}. */
+    public static XdStorageVerifyReport verify(final File folder) {
+        return io.github.xdstorage.utils.XdStorageFolderVerifier.verify(folder);
+    }
+
+    /** See {@link #verify(String)}. */
+    public static XdStorageVerifyReport verify(final java.nio.file.Path folder) {
+        return io.github.xdstorage.utils.XdStorageFolderVerifier.verify(folder.toFile());
+    }
+
+
     /** Открытие с рекомендованным размером фрагмента {@link #DEFAULT_FRAGMENT_SIZE} и конфигурацией по умолчанию (YAML). */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder) {
         return newOrGetFileStorage(name, folder, DEFAULT_FRAGMENT_SIZE, FilesFormat.YAML, XdStorageConfig.defaults());

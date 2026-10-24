@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][VERIFY] verify(): closed-folder integrity walk — the recovery recipe, mechanized"
 labels: [2.1.0-train, P1, engine, testing]
-status: open
+status: done
 ---
 
 ## Summary
@@ -52,14 +52,14 @@ script.
 
 ## Acceptance criteria
 
-- [ ] Green-folder report: a healthy storage from the task-19 walkthrough verifies clean
+- [x] Green-folder report: a healthy storage from the task-19 walkthrough verifies clean
       (verdict OK, counts consistent).
-- [ ] Detection suite: each corruption class from the task-23 matrix (truncated base,
+- [x] Detection suite: each corruption class from the task-23 matrix (truncated base,
       torn journal, missing marker, orphaned journal, `.tmp` litter, count mismatch via a
       hand-edited file) is DETECTED with a report entry naming the file — verified by
       corrupting copies, never originals.
-- [ ] Verify never mutates the folder (byte-identical before/after in the test).
-- [ ] Full suite green ×2; `CHANGELOG.md` "Added".
+- [x] Verify never mutates the folder (byte-identical before/after in the test).
+- [x] Full suite green ×2; `CHANGELOG.md` "Added".
 
 Estimate: ~1–2 dev-days (the count-consistency walk is the careful half).
 
@@ -70,3 +70,27 @@ Estimate: ~1–2 dev-days (the count-consistency walk is the careful half).
 - [EMBEDDING.md](../../EMBEDDING.md) § After a power loss (the recipe to upgrade)
 - [MASTER-PLAN.md](../../MASTER-PLAN.md) Step 3 — FP-5's verification core pulled into this
   train (2026-10-23); `backupTo` + the FP-6 CLI stay 2.3.0
+
+## Implementation notes (2026-10-24)
+
+- API: `XdStorageProvider.verify(String|File|Path)` → `XdStorageVerifyReport` (io.github.xdstorage);
+  the walk lives in `utils/XdStorageFolderVerifier`. "verify-while-open" resolved as the task's
+  recommendation: REPORTED ("IN USE — results unreliable"), never refused — the probe takes the
+  OS folder lock non-blockingly and releases it immediately (open/try/close, nothing written).
+- Everything is STRUCTURAL: files are tokenized (`XdStorageYamlTokenizer`), never materialized
+  into objects — no entity classes needed, nothing written, and one walker covers base, index,
+  structure, B+tree, references and journal files (all are level-1 list-item blocks + the S-1
+  sentinel). Journal state: EMPTY / OK / MISSING_SENTINEL (mid-append cut) / TORN_TAIL (record
+  blocks after the last sentinel = what a replay discards).
+- Severity model: CORRUPT = truncated v2 file, parse failure, data-vs-index count mismatch,
+  newer-format marker, unreadable marker; WARNINGS = torn journal tails (designed lost-tail),
+  orphaned journals (the designed un-checkpointed shape — while open the W4a path journals
+  WITHOUT a base, so every crash-shaped folder legitimately has them), `.tmp` litter, legacy
+  v1 files, missing marker, IN USE; OK otherwise.
+- Count consistency enforced ONLY on clean folders (no journals in the class dir): with
+  journals present the counts reconcile at replay — flagging them would be noise. B+tree
+  key-set reconciliation stays FP-5 (2.3.0); the walk checks tree files' sentinels and counts.
+- Detection matrix: `XdStorageVerifyTest` (8 tests) — green/counts/mutation-free, truncated
+  base (CORRUPT, file named), torn journal (WARNINGS), missing marker, orphaned journal,
+  `.tmp` litter, hand-edited count mismatch (a 4-object base swapped into a 5-object folder:
+  "4 data object(s) vs 5 id-index"), live-storage IN USE then closed-not-in-use.

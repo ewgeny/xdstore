@@ -99,7 +99,15 @@ back with its tail missing. The verified behavior matrix
 `durableWrites=true` (fsync per commit, measured ~8× write cost — BENCHMARKS § Canonical)
 the loss shrinks to nothing.
 
-**The recipe:** (1) reopen normally — most damage opens clean or fails loudly; (2) on a loud
+**The recipe:** (0) run `XdStorageProvider.verify(folder)` — the read-only integrity walk
+(VERIFY, docs/tasks/2.1.0/26) that mechanizes these checks: per-file sentinel state
+(`TRUNCATED` names the file), journal state and record counts (torn tails named), data
+objects vs id-index entries per class, the format marker, orphaned journals, stale `.tmp`
+litter, and a live folder lock (reported as IN USE, never refused). The verdict: `OK` —
+nothing to act on; `WARNINGS` — damage the engine tolerates by design (torn journal tails,
+base-less journals, litter, legacy v1 files); `CORRUPT` — a v2 file without its sentinel,
+an unparseable file, a count mismatch. (1) reopen normally — most damage opens clean or
+fails loudly; (2) on a loud
 `TRUNCATED` sentinel failure, reopen once with `acceptMissingEofSentinel(true)` — the storage
 opens with the readable prefix and rewrites files on the next commit (expect partial content:
 verify critical objects); (3) if the lost tail is unacceptable, restore from backup
