@@ -13,10 +13,42 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.Map;
 
+/**
+ * Stateless converter between application entities and the engine's record layer.
+ * {@code convertTo} projects an entity graph into {@code XdStorageIdentifiableObject}
+ * records (class, id and per-field properties); {@code convertFrom} materializes a record
+ * back into a new entity instance; {@code fillFrom} copies record properties into an
+ * existing instance. Nested values are handled by kind: simple types and enums by
+ * reference, {@code Date}s defensively copied, arrays, collections and maps deep-converted
+ * preserving the runtime container type, embedded ({@code StoreWithParentObject}) children
+ * inlined as nested records, referenced children reduced to id-only records, and parent
+ * back-references stored by id and restored to the owning instance on the way back.
+ *
+ * <p>All methods are static and the class holds no state, so it is thread-safe. Conversion
+ * failures of nested values are logged and yield {@code null} for the affected value; a
+ * failing top-level {@code convertFrom} returns {@code null}. Entity classes must expose an
+ * accessible no-arg constructor and an {@code @XdStorageObjectId} field. Engine-internal —
+ * not part of the public API.</p>
+ */
 public class XdStorageObjectConverter {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageObjectConverter.class);
 
+    /**
+     * Static utility class — no instances needed.
+     */
+    public XdStorageObjectConverter() {
+    }
+
+    /**
+     * Projects an application entity into its stored record form: the record carries the
+     * entity class, its id and one property per stored field, with nested values converted
+     * per the class rules (see the class documentation).
+     *
+     * @param <T>    the entity type
+     * @param object the entity to convert
+     * @return the record holding the entity's class, id and per-field properties
+     */
     public static <T> XdStorageIdentifiableObject convertTo(final T object) {
         final Class<?> cl = object.getClass();
 
@@ -216,6 +248,17 @@ public class XdStorageObjectConverter {
         return null;
     }
 
+    /**
+     * Materializes a new entity instance from its stored record: creates the entity with
+     * its no-arg constructor, restores the id and converts every recorded property back
+     * into the matching field — nested records into embedded children, and parent fields
+     * back to the owning instance.
+     *
+     * @param <T>    the entity type stored in the record
+     * @param object the stored record to materialize
+     * @return the new entity instance, or {@code null} when the conversion fails (the
+     *         failure is logged)
+     */
     public static <T> T convertFrom(final XdStorageIdentifiableObject object) {
         try {
             final Class<T> cl = (Class<T>) object.getType();
@@ -417,6 +460,14 @@ public class XdStorageObjectConverter {
         return null;
     }
 
+    /**
+     * Copies the record's properties into an existing entity instance — unlike
+     * {@code convertFrom} it does not create one, which suits refreshing already materialized
+     * objects. Nested values are converted per the class rules (see the class documentation).
+     *
+     * @param reference the entity instance to fill in place
+     * @param object    the stored record to read the property values from
+     */
     public static void fillFrom(final Object reference, final XdStorageIdentifiableObject object) {
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(reference.getClass());
         final Collection<XdStorageObjectField> properties = clInfo.getFields().values();

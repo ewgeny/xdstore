@@ -91,6 +91,15 @@ Planned scope; items land here as they merge:
 
 ### Changed (planned)
 
+- **Documented API surface** ([28](docs/tasks/2.1.0/28-javadoc-coverage.md)) — every public
+  method of the main tree carries javadoc (full contract prose on the published API tier —
+  facade, config, annotations, query model, exceptions/metrics/id-generation SPI, with the
+  EMBEDDING.md gotchas on the methods themselves; class-level + contract one-liners on the
+  machinery tier), the Tier-1 packages gained `package-info` overviews, and the release
+  profile's long-deferred doclint promise (RELEASE-PLAN §3) is closed: the release build now
+  runs `doclint=missing,syntax` with `failOnWarnings=true`, so the published javadoc jar can
+  never silently regress. Coverage gate: `mvn javadoc:javadoc -Ddoclint=missing` green.
+
 - **Journal file naming and placement** ([24](docs/tasks/2.1.0/24-journal-file-naming.md)) —
   journal files live in the `journal` SUBDIRECTORY of their resource's directory
   (`data/<Class>/journal/<base-without-ext>-journal.yaml`, `structure/journal/...`), named with

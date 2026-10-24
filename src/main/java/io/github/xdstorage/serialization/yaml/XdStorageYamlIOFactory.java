@@ -7,9 +7,15 @@ import io.github.xdstorage.serialization.*;
 import io.github.xdstorage.services.XdStorageServicesLocator;
 
 /**
- * Высокопроизводительная фабрика ввода-вывода СУБД (Поинт Г).
- * Использует паттерн ThreadLocal для полной потокоизоляции читателей и писателей XML,
- * что на 100% ликвидирует гонки данных в кэшах рефлексии метаданных СУБД.
+ * The engine's YAML-format {@link IXdStorageIOFactory} (the storage default): builds
+ * {@link XdStorageYamlObjectsReader}/{@link XdStorageYamlObjectsWriter} and exposes the
+ * codec pieces the commit journal reuses. Uses the ThreadLocal pattern to fully isolate
+ * the reader and writer used by each worker thread, so their reflection/metadata caches
+ * are never shared and data races on those caches are eliminated by construction.
+ *
+ * <p>Thread-safety: the factory itself is immutable and safe to share across threads;
+ * each thread gets its own lazily created reader/writer instances via thread-locals.
+ * Engine-internal — not part of the public API.</p>
  */
 public class XdStorageYamlIOFactory implements IXdStorageIOFactory {
 
@@ -22,10 +28,23 @@ public class XdStorageYamlIOFactory implements IXdStorageIOFactory {
     private final ThreadLocal<IXdStorageObjectsReader> threadLocalReader = new ThreadLocal<>();
     private final ThreadLocal<IXdStorageObjectsWriter> threadLocalWriter = new ThreadLocal<>();
 
+    /**
+     * Creates the YAML I/O factory with the engine's default simple-type helper.
+     *
+     * @param service     the storage services locator (configuration, storage root)
+     * @param idGenerator the engine id generator applied when marshalling id fields
+     */
     public XdStorageYamlIOFactory(final XdStorageServicesLocator service, final IXdStorageIdGenerator idGenerator) {
         this(service, new XdStorageDefaultSimpleTypeHelper(), idGenerator);
     }
 
+    /**
+     * Creates the YAML I/O factory with an explicit simple-type helper.
+     *
+     * @param services         the storage services locator (configuration, storage root)
+     * @param simpleTypeHelper the simple-type SPI used by the produced readers/writers
+     * @param idGenerator      the engine id generator applied when marshalling id fields
+     */
     public XdStorageYamlIOFactory(final XdStorageServicesLocator services, final IXdStorageSimpleTypeHelper simpleTypeHelper,
                                   final IXdStorageIdGenerator idGenerator) {
         this.services = services;

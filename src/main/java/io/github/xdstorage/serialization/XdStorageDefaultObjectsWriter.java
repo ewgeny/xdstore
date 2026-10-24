@@ -24,6 +24,19 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * The XML implementation of {@link IXdStorageObjectsWriter}: walks the object graph of
+ * every given aggregate and streams it as indented XML (nested {@code object}, {@code
+ * array}, {@code primitive}, {@code enum}, {@code collection}, {@code map} elements and
+ * id-only {@code reference} entries per the storage policy). It is also the single id
+ * generation gate of the write path: engine-managed id fields still holding
+ * {@code null} are assigned a generated id while being marshalled.
+ *
+ * <p>Thread-safety: instances are confined to one worker thread (handed out per thread
+ * by {@link XdStorageDefaultIOFactory}); the {@code properties} reflection cache is a
+ * {@code ConcurrentHashMap} and safe under concurrent population. Engine-internal —
+ * not part of the public API.</p>
+ */
 public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageDefaultObjectsWriter.class);
@@ -36,6 +49,13 @@ public class XdStorageDefaultObjectsWriter implements IXdStorageObjectsWriter {
 
     private final Map<Class<?>, Collection<XdStorageObjectField>> properties = new ConcurrentHashMap<>();
 
+    /**
+     * Creates the XML writer.
+     *
+     * @param services         the storage services locator (used by id generation)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar attribute values
+     * @param idGenerator      the engine id generator applied to engine-managed id fields
+     */
     public XdStorageDefaultObjectsWriter(final XdStorageServicesLocator services, final IXdStorageSimpleTypeHelper simpleTypeHelper, final IXdStorageIdGenerator idGenerator) {
         this.services = services;
         this.simpleTypeHelper = simpleTypeHelper;

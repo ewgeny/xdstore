@@ -25,6 +25,11 @@ public final class XdStorageKeyTypeRestore {
      * layer owns the type authority: the tree KEY's value is the indexed class's PRIMARY
      * index field, the object pointer / record id is the entity's id field, and the index
      * RECORD's primaryIndexValue is what the criterion layer compares.
+     *
+     * @param keyValueType the declared type of the tree KEY's value (the indexed class's primary
+     *                     index field type)
+     * @param objectIdType the declared type of the entity id carried as the object pointer
+     * @return a restorer applicable to every entry of a search btree; unknown entry kinds pass through unchanged
      */
     public static java.util.function.UnaryOperator<Object> searchEntryRestorer(
             final Class<?> keyValueType, final Class<?> objectIdType) {
@@ -50,6 +55,16 @@ public final class XdStorageKeyTypeRestore {
         };
     }
 
+    /**
+     * Restores one key to the declared field type after the YAML round-trip: values already of
+     * the target type (primitives widened to their wrappers) pass through; strings, numbers and
+     * booleans are converted via the engine's simple-type conversion; anything unparseable is
+     * returned unchanged so the caller's lookup misses instead of storing a wrongly-typed key.
+     *
+     * @param key the value as read back from disk, may be {@code null}
+     * @param declaredType the declared field type (primitive types are treated as their wrappers), may be {@code null}
+     * @return the value coerced to {@code declaredType}, or the original value when no conversion applies
+     */
     public static Object restore(final Object key, final Class<?> declaredType) {
         if (key == null || declaredType == null) {
             return key;

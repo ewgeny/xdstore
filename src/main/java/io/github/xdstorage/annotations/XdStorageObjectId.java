@@ -6,10 +6,16 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * If one field of the class described this annotation, this must have two
- * methods for a work with this field (getter and setter). And the class
- * identifier object must have constructor with one parameter java.lang.String,
- * and replace the method simpleTypeToString().
+ * Marks the entity's primary-key field — every stored class MUST carry exactly one.
+ * The field needs a getter and a setter, and its type must be constructible from a
+ * {@link String} (a constructor taking one {@code String} argument) unless it is a
+ * simple type ({@code String}, {@code Long}/{@code long}, {@code Integer}/{@code int},
+ * {@code UUID}).
+ *
+ * <p>Who assigns the id is chosen on the same field via
+ * {@link XdStorageObjectFieldProperties}: with the default
+ * {@code DATABASE_GENERATOR} a {@code null} id is generated inside the
+ * {@code save} call and written back onto the same instance.
  */
 @Target(value = ElementType.FIELD)
 @Retention(value = RetentionPolicy.RUNTIME)

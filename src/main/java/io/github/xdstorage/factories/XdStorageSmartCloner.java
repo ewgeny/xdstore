@@ -25,15 +25,38 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
 
     private final IXdStorageReferenceProvider referencesProvider;
 
+    /**
+     * Creates the cloner on top of a reference provider.
+     *
+     * @param referencesProvider the per-transaction reference registry used to memoize the
+     *                           canonical wrappers
+     */
     public XdStorageSmartCloner(final IXdStorageReferenceProvider referencesProvider) {
         this.referencesProvider = referencesProvider;
     }
 
+    /**
+     * Releases the transaction's reference state (delegated to the provider).
+     *
+     * @param transaction the transaction being released
+     */
     @Override
     public void release(final XdStorageTransaction transaction) {
         referencesProvider.release(transaction);
     }
 
+    /**
+     * Clones the given object one reference level at a time for a transaction snapshot:
+     * embedded ({@code StoreWithParentObject}) objects are plain-copied, entity objects
+     * get (or create) their canonical reference wrapper whose fields are packed from the
+     * source; {@code null} passes through.
+     *
+     * @param toClone     the object to clone and wrap
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction the cloned graph belongs to
+     * @return the wrapped clone, or {@code null} when {@code toClone} is {@code null}
+     * @throws XdStorageException when the object cannot be cloned or wrapped
+     */
     @Override
     public Object cloneAndWrap(final Object toClone, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException {
         if (toClone == null) {
@@ -83,6 +106,16 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         return result;
     }
 
+    /**
+     * Unwraps and deep-clones an object into a plain POJO graph for delivery to the
+     * application: B+tree infrastructure instances pass through by identity (cloning them
+     * would corrupt the cache versions), embedded objects are plain-copied, and other
+     * entities are recreated field by field (unpacked one reference level at a time).
+     *
+     * @param toCloneMaybeWrapped the object to unwrap and clone
+     * @return the plain clone, or {@code null} when the input is {@code null}
+     * @throws XdStorageException when the object cannot be unwrapped or cloned
+     */
     @Override
     public Object unwrapAndClone(final Object toCloneMaybeWrapped) throws XdStorageException {
         if (toCloneMaybeWrapped == null) {
@@ -133,6 +166,18 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         return result;
     }
 
+    /**
+     * Populates an existing reference object in place with the fields of {@code object},
+     * under the wrapper's lock when it is lockable. B+tree infrastructure objects are not
+     * copied: the reference is re-anchored to the live canonical instance instead (the
+     * tree graph must stay one instance per storage).
+     *
+     * @param reference   the reference object to populate (never {@code null})
+     * @param object      the source object providing the field values (never {@code null})
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction the reference belongs to
+     * @throws XdStorageException when either argument is {@code null} or the packing fails
+     */
     @Override
     public void fillAndWrap(final Object reference, final Object object, final IXdStorage storage, final XdStorageTransaction transaction) throws XdStorageException {
         if (reference == null) throw new XdStorageException("reference cannot be null");
@@ -196,6 +241,18 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
     }
 
     // Внутренние package-private мостики для суб-процессоров
+
+    /**
+     * Internal bridge for the sub-processors: returns the transaction's reference wrapper
+     * for an entity-typed value (plain-copied or observable-wrapped for embedded objects
+     * and id-less values).
+     *
+     * @param object      the entity-typed value to represent
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction scoping the reference
+     * @return the wrapper representing the value inside the transaction snapshot
+     * @throws Exception if the reference cannot be created or the value cannot be copied
+     */
     Object internalCloneAsReferenceAndWrapObject(final Object object, final IXdStorage storage, final IXdStorageTransaction transaction) throws Exception {
         final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);
@@ -223,6 +280,16 @@ public class XdStorageSmartCloner implements IXdStorageCloner {
         return result;
     }
 
+    /**
+     * Internal bridge for the sub-processors: rebuilds a bare reference skeleton (same
+     * class, id field set) for an entity-typed value — the fields themselves are unpacked
+     * by the caller; embedded objects and id-less values are plain-copied or
+     * observable-wrapped.
+     *
+     * @param object the entity-typed value to rebuild from
+     * @return the bare reference skeleton for the value
+     * @throws Exception if the skeleton cannot be instantiated or the id cannot be read
+     */
     Object internalUnwrapAndCloneAsReference(final Object object) throws Exception {
         final Class<?> cl = XdStorageObjectUtils.getEntityClass(object.getClass());
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(cl);

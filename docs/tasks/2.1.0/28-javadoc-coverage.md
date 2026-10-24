@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][JAVADOC] Cover the public methods of the whole project with javadoc — and turn doclint on"
 labels: [2.1.0-train, P1, docs, chore]
-status: open
+status: done
 ---
 
 ## Summary

@@ -13,7 +13,25 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Runtime wrapper codegen entry point: builds wrapper subclass sources with the
+ * dedicated code generators, compiles them in-process with the system Java compiler
+ * and loads the results through a single shared {@code URLClassLoader} over
+ * {@code ./gencode} that is pinned for the JVM's lifetime. The loader also bridges in
+ * the code sources of the entity hierarchy so application-loaded entities stay linkable.
+ *
+ * <p>A JDK is required at runtime: on a JRE (no system compiler), or when compilation
+ * or loading fails, the generation methods log the loss and return an empty map, and
+ * callers degrade to the dummy wrappers with broken {@code equals}/{@code hashCode} —
+ * degradation is reported once in the log, cached for the JVM lifetime and never retried.
+ * All public entry points are {@code synchronized}, so generation is thread-safe by
+ * mutual exclusion. Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageClassGenerator {
+
+    /** Engine-internal holder: all functionality is static. */
+    public XdStorageClassGenerator() {
+    }
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageClassGenerator.class);
     private static final String CODE_DIRECTORY = "gencode";
@@ -38,6 +56,16 @@ public class XdStorageClassGenerator {
         }
     }
 
+    /**
+     * Generates, compiles and loads the unmodifiable wrapper subclass of the given
+     * class — the {@code XdStorageIdentifiableObject}-specific generator for the
+     * infrastructure base class, the generic one for entity classes.
+     *
+     * @param cl the class to wrap
+     * @return the loaded generated class keyed by {@code cl}; empty when no system
+     *         compiler is available, compilation fails or loading fails
+     * @throws IOException propagated from the compilation task
+     */
     public static synchronized Map<Class<?>, Class<?>> generateUnmodifiableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
         if (cl == XdStorageIdentifiableObject.class) {
@@ -48,12 +76,30 @@ public class XdStorageClassGenerator {
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
+    /**
+     * Generates, compiles and loads the simple (lazy-loading) wrapper subclass of the
+     * given class.
+     *
+     * @param cl the entity class to wrap
+     * @return the loaded generated class keyed by {@code cl}; empty when no system
+     *         compiler is available, compilation fails or loading fails
+     * @throws IOException propagated from the compilation task
+     */
     public static synchronized Map<Class<?>, Class<?>> generateSimpleWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
         new XdStorageSimpleWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
         return compileGeneratedClassesCode(cl, generatedCode);
     }
 
+    /**
+     * Generates, compiles and loads the id-observable wrapper subclass of the given
+     * class used by the observer service for deferred-id notification.
+     *
+     * @param cl the entity class to wrap
+     * @return the loaded generated class keyed by {@code cl}; empty when no system
+     *         compiler is available, compilation fails or loading fails
+     * @throws IOException propagated from the compilation task
+     */
     public static synchronized Map<Class<?>, Class<?>> generateObservableWrapper(final Class<?> cl) throws IOException {
         final Map<String, String> generatedCode = new HashMap<>();
         new XdStorageObservableWrapperClassCodeGenerator().generate(CLASSES_PACKAGE, cl, generatedCode);
@@ -137,6 +183,10 @@ public class XdStorageClassGenerator {
      * application-loaded entity classes — an entity the app provided through its own
      * classloader (an upgraded generation) must become visible here, or the generated wrapper
      * fails to LINK (NoClassDefFoundError on the entity supertype at defineClass).
+     */
+    /**
+     * Child of the shared loader that re-opens {@code addURL} so generated wrappers can
+     * link against entity classes supplied through arbitrary application classloaders.
      */
     private static final class BridgingURLClassLoader extends URLClassLoader {
         BridgingURLClassLoader(final URL[] urls, final ClassLoader parent) {

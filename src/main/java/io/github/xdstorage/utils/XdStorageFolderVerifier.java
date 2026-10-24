@@ -56,6 +56,17 @@ public final class XdStorageFolderVerifier {
     private XdStorageFolderVerifier() {
     }
 
+    /**
+     * Runs the read-only structural integrity walk over a storage folder: checks the format
+     * marker, tokenizes every content file for its EOF-sentinel state and level-1 entry count
+     * (never materializing objects), flags journals without a base, stale {@code .tmp} litter
+     * and unexpected files, and compares per-class data counts against their id-index file
+     * (only on journal-free folders). A live folder lock is reported but not refused.
+     *
+     * @param folder the storage folder to inspect read-only (never modified, never locked)
+     * @return the structured report: per-file rows, findings, format version and the overall
+     *         verdict ({@code OK} / {@code WARNINGS} / {@code CORRUPT})
+     */
     public static XdStorageVerifyReport verify(final File folder) {
         final List<FileReport> files = new ArrayList<>();
         final List<String> findings = new ArrayList<>();

@@ -12,15 +12,35 @@ import io.github.xdstorage.utils.XdStorageObjectUtils;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * The default {@link IXdStorageReferenceProvider}: a per-transaction, per-class, per-id
+ * hierarchy of concurrent maps memoizing the canonical reference wrappers, with
+ * double-checked, lock-guarded creation so concurrent snapshot materializations of the
+ * same (class, id) pair share one wrapper instance. The whole registry for a transaction
+ * is discarded on {@code #release}.
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageDefaultReferenceProvider implements IXdStorageReferenceProvider {
 
     private final IXdStorage storage;
     private final Map<String, Map<Class<?>, Map<Object, IXdStorageSimpleWrapper>>> references = new ConcurrentHashMap<>();
 
+    /**
+     * Creates the provider bound to one storage.
+     *
+     * @param storage the storage whose transactions this provider serves
+     */
     public XdStorageDefaultReferenceProvider(final IXdStorage storage) {
         this.storage = storage;
     }
 
+    /**
+     * @param cl          the entity class of the object
+     * @param objectId    the object's id
+     * @param transaction the transaction scoping the lookup
+     * @return the memoized wrapper, or {@code null} when none was registered yet
+     */
     @Override
     public IXdStorageSimpleWrapper getReference(final Class<?> cl, final Object objectId, final IXdStorageTransaction transaction) {
         final String transactionId = transaction.getTransactionId();
@@ -31,6 +51,21 @@ public class XdStorageDefaultReferenceProvider implements IXdStorageReferencePro
         return transactionClassReferences.get(objectId);
     }
 
+    /**
+     * Creates and memoizes the canonical wrapper for the (class, id) pair — under a
+     * per-class lock when a concurrent registration is possible — or returns the
+     * already-registered one. A wrapper whose generation degraded to a dummy is treated as
+     * an explicit, diagnosable failure.
+     *
+     * @param cl          the entity class of the object
+     * @param idField     the id-field accessor used to stamp the id into the new wrapper
+     * @param objectId    the object's id
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction scoping the registration
+     * @return the canonical wrapper for the pair (never {@code null})
+     * @throws XdStorageException when the wrapper cannot be instantiated, its generation
+     *         degraded to a dummy, or registration failed
+     */
     @Override
     public IXdStorageSimpleWrapper createAndRegisterReference(final Class<?> cl, final XdStorageObjectIdField idField, final Object objectId, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
@@ -72,6 +107,11 @@ public class XdStorageDefaultReferenceProvider implements IXdStorageReferencePro
         return result;
     }
 
+    /**
+     * Discards the transaction's whole reference registry (all classes and ids).
+     *
+     * @param transaction the transaction being released
+     */
     @Override
     public void release(final XdStorageTransaction transaction) {
         final String transactionId = transaction.getTransactionId();

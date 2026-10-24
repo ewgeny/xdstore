@@ -11,11 +11,28 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Неблокирующий реентерабельный примитив синхронизации ядра СУБД (Поинт Г).
- * Гарантирует потокобезопасный отпуск ресурсов за счет блокирующего вызова mainLock.lock()
- * и адаптивного опроса transaction.getTimeout() при захвате.
+ * The engine's reentrant read-write latch guarding record resources: per-thread counted readers,
+ * a single reentrant writer, and every state transition made under one short internal lock.
+ * Blocking acquisition ({@code lockRead}/{@code lockWrite}) loops over the non-blocking
+ * try-operations, sleeping in short steps, until the transaction's timeout elapses — then it
+ * fails loudly and feeds the JVM-wide anomaly metrics: a lock-acquisition timeout increments the
+ * engine's lock-timeout counter, and any acquisition that waited one second or more is logged
+ * and counted as a contention anomaly (possible leaked write lock or reader starvation).
+ *
+ * <p>Thread-safety: counters are atomics and concurrent maps, transitions are atomic under the
+ * internal lock. Readers pass while no other thread holds the write lock; a writer passes only
+ * with no readers and no other writer. A thread holding the write lock can also take read locks
+ * (downgrade), and a lone reader can take the write lock (upgrade). There is no FIFO arbitration:
+ * reader-priority, waiting-writer-barrier and fair variants were tried and rejected by
+ * experiments (R-26/R-28/R-29); starvation treatment remains a known open point (R-29).
+ *
+ * <p>Engine-internal — not part of the public API.
  */
 public class XdStorageReadWriteLock {
+
+    /** Creates an unlocked latch: no writer, no readers, all counters at zero. */
+    public XdStorageReadWriteLock() {
+    }
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageReadWriteLock.class);
 
@@ -37,15 +54,33 @@ public class XdStorageReadWriteLock {
     // java.util.concurrent RW-лок только для ТЕКОВЫХ latch-ов с FIFO, либо per-node striping,
     // либо устранение самого contention (снижение глубины deep-lock цепей).
 
+    /**
+     * Whether the CURRENT thread holds the write lock.
+     *
+     * @return {@code true} when the write lock is held (reentrancy counted) by the calling thread
+     */
     public boolean isWriteLocked() {
         return writeLocksCounter.get() > 0 && writeLockThread == Thread.currentThread();
     }
 
+    /**
+     * Whether the CURRENT thread holds at least one read lock.
+     *
+     * @return {@code true} when the calling thread's reader count is above zero
+     */
     public boolean isReadLocked() {
         AtomicLong counter = readLocksCounters.get(Thread.currentThread());
         return counter != null && counter.get() > 0;
     }
 
+    /**
+     * Non-blocking write acquisition: succeeds when no other thread holds the write lock and the
+     * reader map is empty or contains only the calling thread (lone-reader upgrade). Reentrant:
+     * every success increments the calling thread's writer count.
+     *
+     * @return {@code true} when the write lock was acquired, {@code false} when another thread
+     *         holds the write lock or other readers exist
+     */
     public boolean tryLockWrite() {
         final Thread currentThread = Thread.currentThread();
 
@@ -76,6 +111,14 @@ public class XdStorageReadWriteLock {
         }
     }
 
+    /**
+     * Non-blocking read acquisition: succeeds while no other thread holds the write lock; the
+     * calling thread's own write lock does not block it (downgrade). Reentrant: every success
+     * increments the calling thread's reader count.
+     *
+     * @return {@code true} when the read lock was acquired, {@code false} when another thread
+     *         holds the write lock
+     */
     public boolean tryLockRead() {
         final Thread currentThread = Thread.currentThread();
 
@@ -114,6 +157,17 @@ public class XdStorageReadWriteLock {
         }
     }
 
+    /**
+     * Blocking write acquisition: polls {@link #tryLockWrite()} with short sleeps until it
+     * succeeds or the transaction's timeout elapses. A timeout increments the engine's
+     * lock-acquisition-timeout metric, logs the full lock state (holder and readers) and fails
+     * with {@code XdStorageRuntimeException}; a wait of one second or more is logged and counted
+     * as a contention anomaly. Without a transaction a default 5 s timeout applies.
+     *
+     * @param transaction the transaction whose timeout bounds the wait ({@code null} uses the
+     *                    default timeout)
+     * @throws InterruptedException when the polling sleep is interrupted
+     */
     public void lockWrite(final IXdStorageTransaction transaction) throws InterruptedException {
         long timeout = transaction != null ? transaction.getTimeout() : 5000;
         timeout *= 1_000_000;
@@ -135,6 +189,17 @@ public class XdStorageReadWriteLock {
         logLockContention(startTime, "write", transaction);
     }
 
+    /**
+     * Blocking read acquisition: polls {@link #tryLockRead()} with short sleeps until it
+     * succeeds or the transaction's timeout elapses. A timeout increments the engine's
+     * lock-acquisition-timeout metric, logs the full lock state (holder and readers) and fails
+     * with {@code XdStorageRuntimeException}; a wait of one second or more is logged and counted
+     * as a contention anomaly. Without a transaction a default 5 s timeout applies.
+     *
+     * @param transaction the transaction whose timeout bounds the wait ({@code null} uses the
+     *                    default timeout)
+     * @throws InterruptedException when the polling sleep is interrupted
+     */
     public void lockRead(final IXdStorageTransaction transaction) throws InterruptedException {
         long timeout = transaction != null ? transaction.getTimeout() : 5000;
         timeout *= 1_000_000;
@@ -190,6 +255,12 @@ public class XdStorageReadWriteLock {
         }
     }
 
+    /**
+     * Releases one write-lock acquisition of the CURRENT thread; the lock frees when the last
+     * reentrant acquisition is released. A thread that does not hold the write lock gets
+     * {@code IllegalMonitorStateException} — a leaked or unbalanced lock is also logged with the
+     * real holder.
+     */
     public void unlockWrite() {
         final Thread currentThread = Thread.currentThread();
         // ИСПРАВЛЕНИЕ: Используем ГАРАНТИРОВАННЫЙ блокирующий вызов lock() вместо tryLock(),
@@ -209,6 +280,11 @@ public class XdStorageReadWriteLock {
         }
     }
 
+    /**
+     * Releases one read-lock acquisition of the CURRENT thread; the reader is forgotten when its
+     * count drops to zero. A thread that holds no read lock gets
+     * {@code IllegalMonitorStateException}.
+     */
     public void unlockRead() {
         final Thread currentThread = Thread.currentThread();
         // ИСПРАВЛЕНИЕ: Используем ГАРАНТИРОВАННЫЙ блокирующий вызов lock() вместо tryLock(),

@@ -11,8 +11,15 @@ import java.io.Writer;
 import java.util.Collection;
 
 /**
- * Главный фасад подсистемы маршаллинга СУБД.
- * Строго реализует интерфейс IXdStorageObjectsWriter и координирует потоковую запись.
+ * The YAML implementation of {@link IXdStorageObjectsWriter}: the top-level marshalling
+ * facade. Streams each resource as a {@code objects}/{@code references} root block via
+ * {@link XdStorageYamlEmitter}, delegating the body encoding to the specialized block
+ * writers, and terminates the file with the S-1 EOF sentinel so a truncated file can
+ * never be mistaken for a complete database on reload.
+ *
+ * <p>Thread-safety: instances are confined to one worker thread (handed out per thread
+ * by {@link XdStorageYamlIOFactory}); the held references are immutable. Engine-internal
+ * — not part of the public API.</p>
  */
 public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
 
@@ -20,6 +27,14 @@ public class XdStorageYamlObjectsWriter implements IXdStorageObjectsWriter {
     private final IXdStorageSimpleTypeHelper simpleTypeHelper;
     private final IXdStorageIdGenerator idGenerator;
 
+    /**
+     * Creates the YAML writer.
+     *
+     * @param services         the storage services locator (used by id generation and the
+     *                         ORM reference policy during cascading writes)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar attribute values
+     * @param idGenerator      the engine id generator applied to engine-managed id fields
+     */
     public XdStorageYamlObjectsWriter(final XdStorageServicesLocator services,
                                       final IXdStorageSimpleTypeHelper simpleTypeHelper,
                                       final IXdStorageIdGenerator idGenerator) {

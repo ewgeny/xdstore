@@ -15,6 +15,24 @@ import java.util.Map;
  */
 public class XdStorageClonerFieldPacker {
 
+    /** Instantiation-only utility class — no instances. */
+    public XdStorageClonerFieldPacker() {
+    }
+
+    /**
+     * Copies every non-id field from the source object into the target (an engine
+     * reference wrapper): primitives/enums/simple values as-is, {@code Date} values by
+     * time, arrays/collections/maps deep-copied and recursed, and entity-typed values
+     * replaced by the transaction's reference wrappers.
+     *
+     * @param target      the reference object receiving the field values
+     * @param src         the source object providing the field values
+     * @param clInfo      metadata of the source object's class (field map)
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction the target reference belongs to
+     * @param cloner      the orchestrator used to wrap entity-typed values
+     * @throws Exception if reflective field access fails
+     */
     public static void packFields(final Object target, final Object src, final XdStorageClassInfo clInfo,
                                   final IXdStorage storage, final IXdStorageTransaction transaction,
                                   final XdStorageSmartCloner cloner) throws Exception {

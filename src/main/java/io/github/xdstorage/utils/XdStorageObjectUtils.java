@@ -14,14 +14,37 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
 
+/**
+ * The engine's central object helper facade: deep MVCC cloning, wrapper (proxy) creation and
+ * recognition, entity-class resolution and the shared "simple type" predicate. Stateless
+ * delegation over {@code XdStorageMvccGraphCloner}, {@code XdStorageProxyCompilationEngine} and
+ * friends, so it is safe to call from any thread (per-object cloning is expected to happen
+ * under the engine's own locking). Engine-internal — not part of the public API.
+ */
 public final class XdStorageObjectUtils {
 
     private XdStorageObjectUtils() {}
 
+    /**
+     * Deep-clones the object for the MVCC snapshot (see {@link XdStorageMvccGraphCloner});
+     * answers {@code null} when {@code object} is {@code null} or the clone fails.
+     *
+     * @param <TObject> the static type of the object being cloned
+     * @param object the source object, may be {@code null}
+     * @return the deep clone, or {@code null} when cloning failed
+     */
     public static <TObject> TObject cloneObject(final TObject object) {
         return XdStorageMvccGraphCloner.cloneObject(object);
     }
 
+    /**
+     * Copies the state of {@code reference} into {@code object}: identifiable objects delegate
+     * to the converter, everything else to the same-type graph fill.
+     *
+     * @param reference the source instance whose state is copied
+     * @param object the target instance receiving the state
+     * @throws NullPointerException when either argument is {@code null}
+     */
     public static void fillObject(final Object reference, final Object object) {
         if (object == null) throw new NullPointerException("Object cannot be null");
         if (reference == null) throw new NullPointerException("Object reference cannot be null");
@@ -33,6 +56,14 @@ public final class XdStorageObjectUtils {
         }
     }
 
+    /**
+     * Probes whether the object can be wrapped in the generated unmodifiable wrapper (the
+     * generated checker says yes); any probe failure answers {@code true}, i.e. "treat as
+     * wrappable".
+     *
+     * @param object the object to probe, must not be {@code null}
+     * @return {@code true} when the entity class accepts an unmodifiable wrapper
+     */
     public static boolean isWrappableObject(final Object object) {
         try {
             final Class<?> w = XdStorageProxyCompilationEngine.getClassUnmodifiableWrapper(getEntityClass(object.getClass()));
@@ -40,6 +71,13 @@ public final class XdStorageObjectUtils {
         } catch (Exception e) { return true; }
     }
 
+    /**
+     * Deprecated id-observation wrapper; superseded by the simple/unmodifiable wrapper paths.
+     *
+     * @param object the entity instance to wrap, may be {@code null}
+     * @return the observable wrapper, the object itself when already wrapped, or {@code null}
+     *         when the object is {@code null} or the wrapper class cannot be instantiated
+     */
     @Deprecated
     public static IXdStorageIdObservableWrapper wrapAsObservableObject(final Object object) {
         if (object == null) return null;
@@ -50,6 +88,14 @@ public final class XdStorageObjectUtils {
         } catch (Exception e) { return null; }
     }
 
+    /**
+     * Whether the object represents a lazy reference rather than a materialized entity:
+     * asked of simple wrappers and (R-53) of the btree parser stubs marked
+     * {@code IXdStorageReferenceMarked}; everything else answers {@code false}.
+     *
+     * @param object the object to test
+     * @return {@code true} when the object is a not-yet-loaded reference
+     */
     public static boolean isReference(final Object object) {
         if (object instanceof IXdStorageSimpleWrapper) return ((IXdStorageSimpleWrapper) object).isReference__();
         // R-53: парсерные стабы инфраструктуры B+Дерева (readReference -> newInstance) — не
@@ -58,6 +104,18 @@ public final class XdStorageObjectUtils {
         return false;
     }
 
+    /**
+     * Wraps the object into the generated simple wrapper (deferred single-object access); an
+     * object the generated checker rejects stays unwrapped.
+     *
+     * @param <TObject> the static type of the wrapped object
+     * @param object the entity instance to wrap, may be {@code null}
+     * @param storage the owning storage handed to the wrapper
+     * @param transaction the transaction context handed to the wrapper
+     * @return the wrapper, the object itself when already a simple wrapper, or {@code null}
+     *         when the object is {@code null} or not simply wrappable
+     * @throws Exception when the wrapper class cannot be generated, looked up or instantiated
+     */
     public static <TObject> IXdStorageSimpleWrapper wrapAsSimpleObject(final TObject object, final IXdStorage storage, final IXdStorageTransaction transaction) throws Exception {
         if (object == null) return null;
         if (object instanceof IXdStorageSimpleWrapper) return (IXdStorageSimpleWrapper) object;
@@ -67,18 +125,57 @@ public final class XdStorageObjectUtils {
         return (IXdStorageSimpleWrapper) w.getConstructor(Object.class, object.getClass(), IXdStorage.class).newInstance(null, object, storage);
     }
 
+    /**
+     * Tests for the generated simple wrapper.
+     *
+     * @param object the object to test
+     * @return {@code true} when the object is a generated simple wrapper
+     */
     public static boolean isSimpleWrappedObject(final Object object) {
         return object instanceof IXdStorageSimpleWrapper;
     }
 
+    /**
+     * Whether the object can stand in for a stored entity by identity alone: an
+     * {@code XdStorageIdentifiableObject} or a simple wrapper.
+     *
+     * @param obj the object to test
+     * @return {@code true} when the object carries an id and can be persisted by reference
+     */
     public static boolean isSimpleReference(final Object obj) {
         return obj instanceof io.github.xdstorage.object.XdStorageIdentifiableObject || obj instanceof io.github.xdstorage.code.IXdStorageSimpleWrapper;
     }
 
+    /**
+     * Convenience overload delegating to
+     * {@link #wrapAsUnmodifiableObject(Object, Object, IXdStorage, IXdStorageTransaction)}
+     * without a parent back-reference.
+     *
+     * @param <TObject> the static type of the wrapped object
+     * @param object the object (or array/collection/map of objects) to wrap, may be {@code null}
+     * @param storage the owning storage handed to the wrappers
+     * @param transaction the transaction context handed to the wrappers
+     * @return the wrapped object graph, or {@code null} when {@code object} is {@code null}
+     *         or the wrapping is not possible
+     */
     public static <TObject> TObject wrapAsUnmodifiableObject(final TObject object, final IXdStorage storage, final IXdStorageTransaction transaction) {
         return wrapAsUnmodifiableObject(null, object, storage, transaction);
     }
 
+    /**
+     * Recursively wraps the object graph into the generated unmodifiable (lazy-loading)
+     * wrappers: simple values, enums and {@code Date}s pass through; arrays, collections and
+     * maps are rebuilt element-wise; entities are unwrapped from their existing wrappers and
+     * re-wrapped with the given parent, storage and transaction. Classes the generated checker
+     * rejects (and any reflective failure) yield {@code null} for the whole call.
+     *
+     * @param <TObject> the static type of the wrapped object
+     * @param parent the wrapped parent instance for back-references, may be {@code null}
+     * @param object the object (or array/collection/map of objects) to wrap, may be {@code null}
+     * @param storage the owning storage handed to the wrappers
+     * @param transaction the transaction context handed to the wrappers
+     * @return the wrapped object graph, or {@code null} when wrapping is not possible
+     */
     @SuppressWarnings("unchecked")
     public static <TObject> TObject wrapAsUnmodifiableObject(final Object parent, TObject object, final IXdStorage storage, final IXdStorageTransaction transaction) {
         if (object == null) return null;
@@ -145,38 +242,99 @@ public final class XdStorageObjectUtils {
         return clone;
     }
 
+    /**
+     * The engine's "simple type" predicate: primitives, {@code Number}, {@code Boolean},
+     * {@code Character} and {@code String}. The second argument is accepted for call-site
+     * symmetry with the other predicates and is not consulted.
+     *
+     * @param cl the class to test
+     * @param object an optional instance of the class (ignored)
+     * @return {@code true} when the class is stored inline without a nested record
+     */
     public static boolean isSimpleType(final Class<?> cl, final Object object) {
         return cl.isPrimitive() || Number.class.isAssignableFrom(cl) || cl == Boolean.class || cl == Character.class || cl == String.class;
     }
 
+    /**
+     * Resolves a generated wrapper class to its entity class; plain entity classes pass through.
+     *
+     * @param cl the class to resolve
+     * @return the entity class behind a wrapper, or {@code cl} itself when it is not a wrapper
+     */
     public static Class<?> getEntityClass(final Class<?> cl) {
         return (IXdStorageIdObservableWrapper.class.isAssignableFrom(cl) || IXdStorageSimpleWrapper.class.isAssignableFrom(cl)) ? cl.getSuperclass() : cl;
     }
 
+    /** Delegates to {@link XdStorageClassMetadataRegistry#getClassInfo(Class)} (builds metadata on first use).
+     *
+     * @param cl the entity class (a generated wrapper class is resolved to its entity)
+     * @return the class's shared metadata record
+     */
     public static XdStorageClassInfo getClassInfo(Class<?> cl) {
         return XdStorageClassMetadataRegistry.getClassInfo(cl);
     }
 
+    /**
+     * Reverse look-up of the unmodifiable wrapper: the entity class a generated wrapper was
+     * compiled for, found by scanning the engine's wrapper cache.
+     *
+     * @param clWrapper the wrapper class to resolve
+     * @return the wrapped entity class, or {@code null} when the class is not a known wrapper
+     */
     public static Class<?> getMergedClass(final Class<?> clWrapper) {
         return XdStorageProxyCompilationEngine.getWrappedClass(clWrapper);
     }
 
+    /**
+     * Same contract as {@link #getMergedClass(Class)}: the entity class behind a generated
+     * unmodifiable wrapper.
+     *
+     * @param clWrapper the wrapper class to resolve
+     * @return the wrapped entity class, or {@code null} when the class is not a known wrapper
+     */
     public static Class<?> getWrappedClass(final Class<?> clWrapper) {
         return XdStorageProxyCompilationEngine.getWrappedClass(clWrapper);
     }
 
+    /**
+     * The reflection field holding the wrapped entity inside a generated simple wrapper.
+     *
+     * @param clWrapper the wrapper class
+     * @return the accessible {@code object} field, or {@code null} when the class has none
+     */
     public static Field getSimpleWrapperObjectField(final Class<?> clWrapper) {
         return XdStorageWrapperFieldLocator.getSimpleWrapperObjectField(clWrapper);
     }
 
+    /**
+     * The reflection field holding the wrapped entity inside a generated unmodifiable wrapper.
+     *
+     * @param clWrapper the wrapper class
+     * @return the accessible {@code object} field, or {@code null} when the class has none
+     */
     public static Field getUnmodifiableWrapperObjectField(final Class<?> clWrapper) {
         return XdStorageWrapperFieldLocator.getUnmodifiableWrapperObjectField(clWrapper);
     }
 
+    /**
+     * The reflection field holding the wrapped entity inside a generated observable wrapper.
+     *
+     * @param clWrapper the wrapper class
+     * @return the accessible {@code object} field, or {@code null} when the class has none
+     */
     public static Field getObservableWrapperObjectField(final Class<?> clWrapper) {
         return XdStorageWrapperFieldLocator.getObservableWrapperObjectField(clWrapper);
     }
 
+    /**
+     * Peels every wrapper layer (simple, unmodifiable, observable) off the object, recursively,
+     * until the plain entity instance is reached; non-wrapper objects pass through unchanged.
+     *
+     * @param <T> the static type of the unwrapped object
+     * @param object the possibly wrapped object
+     * @return the innermost entity instance
+     * @throws RuntimeException when reflective field access on a wrapper fails
+     */
     @SuppressWarnings("unchecked")
     public static <T> T getWrappedObjectOrSameObject(final Object object) {
         final Class<?> cl = object.getClass();

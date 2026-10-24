@@ -18,35 +18,74 @@ import java.util.Map;
  */
 public abstract class XdStorageAbstractClassCodeGenerator {
 
+    /** Shared SLF4J logger for this generator and all its subclasses. */
     protected static final Logger log = LoggerFactory.getLogger(XdStorageAbstractClassCodeGenerator.class);
+
+    /** Whether strong getters whose backing field carries {@code XdStorageLoadByGetMethod} are generated as lazy-load accessors. */
     protected final boolean generateLoadByGet;
 
     /**
      * Контекст собираемых методов, изолированный в рамках одного вызова.
      */
     protected static class GenerationContext {
+
+        /** Creates an empty context for a single generation run. */
+        protected GenerationContext() {
+        }
+
+        /** The getter of the {@code XdStorageParentObject}-annotated field, or {@code null} when the class has no parent getter. */
         public Method parentGetter;
+
+        /** Getters returning simple-typed fields (emitted as plain delegating accessors). */
         public final List<Method> fieldsGetters = new ArrayList<>();
+
+        /** Getters returning non-simple (reference) fields (emitted with wrapper materialization). */
         public final List<Method> strongGetters = new ArrayList<>();
+
+        /** All {@code set*} methods of the entity class. */
         public final List<Method> setters = new ArrayList<>();
+
+        /** Strong getters whose backing field carries {@code XdStorageLoadByGetMethod} (emitted as lazy-load accessors). */
         public final List<Method> strongLoadByGetGetters = new ArrayList<>();
+
+        /** Public methods that are neither accessors nor {@code equals}/{@code hashCode}/{@code toString} (emitted as closed/delegating methods). */
         public final List<Method> toCloseMethods = new ArrayList<>();
     }
 
+    /** Creates a generator that does not emit lazy-load accessors. */
     protected XdStorageAbstractClassCodeGenerator() {
         this(false);
     }
 
+    /**
+     * Creates a generator with an explicit lazy-load (load-by-get) switch.
+     *
+     * @param generateLoadByGet whether {@code XdStorageLoadByGetMethod}-annotated strong
+     *        getters are generated as lazy-load accessors
+     */
     protected XdStorageAbstractClassCodeGenerator(final boolean generateLoadByGet) {
         this.generateLoadByGet = generateLoadByGet;
     }
 
+    /**
+     * Generates the wrapper subclass source for the given entity class and adds it to
+     * the accumulator. Implementations must stay stateless: all per-call state lives in
+     * a local {@code GenerationContext}, so concurrent generations cannot clobber each other.
+     *
+     * @param classesPackage target package of the generated class
+     * @param cl             the entity class to generate a wrapper for
+     * @param code           accumulator map keyed by fully-qualified generated class name
+     * @return the same accumulator map with the generated source added
+     */
     public abstract Map<String, String> generate(final String classesPackage, final Class<?> cl, final Map<String, String> code);
 
     /**
      * Возвращает имя класса в форме, пригодной для подстановки в генерируемый исходный код Java.
      * Бинарное имя вложенного класса (Outer$Inner) не разрешается компилятором в исходнике,
      * поэтому member-классы обязаны эмититься через точку (Outer.Inner).
+     *
+     * @param cl the type to render (arrays render as {@code Component[]})
+     * @return the source-form type name
      */
     protected static String getSourceTypeName(final Class<?> cl) {
         if (cl.isArray()) {
@@ -58,6 +97,23 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return getSourceTypeName(cl.getEnclosingClass()) + "." + cl.getSimpleName();
     }
 
+    /**
+     * Emits the source header of one generated method: the (always public) modifier,
+     * generic type parameters, return type, parameter list and {@code throws} clause.
+     * Generic types are emitted through their reflection string form; array and member
+     * class names are rendered in source form.
+     *
+     * @param modifiers         visibility modifiers of the source method (the generated
+     *                          method is always emitted public)
+     * @param name              method name to emit
+     * @param typeParameters    generic type parameters of the source method
+     * @param returnType        erased return type of the source method
+     * @param genReturnType     generic return type used verbatim when generic
+     * @param parameterTypes    erased parameter types
+     * @param genParameterTypes generic parameter types used verbatim when generic
+     * @param exceptionTypes    declared checked exceptions to re-emit
+     * @return the method header source, without body
+     */
     protected String buildMethodDefinition(final int modifiers, final String name, final TypeVariable<Method>[] typeParameters, final Class<?> returnType,
                                            final Type genReturnType, final Class<?>[] parameterTypes, final Type[] genParameterTypes,
                                            final Class<?>[] exceptionTypes) {
@@ -113,6 +169,14 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return builder.toString();
     }
 
+    /**
+     * Emits the argument list of a generated forwarding call: the method name followed
+     * by the generated parameter names ({@code var0}, {@code var1}, ...).
+     *
+     * @param name           method name to call
+     * @param parameterTypes parameter types; only the array length matters here
+     * @return the {@code name(var0, var1, ...)} call source
+     */
     protected String buildMethodCalling(final String name, final Class<?>[] parameterTypes) {
         final StringBuilder builder = new StringBuilder();
         builder.append(name).append("(");
@@ -126,6 +190,15 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return builder.toString();
     }
 
+    /**
+     * Classifies the public overridable methods of the entity class into the buckets of
+     * a fresh {@code GenerationContext}: simple/strong/lazy-load getters, setters,
+     * the parent getter and closed methods. Individual classification failures are
+     * logged and skipped, not fatal.
+     *
+     * @param cl the entity class to inspect
+     * @return the filled context, local to this generation call
+     */
     protected GenerationContext collectMethodsAndClasses(final Class<?> cl) {
         final GenerationContext ctx = new GenerationContext();
         final Method[] methods = getPublicMethods(cl);
@@ -168,6 +241,13 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return ctx;
     }
 
+    /**
+     * Finds the id field of the entity class, walking up the superclass chain.
+     *
+     * @param cl the entity class to inspect
+     * @return the name of the field annotated with {@code XdStorageObjectId},
+     *         or {@code null} when the class hierarchy declares no id field
+     */
     protected String getIdFieldName(final Class<?> cl) {
         for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {
             final Field[] tmp = clazz.getDeclaredFields();
@@ -180,6 +260,15 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return null;
     }
 
+    /**
+     * Whether the given {@code getXxx} method is the parent-object getter: its backing
+     * field (derived from the method name) must be annotated with {@code XdStorageParentObject}.
+     *
+     * @param cl     the entity class declaring the field
+     * @param method the {@code getXxx} method to test
+     * @return {@code true} when the backing field is the parent-object field
+     * @throws NoSuchFieldException when no backing field matches the method name
+     */
     protected boolean isParentGetter(final Class<?> cl, final Method method) throws NoSuchFieldException {
         final String name = method.getName();
         final String fieldName = name.substring(3, 4).toLowerCase() + name.substring(4);
@@ -187,6 +276,15 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return field.isAnnotationPresent(XdStorageParentObject.class);
     }
 
+    /**
+     * Whether the given {@code getXxx} method is a lazy-load getter: its backing field
+     * (derived from the method name) must be annotated with {@code XdStorageLoadByGetMethod}.
+     * Any reflection failure yields {@code false}.
+     *
+     * @param cl     the entity class declaring the field
+     * @param method the {@code getXxx} method to test
+     * @return {@code true} when the backing field requests load-by-get semantics
+     */
     protected boolean isLoadByGet(final Class<?> cl, final Method method) {
         try {
             final String name = method.getName();
@@ -198,6 +296,16 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         }
     }
 
+    /**
+     * Collects the public methods of the entity class that a generated wrapper can
+     * override: walking from the class up the hierarchy (excluding {@code Object}),
+     * static, final and synthetic (bridge) methods are skipped, and redeclarations in
+     * superclasses collapse onto the most derived one. The walk order makes the
+     * returned array most-derived-first.
+     *
+     * @param cl the entity class to inspect
+     * @return the unique overridable public methods, most derived declaration first
+     */
     protected static Method[] getPublicMethods(final Class<?> cl) {
         final List<Method> result = new ArrayList<>();
         final java.util.Set<String> seen = new java.util.HashSet<>();
@@ -219,5 +327,13 @@ public abstract class XdStorageAbstractClassCodeGenerator {
         return result.toArray(new Method[result.size()]);
     }
 
+    /**
+     * Builds the simple class name of the generated wrapper for the entity class.
+     *
+     * @param classesPackage target package of the generated class (unused by simple
+     *                       name-based schemes)
+     * @param cl             the entity class being wrapped
+     * @return the generated class simple name
+     */
     protected abstract String buildClassName(final String classesPackage, final Class<?> cl);
 }

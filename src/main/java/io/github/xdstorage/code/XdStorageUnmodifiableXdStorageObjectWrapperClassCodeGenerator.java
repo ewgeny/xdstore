@@ -14,6 +14,23 @@ import java.util.Map;
  */
 public class XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator extends XdStorageAbstractClassCodeGenerator {
 
+    /** Creates a stateless generator with lazy-load generation switched off. */
+    public XdStorageUnmodifiableXdStorageObjectWrapperClassCodeGenerator() {
+    }
+
+    /**
+     * Generates the read-only wrapper subclass of the engine's infrastructure base
+     * class {@code XdStorageIdentifiableObject}: plain getters delegate to the wrapped
+     * object, strong getters delegate directly (this wrapper carries no storage or
+     * transaction, so no nested wrapper materialization), and setters plus closed
+     * methods throw {@code XdStorageRuntimeException}.
+     *
+     * @param classesPackage target package of the generated class
+     * @param cl             the infrastructure class to generate the wrapper for
+     *                       (always {@code XdStorageIdentifiableObject} in practice)
+     * @param code           accumulator map keyed by fully-qualified generated class name
+     * @return the same accumulator map with the generated source added
+     */
     @Override
     public Map<String, String> generate(final String classesPackage, final Class<?> cl, final Map<String, String> code) {
         // 1. Собираем методы во внутренний изолированный GenerationContext нити

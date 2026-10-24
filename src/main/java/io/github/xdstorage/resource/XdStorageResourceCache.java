@@ -80,6 +80,16 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     /** R-42: ноды дерева — внутренняя структура с живым инстансом-истиной (полная инфра-релаксация). */
     private final boolean structuralNodeCache;
 
+    /**
+     * Builds the cache facade for one resource: binds the entity class, its id field and the
+     * engine services, picks the infrastructure/structural-node mode from the class name
+     * (B+-tree internals are cached as live canonical graphs, not clones) and adopts the
+     * storage's configured read isolation level.
+     *
+     * @param services engine services shared with collaborators
+     * @param clazz    the entity class the cache stores, or {@code null} when unknown
+     * @param field    metadata of the entity id field
+     */
     public XdStorageResourceCache(final XdStorageServicesLocator services, final Class<?> clazz, final XdStorageObjectIdField field) {
         this.services = services;
         this.field = field;
@@ -157,14 +167,33 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         return isolationLevel;
     }
 
+    /**
+     * Overrides the read isolation level of this cache ({@code null} falls back to
+     * {@link XdStorageIsolationLevel#SNAPSHOT}). Meant for tests and explicit reconfiguration;
+     * the open-time level comes from the storage config.
+     *
+     * @param isolationLevel the isolation level to apply, or {@code null} for the default
+     */
     public void setIsolationLevel(final XdStorageIsolationLevel isolationLevel) {
         this.isolationLevel = isolationLevel == null ? XdStorageIsolationLevel.SNAPSHOT : isolationLevel;
     }
 
+    /**
+     * The number of records currently held by the cache (the prepared state of the resource).
+     *
+     * @return the cached record count
+     */
     public long getObjectsCount() {
         return cache.size();
     }
 
+    /**
+     * Whether the cache holds a record with the given id (irrespective of snapshot
+     * visibility).
+     *
+     * @param id the object id
+     * @return {@code true} when a record with the id is cached
+     */
     public boolean hasObject(final Object id) {
         return cache.containsKey(id);
     }
@@ -173,6 +202,13 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     // НАПОЛНЕНИЕ КЭША (загрузка ресурса с диска)
     // =========================================================================
 
+    /**
+     * Loads parsed records into the cache as committed read records — the prepare-from-disk
+     * path. Records already present are kept (first writer wins); for B+-tree infrastructure
+     * the parsed copy yields to a live canonical instance when one is registered.
+     *
+     * @param objects the parsed objects to cache
+     */
     public void fillCache(final Collection<Object> objects) {
         for (final Object object : objects) {
             // ФАЗА 3B: parse-копия уступает место живому каноническому инстансу (если он есть)
@@ -181,13 +217,19 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
-    /** W-1: replay of a committed journal UPSERT — base-парсинг уступает состоянию журнала (last writer wins), поэтому put, не putIfAbsent. */
+    /** W-1: replay of a committed journal UPSERT — base-парсинг уступает состоянию журнала (last writer wins), поэтому put, не putIfAbsent.
+     *
+     * @param object the committed object state from the journal
+     */
     public void applyCommittedJournalUpsert(final Object object) {
         final Object objectCanonical = adoptCanonicalInstance(object);
         cache.put(field.get(objectCanonical), createReadRecord(objectCanonical));
     }
 
-    /** W-1: replay of a committed journal DELETE. */
+    /** W-1: replay of a committed journal DELETE.
+     *
+     * @param id the id of the record the journal deletes
+     */
     public void applyCommittedJournalDelete(final Object id) {
         cache.remove(id);
     }
@@ -200,6 +242,8 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
      * already describes (an abandoned tx never reached phase-1, a committing tx's redo is
      * in the journal and replay is idempotent). Records without a committed body
      * (uncommitted inserts) are skipped — their journal redo re-creates them at replay.
+     *
+     * @return the committed object bodies, ready for a full-file write-out
      */
     public java.util.Collection<Object> readCommittedForCheckpoint() {
         final java.util.List<Object> result = new java.util.ArrayList<>();
@@ -225,6 +269,13 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     /** W-2: бюджет включают ТОЛЬКО ресурсы пользовательских данных (id-индексы — служебные записи, не бюджетируются). */
     private volatile boolean enforceMaterializationBudget;
 
+    /**
+     * Turns the per-transaction materialization budget on or off for this cache — enabled
+     * only for user-data resources (id-index caches hold service records that are not
+     * budgeted).
+     *
+     * @param value {@code true} to enforce the budget on the read paths
+     */
     public void setEnforceMaterializationBudget(final boolean value) {
         this.enforceMaterializationBudget = value;
     }
@@ -244,6 +295,13 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
+    /**
+     * Loads parsed records into the cache as committed read records without ever replacing
+     * an existing record (unlike {@link #fillCache} this is a strict no-overwrite fill).
+     *
+     * @param <T>      the entity class of the objects
+     * @param objects  the parsed objects to cache
+     */
     public <T> void fillCacheOnlyIfNotExists(final Collection<T> objects) {
         for (final Object object : objects) {
             final Object objectCanonical = adoptCanonicalInstance(object);
@@ -251,6 +309,18 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
+    /**
+     * Loads parsed records into the cache AND registers an isolated clone of every object in
+     * the transaction's read contour (materialization), appending the instance the
+     * transaction will actually see to {@code result}. Runs inside the transaction's
+     * critical section.
+     *
+     * @param <T>         the entity class of the objects
+     * @param objects     the parsed objects to load and materialize
+     * @param result      the collection the materialized (clone/wrapped) objects are added to
+     * @param transaction the transaction to materialize for
+     * @throws XdStorageException when the critical section cannot be entered
+     */
     public <T> void fillAndCloneCacheOnlyIfNotExists(final List<T> objects, final Collection<T> result, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -329,6 +399,17 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     // НЕИДЕНТИФИЦИРОВАННЫЕ ОБЪЕКТЫ (observable-обертки без DB-id)
     // =========================================================================
 
+    /**
+     * Looks up the transaction-local unidentified (observable wrapper) form of the given
+     * object, registered by an earlier read of the same not-yet-identified object. Runs
+     * inside the transaction's critical section.
+     *
+     * @param <T>         the expected type of the registered object
+     * @param object      the object whose transaction-local twin is looked up
+     * @param transaction the owning transaction
+     * @return the registered unidentified object, or {@code null} when none was registered
+     * @throws XdStorageException when the critical section cannot be entered
+     */
     public <T> T findUnidentified(final Object object, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -355,6 +436,19 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     // СКАНИРУЮЩИЕ ЧТЕНИЯ (предикат / полный / unsafe)
     // =========================================================================
 
+    /**
+     * Snapshot scan filtered by the predicate: resolves every snapshot-visible record,
+     * materializes it (per the cache's isolation level) and keeps those passing the filter.
+     * Fails loudly on the first record whose materialization or filtering throws. Runs
+     * inside the transaction's critical section and enforces the materialization budget.
+     *
+     * @param <T>         the entity class of the stored objects
+     * @param transaction the transaction whose snapshot is scanned
+     * @param predicate   the filter applied per materialized record
+     * @return the snapshot-visible objects passing the filter
+     * @throws XdStorageException on a storage-level failure, a record-level failure, or a
+     *                            materialization budget violation
+     */
     @SuppressWarnings("unchecked")
     public <T> Collection<T> read(final XdStorageTransaction transaction, final IXdStoragePredicate<T> predicate) throws XdStorageException {
         transaction.startCriticalSection();
@@ -471,6 +565,18 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         return result;
     }
 
+    /**
+     * Streaming scan: feeds every object visible in the transaction's snapshot to the
+     * watcher without materializing the whole result collection. A callback that throws
+     * fails the scan. Runs inside the transaction's critical section and enforces the
+     * materialization budget.
+     *
+     * @param <T>         the entity class the watcher observes
+     * @param transaction the transaction whose snapshot is scanned
+     * @param watcher     the per-object callback
+     * @throws XdStorageException on a storage-level failure, a callback failure, or a
+     *                            materialization budget violation
+     */
     @SuppressWarnings("unchecked")
     public <T> void watch(final XdStorageTransaction transaction, final IXdStorageWatcher<T> watcher) throws XdStorageException {
         transaction.startCriticalSection();
@@ -570,6 +676,18 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
+    /**
+     * Full snapshot scan: returns every object of the resource visible in the transaction's
+     * snapshot, materializing (cloning and wrapping) records not yet materialized by this
+     * transaction. Runs inside the transaction's critical section and enforces the
+     * materialization budget.
+     *
+     * @param <T>         the entity class of the stored objects
+     * @param transaction the transaction whose snapshot is scanned
+     * @return the snapshot-visible objects of the resource
+     * @throws XdStorageException on a storage-level failure or a materialization budget
+     *                            violation
+     */
     @SuppressWarnings("unchecked")
     public <T> Collection<T> read(final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
@@ -636,6 +754,16 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         return result;
     }
 
+    /**
+     * The write-out view: resolves records for the commit path ({@code View.WRITE_OUT}) and
+     * prefers the transaction's own staged versions over the resolved state — no wrapping,
+     * no budget. Callers persist this collection in commit phase 1.
+     *
+     * @param <T>         the entity class of the stored objects
+     * @param transaction the committing transaction
+     * @return the objects to persist for the transaction
+     * @throws XdStorageException when the critical section cannot be entered
+     */
     public <T> Collection<T> readUnsafe(final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -690,6 +818,18 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     // ЧТЕНИЕ ПО ID И ПО ССЫЛКЕ
     // =========================================================================
 
+    /**
+     * Reads the record with the given id as visible in the transaction's snapshot,
+     * materializing it on first access (per the cache's isolation level). Runs inside the
+     * transaction's critical section and enforces the materialization budget.
+     *
+     * @param id          the object id
+     * @param transaction the transaction whose snapshot is read
+     * @return the materialized object, or {@code null} when the id is absent or invisible
+     *         in the snapshot
+     * @throws XdStorageException on a storage-level failure or a materialization budget
+     *                            violation
+     */
     public Object read(final Object id, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -790,6 +930,17 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         return null;
     }
 
+    /**
+     * Hydrates the passed reference object in place from the snapshot-visible state of the
+     * record with the same id; fails with a storage exception when the object cannot be
+     * loaded, and with a reference-invisible exception when the record exists but is not
+     * visible in the reader's snapshot (normal MVCC semantics, not corruption). Runs inside
+     * the transaction's critical section and enforces the materialization budget.
+     *
+     * @param reference   the reference object to fill (must carry an id)
+     * @param transaction the transaction whose snapshot the load resolves in
+     * @throws XdStorageException when the referenced object cannot be loaded
+     */
     public void readByReference(final Object reference, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -1001,6 +1152,16 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     // МУТАЦИИ (делегация контуру XdStorageCacheMutator)
     // =========================================================================
 
+    /**
+     * Stages the insert of a new object into the transaction's write set (via the mutation
+     * contour); a re-insert of an object already staged as inserted/updated by the same
+     * transaction is silently ignored (duplicate-insert guard). Runs inside the
+     * transaction's critical section.
+     *
+     * @param newObject   the object to insert
+     * @param transaction the transaction to stage the insert in
+     * @throws XdStorageException when the object cannot be materialized for the cache
+     */
     public void insert(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -1026,10 +1187,26 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
+    /**
+     * Stages the update of an object into the transaction's write set (delegated to the
+     * mutation contour).
+     *
+     * @param newObject   the object with its new state
+     * @param transaction the transaction to stage the update in
+     * @throws XdStorageException when the object cannot be materialized for the cache
+     */
     public void update(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         mutator.update(newObject, transaction);
     }
 
+    /**
+     * Stages the deletion of the record with the given id into the transaction's write set
+     * (delegated to the mutation contour).
+     *
+     * @param objectId    the id of the record to delete
+     * @param transaction the transaction to stage the delete in
+     * @throws XdStorageException when the deletion cannot be staged
+     */
     public void delete(final Object objectId, final XdStorageTransaction transaction) throws XdStorageException {
         mutator.delete(objectId, transaction);
     }
@@ -1038,6 +1215,13 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     // ЗАВЕРШЕНИЕ ТРАНЗАКЦИИ (делегация XdStorageCacheCommitProtocol)
     // =========================================================================
 
+    /**
+     * Whether the transaction has staged changes (insert/update/delete) in this cache.
+     *
+     * @param transaction the transaction to inspect
+     * @return {@code true} when the transaction's write set is non-empty
+     * @throws XdStorageException when the critical section cannot be entered
+     */
     public boolean hasChanges(final XdStorageTransaction transaction) throws XdStorageException {
         transaction.startCriticalSection();
         try {
@@ -1047,26 +1231,71 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
         }
     }
 
+    /**
+     * Discards the transaction's contours in this cache (read set, write set, rollback
+     * journal) — the release step after the transaction has ended.
+     *
+     * @param transaction the transaction whose contours are cleared
+     */
     public void clear(final XdStorageTransaction transaction) {
         workspace.clear(transaction.getTransactionId());
     }
 
+    /**
+     * Commit phase 0: fills the collector with the transaction's staged changes for this
+     * cache (delegated to the commit protocol) — the input for the persisted phases.
+     *
+     * @param transaction the committing transaction
+     * @param collector   the collector receiving the staged changes
+     */
     public void prepareCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
         commitProtocol.prepareCommit(transaction, collector);
     }
 
+    /**
+     * Second two-phase step at the cache level: contributes the staged changes to the
+     * collector again and marks every changed record perform-committed — the second
+     * two-phase flag that must be set before the final {@link #commit} (delegated to the
+     * commit protocol).
+     *
+     * @param transaction the committing transaction
+     * @param collector   the collector filled by {@link #prepareCommit}
+     */
     public void performCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
         commitProtocol.performCommit(transaction, collector);
     }
 
+    /**
+     * Commit phase 2 at the cache level: publishes the transaction's staged changes into the
+     * visible committed state (delegated to the commit protocol).
+     *
+     * @param transaction the committing transaction
+     * @throws XdStorageException when the changes cannot be published
+     */
     public void commit(final XdStorageTransaction transaction) throws XdStorageException {
         commitProtocol.commit(transaction);
     }
 
+    /**
+     * Discards the transaction's staged changes and unregisters its contours (pre-commit
+     * rollback, delegated to the commit protocol).
+     *
+     * @param transaction the transaction being rolled back
+     * @throws XdStorageException when the rollback cannot be completed
+     */
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
         commitProtocol.rollback(transaction);
     }
 
+    /**
+     * Rolls back an already-prepared (phase-1 persisted) commit from the cache state: undoes
+     * the staged effects of the given committed changes so a failed commit leaves no trace
+     * in the visible state (delegated to the commit protocol).
+     *
+     * @param transaction the failed transaction
+     * @param committed   the changes the failed first phase persisted
+     * @throws XdStorageException when the compensation cannot be completed
+     */
     public void rollbackFailedCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> committed) throws XdStorageException {
         commitProtocol.rollbackFailedCommit(transaction, committed);
     }

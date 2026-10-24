@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/** The engine's Long Hi-Lo id generator — the {@code long} twin of
+ * {@link XdStorageIntegerIdGenerator} (persisted batches, prefetch, per-class locking). */
 public class XdStorageLongIdGenerator implements IXdStorageIdGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageLongIdGenerator.class);
@@ -31,6 +33,9 @@ public class XdStorageLongIdGenerator implements IXdStorageIdGenerator {
     private final Map<Class<?>, AtomicLong> counters = new ConcurrentHashMap<>();
     private final Map<Class<?>, Long> lastIdentifierOfPart = new ConcurrentHashMap<>();
 
+    /** Builds the generator.
+     *
+     * @param provider the storage services locator (transaction/bookkeeping access) */
     public XdStorageLongIdGenerator(final XdStorageServicesLocator provider) {
         this.services = provider;
     }

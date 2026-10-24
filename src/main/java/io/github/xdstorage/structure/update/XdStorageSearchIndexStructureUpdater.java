@@ -19,6 +19,17 @@ import io.github.xdstorage.utils.XdStorageObjectUtils;
 
 import java.util.Date;
 
+/**
+ * The structure updater the structure manager schedules when a search index definition of a
+ * class changed: {@code execute} attaches a watcher to the class's stored resources (the id
+ * hash index resource for {@code StoreAsClassObjects}, the references resource and the
+ * per-object resources for {@code StoreAsSingleObject}) so every stored record is re-indexed
+ * through the search manager inside the migration transaction. The update name embeds a
+ * creation timestamp, so each run is journalled as its own script.
+ *
+ * <p>Created and driven solely by the structure manager. Engine-internal — not part of the
+ * public API.</p>
+ */
 public class XdStorageSearchIndexStructureUpdater extends XdStorageAbstractStructureUpdater<XdStorageSearchIndexRecord> {
 
     private final IXdStorageSearchManager searchManager;
@@ -27,6 +38,13 @@ public class XdStorageSearchIndexStructureUpdater extends XdStorageAbstractStruc
 
     private final XdStorageSearchIndex index;
 
+    /**
+     * Creates the re-indexing updater for one changed search index.
+     *
+     * @param searchManager the search manager the stored records are re-indexed through
+     * @param cl            the stored class whose index definition changed
+     * @param index         the changed search index definition
+     */
     public XdStorageSearchIndexStructureUpdater(final IXdStorageSearchManager searchManager, final Class<?> cl, final XdStorageSearchIndex index) {
         super(cl.getSimpleName() + "-" + index.getName() + "-" + new Date().getTime());
 
@@ -36,11 +54,29 @@ public class XdStorageSearchIndexStructureUpdater extends XdStorageAbstractStruc
         this.index = index;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @return the class whose search index is refreshed by this updater
+     */
     @Override
     public Class<?> getDataClass() {
         return cl;
     }
 
+    /**
+     * Refreshes the search index of the target class: registers a watcher on the class's
+     * stored resources so each stored record is re-indexed via the search manager within
+     * the given transaction. Never reports {@code FAILURE} — it either succeeds or throws.
+     *
+     * @param resourcesManager the engine resources manager to lock the stored resources of
+     *                         the class through
+     * @param transaction      the transaction the re-indexing runs in
+     * @return {@code SUCCESSFULLY} when the re-indexing watchers were registered
+     * @throws XdStorageConnectionException when the storage connection fails
+     * @throws XdStorageRuntimeException    (unchecked) when the index cannot be refreshed,
+     *                                      including any storage error wrapped from below
+     */
     @Override
     public XdStorageUpdateStructureResult execute(final XdStorageAbstractResourcesManager resourcesManager, final XdStorageTransaction transaction) throws XdStorageConnectionException {
         try {
@@ -86,6 +122,13 @@ public class XdStorageSearchIndexStructureUpdater extends XdStorageAbstractStruc
         return XdStorageUpdateStructureResult.SUCCESSFULLY;
     }
 
+    /**
+     * Unused by this updater: re-indexing happens through the watchers of {@code execute}
+     * instead of a record-by-record rewrite.
+     *
+     * @param oldStateOfObject the record as currently stored (ignored)
+     * @return always {@code null}
+     */
     @Override
     protected XdStorageSearchIndexRecord transform(final XdStorageIdentifiableObject oldStateOfObject) {
         return null;

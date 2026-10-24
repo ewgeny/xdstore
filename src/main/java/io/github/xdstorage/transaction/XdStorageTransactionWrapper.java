@@ -3,10 +3,28 @@ package io.github.xdstorage.transaction;
 import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 import io.github.xdstorage.resource.IXdStorageResourceObject;
 
+/**
+ * A read-mostly view over another transaction: identity, timeout, start time and resource
+ * registration checks delegate to the wrapped transaction, while commit, rollback and resource
+ * registration are refused with {@code XdStorageRuntimeException}. Used to hand helper code
+ * (e.g. structure updaters) the caller's transaction without letting it finish the transaction
+ * or drag new resources into it.
+ *
+ * <p>Thread-safety: the wrapper itself holds only the delegate reference; its answers are as
+ * thread-safe as the wrapped transaction.
+ *
+ * <p>Engine-internal — not part of the public API.
+ */
 public class XdStorageTransactionWrapper extends XdStorageTransaction {
 
     private final XdStorageTransaction tx;
 
+    /**
+     * Wraps the given transaction. The wrapper's own engine-side bookkeeping stays empty —
+     * every meaningful call is forwarded.
+     *
+     * @param tx the transaction to delegate to
+     */
     public XdStorageTransactionWrapper(final XdStorageTransaction tx) {
         super(null, null,null,0, null);
 

@@ -10,6 +10,13 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * The JVM-wide registry of per-entity metadata ({@link XdStorageClassInfo}) and the class
+ * resolver used by the serialization layer. Metadata is built lazily per class: lookups are
+ * lock-free against a {@link ConcurrentHashMap}, the first build of a class runs under a
+ * global {@link java.util.concurrent.locks.ReentrantLock} (double-checked). Engine-internal —
+ * not part of the public API.
+ */
 public final class XdStorageClassMetadataRegistry {
     private static final Map<Class<?>, XdStorageClassInfo> classesInfo = new ConcurrentHashMap<>();
     private static final ReentrantLock REGISTRY_LOCK = new ReentrantLock();
@@ -29,6 +36,11 @@ public final class XdStorageClassMetadataRegistry {
      * layer — TCCL first, then every class any storage of this JVM has registered (whatever
      * classloader loaded it), then the caller's loader. Throws ClassNotFoundException with
      * the original semantics so the readers' error paths stay intact.
+     *
+     * @param name the fully-qualified binary class name to resolve
+     * @return the resolved {@link Class} (identity-preferred: an already-registered class is
+     *         returned as the exact instance the engine uses)
+     * @throws ClassNotFoundException when no registered class matches and every loader path fails
      */
     public static Class<?> resolveOrThrow(final String name) throws ClassNotFoundException {
         // REGISTRY FIRST: the exact Class instance this storage already uses. Trying loaders
@@ -46,6 +58,12 @@ public final class XdStorageClassMetadataRegistry {
         return Class.forName(name);
     }
 
+    /**
+     * Best-effort resolver: the registry first, then TCCL, then the caller's loader.
+     *
+     * @param name the fully-qualified binary class name to resolve
+     * @return the resolved {@link Class}, or {@code null} when no registered or loadable class matches
+     */
     public static Class<?> findLoadedClassByName(final String name) {
         if (name == null) {
             return null;
@@ -66,6 +84,13 @@ public final class XdStorageClassMetadataRegistry {
         return null;
     }
 
+    /**
+     * Returns the cached metadata for the class, building it on first use: policy, id-index
+     * information, id field, scanned fields, search indexes and the autosave cascade fields.
+     *
+     * @param cl the entity class (a generated wrapper class is resolved to its entity)
+     * @return the metadata, shared JVM-wide for the class
+     */
     public static XdStorageClassInfo getClassInfo(Class<?> cl) {
         cl = XdStorageObjectUtils.getEntityClass(cl);
         XdStorageClassInfo info = classesInfo.get(cl);
@@ -100,6 +125,14 @@ public final class XdStorageClassMetadataRegistry {
         }
     }
 
+    /**
+     * Resolves the storage policy of a class: the {@code @XdStorageObjectPolicy} annotation on
+     * the class itself or the nearest superclass carrying one, defaulting to the embedded
+     * {@code StoreWithParentObject}; primitives are always embedded.
+     *
+     * @param cl the class to resolve (may be an {@code @XdStorageObjectId}-less type)
+     * @return the policy in effect, never {@code null}
+     */
     public static XdStoragePolicy getClassPolicy(final Class<?> cl) {
         if (cl.isPrimitive()) return XdStoragePolicy.StoreWithParentObject;
         XdStoragePolicy policy = null;
@@ -112,6 +145,14 @@ public final class XdStorageClassMetadataRegistry {
         return policy != null ? policy : XdStoragePolicy.StoreWithParentObject;
     }
 
+    /**
+     * Locates the {@code @XdStorageObjectId}-annotated field of the class (superclass hierarchy
+     * included, wrappers unwrapped) and binds it with its getter and setter. Wrapper classes are
+     * resolved to their entity class first; any reflective failure yields {@code null}.
+     *
+     * @param cl the class to inspect
+     * @return the id field accessor, or {@code null} when the class has no id field
+     */
     public static XdStorageObjectIdField getClassIdField(final Class<?> cl) {
         if (IXdStorageUnmodifiableWrapper.class.isAssignableFrom(cl)) {
             return getClassIdField(XdStorageObjectUtils.getWrappedClass(cl));
@@ -132,10 +173,26 @@ public final class XdStorageClassMetadataRegistry {
         return null;
     }
 
+    /**
+     * Scans the class's persistence fields fresh from reflection (superclass hierarchy
+     * included); no registry caching on this path.
+     *
+     * @param cl the class to scan
+     * @return the fields by field name, possibly empty
+     */
     public static Map<String, XdStorageObjectField> getClassFields(final Class<?> cl) {
         return XdStorageReflectionFieldScanner.scanFields(cl);
     }
 
+    /**
+     * Derives the shape information of one field from the declared types: array, collection or
+     * map flag, and — for parameterized declarations read through the getter's generic return
+     * type — the map key class and the element/value class.
+     *
+     * @param field the reflection field
+     * @param getter the field's getter, the source of the generic parameter types
+     * @return the immutable shape descriptor
+     */
     public static XdStorageObjectFieldInfo buildFieldInfo(final Field field, final Method getter) {
         Class<?> fieldClass = field.getType(), mapKeyClass = null, valueClass;
         boolean isArray = false, isCollection = false, isMap = false;

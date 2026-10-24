@@ -29,7 +29,24 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Per-storage service wiring hub: constructs and holds the collaborator instances of
+ * one open storage — worker executor, configuration, metrics, transaction/trigger/
+ * resource/search/structure managers, id generator, naming service, IO factory,
+ * reference provider, cloner and the canonical B+tree instance registry — and hands
+ * them to the engine through plain getters.
+ *
+ * <p>The locator is a mutable holder, not thread-safe by itself: collaborators are
+ * wired once by {@code initFileConfiguration} before the storage starts serving, after
+ * which the getters are read-only. Until initialization the accessors return
+ * {@code null} fields (metrics yields a throwaway instance).
+ * Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageServicesLocator {
+
+    /** Wiring happens through {@code initFileConfiguration}; an explicit constructor adds nothing. */
+    public XdStorageServicesLocator() {
+    }
 
     private IXdStorage storage;
 
@@ -59,10 +76,30 @@ public class XdStorageServicesLocator {
 
     private IXdStorageCloner cloner;
 
+    /**
+     * Wires a file-backed storage with the default engine configuration.
+     *
+     * @param storage       the owning storage facade
+     * @param folder        filesystem folder holding the storage resources
+     * @param fragmentSize  fragment size for the file-backed resources
+     * @param format        on-disk serialization format
+     */
     public void initFileConfiguration(final IXdStorage storage, final String folder, final int fragmentSize, FilesFormat format) {
         initFileConfiguration(storage, folder, fragmentSize, format, XdStorageConfig.defaults());
     }
 
+    /**
+     * Wires all collaborators of a file-backed storage: naming service, id generator,
+     * IO factory, trigger/transaction/resource/structure/search managers, reference
+     * provider and cloner, plus the worker executor and metrics. The configuration is
+     * stored first because collaborators read it at construction time.
+     *
+     * @param storage       the owning storage facade
+     * @param folder        filesystem folder holding the storage resources
+     * @param fragmentSize  fragment size for the file-backed resources
+     * @param format        on-disk serialization format
+     * @param config        engine configuration; {@code null} falls back to the defaults
+     */
     public void initFileConfiguration(final IXdStorage storage, final String folder, final int fragmentSize,
                                       final FilesFormat format, final XdStorageConfig config) {
         // конфиг обязателен ДО создания коллабораторов: ioFactory/кэши читают его при конструировании
@@ -94,54 +131,120 @@ public class XdStorageServicesLocator {
         };
     }
 
+    /**
+     * Returns the active engine configuration.
+     *
+     * @return the configuration installed at init (defaults until then)
+     */
     public XdStorageConfig getStorageConfig() {
         return storageConfig;
     }
 
+    /**
+     * Returns the metrics registry of this storage.
+     *
+     * @return the registry installed at init, or a fresh throwaway instance when the
+     *         locator is not initialized
+     */
     public XdStorageMetrics getMetrics() {
         return metrics != null ? metrics : new XdStorageMetrics();
     }
 
+    /**
+     * Returns the owning storage facade.
+     *
+     * @return the storage passed to {@code initFileConfiguration}, {@code null} before init
+     */
     public IXdStorage getStorage() {
         return storage;
     }
 
+    /**
+     * Returns the fixed worker thread pool created at init.
+     *
+     * @return the worker executor, {@code null} before init
+     */
     public ExecutorService getExecutor() {
         return executor;
     }
 
+    /**
+     * Returns the transaction manager of this storage.
+     *
+     * @return the manager wired at init, {@code null} before init
+     */
     public IXdStorageTransactionManager getTransactionsManager() {
         return transactionsManager;
     }
 
+    /**
+     * Returns the trigger manager of this storage.
+     *
+     * @return the manager wired at init, {@code null} before init
+     */
     public XdStorageTriggerManager getTriggersManager() {
         return triggersManager;
     }
 
+    /**
+     * Returns the resources manager of this storage.
+     *
+     * @return the manager wired at init, {@code null} before init
+     */
     public XdStorageAbstractResourcesManager getResourcesManager() {
         return resourcesManager;
     }
 
+    /**
+     * Returns the search manager of this storage.
+     *
+     * @return the manager wired at init, {@code null} before init
+     */
     public IXdStorageSearchManager getSearchManager() {
         return searchManager;
     }
 
+    /**
+     * Returns the structure manager of this storage.
+     *
+     * @return the manager wired at init, {@code null} before init
+     */
     public XdStorageStructureManager getStructureManager() {
         return structureManager;
     }
 
+    /**
+     * Returns the id generator of this storage.
+     *
+     * @return the generator wired at init, {@code null} before init
+     */
     public IXdStorageIdGenerator getIdGenerator() {
         return idGenerator;
     }
 
+    /**
+     * Returns the resource naming service of this storage.
+     *
+     * @return the service wired at init, {@code null} before init
+     */
     public IXdStorageResourceNamingService getNamingService() {
         return namingService;
     }
 
+    /**
+     * Returns the IO factory of this storage.
+     *
+     * @return the factory wired at init, {@code null} before init
+     */
     public IXdStorageIOFactory getIoFactory() {
         return ioFactory;
     }
 
+    /**
+     * Returns the cloner of this storage.
+     *
+     * @return the cloner wired at init, {@code null} before init
+     */
     public IXdStorageCloner getCloner() {
         return cloner;
     }
@@ -150,14 +253,28 @@ public class XdStorageServicesLocator {
     private final io.github.xdstorage.resource.XdStorageCanonicalInstanceRegistry canonicalInstances =
             new io.github.xdstorage.resource.XdStorageCanonicalInstanceRegistry();
 
+    /**
+     * Returns the per-storage registry of canonical B+tree instances.
+     *
+     * @return the registry (created with the locator, empty until the tree managers populate it)
+     */
     public io.github.xdstorage.resource.XdStorageCanonicalInstanceRegistry getCanonicalInstances() {
         return canonicalInstances;
     }
 
+    /**
+     * Returns the reference provider of this storage.
+     *
+     * @return the provider wired at init, {@code null} before init
+     */
     public IXdStorageReferenceProvider getReferencesProvider() {
         return referencesProvider;
     }
 
+    /**
+     * Shuts the worker thread pool down and clears the canonical B+tree instance
+     * registry. Called once when the storage closes.
+     */
     public void shutdown() {
         this.executor.shutdown();
         this.canonicalInstances.clear();

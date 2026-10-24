@@ -13,13 +13,41 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Изолированный рефлексивный парсер JavaBeans-сущностей и ORM-ссылок СУБД.
- * Прецизионно выровнен по каретке Кнута для тотально типизированной метамодели.
+ * Isolated reflective parser of JavaBeans entities and ORM references: assembles live
+ * objects from the totally typed {@code name}/{@code type}/{@code value} field
+ * metamodel written by {@link XdStorageYamlBlockObjectsWriter}, driving the tokenizer
+ * with strict one-token look-ahead. Two record flavours are supported: live instances
+ * ({@link #readObject}) and storage-neutral {@code XdStorageIdentifiableObject} data
+ * records ({@link #readObjectData}).
+ *
+ * <p>Thread-safety: all methods are static; the {@code propertiesCache} is a
+ * {@code ConcurrentHashMap} and safe under concurrent population. Engine-internal —
+ * not part of the public API.</p>
  */
 public class XdStorageYamlBlockObjectsReader {
 
     private static final Map<Class<?>, Map<String, XdStorageObjectField>> propertiesCache = new ConcurrentHashMap<>();
 
+    /**
+     * Utility class — no instances.
+     */
+    public XdStorageYamlBlockObjectsReader() {
+    }
+
+    /**
+     * Reads an {@code object} block: resolves the stored class, instantiates it and fills
+     * every {@code - field:} entry (scalars via the simple-type helper, complex values via
+     * the container readers) into the matching JavaBeans property. Fields unknown to the
+     * class are skipped.
+     *
+     * @param tokenizer        the token stream positioned at the object's {@code class:} key
+     * @param parentLevel      the tab level of the {@code object} block itself; deeper tokens
+     *                         belong to the object
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar field values
+     * @return the restored live instance, or {@code null} when the {@code class:} key is absent
+     * @throws Exception when the class cannot be resolved or instantiated, or a field value
+     *         cannot be materialized
+     */
     public static Object readObject(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         YamlLineToken token = tokenizer.peekToken();
         if (token == null || !"class".equals(token.key)) {
@@ -144,6 +172,25 @@ public class XdStorageYamlBlockObjectsReader {
         }
     }
 
+    /**
+     * Reads a {@code reference} block: restores a stub instance of the referenced class
+     * with only its id populated. The id may be a scalar ({@code objectId:}/{@code
+     * dataStorageId:} key), a {@code java.lang.Class} token, or a composite id written as
+     * a nested object body — all three forms mirror
+     * {@code XdStorageYamlBlockObjectsWriter.writeReferenceData}.
+     *
+     * @param tokenizer        the token stream positioned inside the reference block
+     * @param parentLevel      the tab level of the {@code reference} block itself; deeper
+     *                         tokens belong to it
+     * @param knownField       the id field to use when it is already known from the caller
+     *                         (e.g. batch references reading); {@code null} to resolve it from
+     *                         the entity class metadata
+     * @param simpleTypeHelper the simple-type SPI used to materialize the scalar id value
+     * @return the restored id-carrying stub instance, or {@code null} when the
+     *         {@code class:} key or the id value is absent
+     * @throws Exception when the entity class cannot be resolved or instantiated, or the id
+     *         value cannot be materialized
+     */
     public static Object readReference(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final XdStorageObjectIdField knownField, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         String className = null;
         String idValue = null;
@@ -194,6 +241,19 @@ public class XdStorageYamlBlockObjectsReader {
         return result;
     }
 
+    /**
+     * Reads an {@code object} block of a data resource into the engine's storage-neutral
+     * record form: an {@code XdStorageIdentifiableObject} carrying the entity class, the
+     * id and the raw field values — the entity class itself is never instantiated.
+     *
+     * @param tokenizer        the token stream positioned at the object's {@code class:} key
+     *                         (consumed first)
+     * @param parentLevel      the tab level of the {@code object} block itself
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar field values
+     * @return the restored typed data record
+     * @throws Exception when the class cannot be resolved, or a field value cannot be
+     *         materialized
+     */
     public static Object readObjectData(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         YamlLineToken token = tokenizer.nextToken();
         final Class<?> cl = XdStorageClassMetadataRegistry.resolveOrThrow(token.value);
@@ -292,6 +352,17 @@ public class XdStorageYamlBlockObjectsReader {
         return result;
     }
 
+    /**
+     * Reads a {@code reference} block of a data resource into the engine's record form: a
+     * typed stub {@code XdStorageIdentifiableObject} with only class and id populated. The
+     * id field is resolved from the entity class metadata.
+     *
+     * @param tokenizer   the token stream positioned inside the reference block
+     * @param parentLevel the tab level of the {@code reference} block itself
+     * @return the restored typed data record with class and id
+     * @throws Exception when the entity class cannot be resolved or the id value cannot be
+     *         materialized
+     */
     public static Object readObjectDataReference(final XdStorageYamlTokenizer tokenizer, final int parentLevel) throws Exception {
         return readReference(tokenizer, parentLevel, null, new io.github.xdstorage.helpers.XdStorageDefaultSimpleTypeHelper());
     }
@@ -321,6 +392,13 @@ public class XdStorageYamlBlockObjectsReader {
         return type;
     }
 
+    /**
+     * Restores the canonical Java string from its on-disk scalar form: the YAML
+     * single-quote escape pair {@code ''} is folded back into a single {@code '}.
+     *
+     * @param value the raw scalar read from the file (may be {@code null})
+     * @return the decoded string, or {@code null} when {@code value} is {@code null}
+     */
     public static String decode(final String value) {
         if (value == null) return null;
         // Восстанавливаем канонические кавычки Java, превращая пары '' обратно в одинарные '

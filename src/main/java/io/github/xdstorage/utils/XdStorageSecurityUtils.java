@@ -4,7 +4,9 @@ import io.github.xdstorage.exceptions.XdStorageRuntimeException;
 import java.util.regex.Pattern;
 
 /**
- * Утилиты обеспечения безопасности и защиты от инъекций СУБД xdstorage.
+ * Security utilities of the xdstorage engine: validation and escaping guards against injection
+ * through user-controlled identifiers. Stateless and thread-safe (the whitelist is a compiled
+ * constant {@link Pattern}). Engine-internal — not part of the public API.
  */
 public class XdStorageSecurityUtils {
 
@@ -14,6 +16,11 @@ public class XdStorageSecurityUtils {
     /**
      * Валидирует и экранирует SQL-идентификатор (имя таблицы, колонки или индекса).
      * Выбрасывает XdStorageRuntimeException в случае обнаружения подозрительных символов.
+     *
+     * @param identifier the raw identifier to validate ({@code null} passes through unchanged)
+     * @return the identifier safely double-quoted for PostgreSQL
+     * @throws XdStorageRuntimeException when the identifier contains characters outside the
+     *         {@code [a-zA-Z0-9_.]} whitelist (injection attempt)
      */
     public static String sanitizeIdentifier(final String identifier) {
         if (identifier == null) {
@@ -29,5 +36,9 @@ public class XdStorageSecurityUtils {
 
         // 2. Возвращаем безопасно экранированный в двойные кавычки токен для PostgreSQL
         return "\"" + identifier + "\"";
+    }
+
+    /** Intentionally public to mirror the implicit constructor's access level. */
+    public XdStorageSecurityUtils() {
     }
 }

@@ -5,8 +5,15 @@ import java.io.IOException;
 import java.io.Reader;
 
 /**
- * Высокопроизводительный построчный lock-free токенизатор YAML на табуляциях.
- * Оперирует буфером заглядывания вперёд peekToken для безопасного рекурсивного спуска.
+ * High-performance line-oriented, lock-free tokenizer for the engine's tab-indented
+ * YAML dialect. Each physical line becomes one {@link YamlLineToken} carrying its tab
+ * nesting level, key, raw value and list-item flag; blank lines and {@code #} comment
+ * lines are skipped — except the S-1 EOF sentinel, which is returned as a level-0 token
+ * so the high-level reader can distinguish a clean end of file from a truncation. A
+ * one-token look-ahead buffer ({@code peekToken}) backs the recursive-descent readers.
+ *
+ * <p>Thread-safety: an instance is confined to the reader that created it and is not
+ * safe for concurrent use. Engine-internal — not part of the public API.</p>
  */
 public class XdStorageYamlTokenizer {
 
@@ -18,6 +25,10 @@ public class XdStorageYamlTokenizer {
      * пропускают ее безвредно.
      */
     public static final String EOF_SENTINEL_LINE = "# xdstorage-eof";
+
+    /** The sentinel's token key: the level-0 pseudo-token returned by this tokenizer
+     * when {@link #EOF_SENTINEL_LINE} is read, letting the high-level reader detect a
+     * clean EOF explicitly. */
     public static final String EOF_SENTINEL_KEY = "xdstorage-eof";
 
     private final BufferedReader reader;
@@ -25,6 +36,12 @@ public class XdStorageYamlTokenizer {
     // Внутренний буфер для реализации заглядывания вперёд (Look-Ahead Barrier)
     private YamlLineToken peekedToken = null;
 
+    /**
+     * Creates the tokenizer over the given stream, wrapping a non-buffered reader into a
+     * {@code BufferedReader} for line reads.
+     *
+     * @param reader the character stream of the resource file to tokenize
+     */
     public XdStorageYamlTokenizer(final Reader reader) {
         this.reader = (reader instanceof BufferedReader) ?
                 (BufferedReader) reader : new BufferedReader(reader);
@@ -33,6 +50,10 @@ public class XdStorageYamlTokenizer {
     /**
      * Позволяет высокоуровневому демаршаллеру заглянуть на один токен вперёд,
      * не извлекая его физически из конвейера чтения. Ключевой элемент рекурсивного спуска!
+     *
+     * @return the next token without consuming it ({@code null} at end of file); repeated
+     *         calls return the same buffered token until {@link #nextToken()} is used
+     * @throws IOException when the underlying stream cannot be read
      */
     public YamlLineToken peekToken() throws IOException {
         if (peekedToken == null) {
@@ -44,6 +65,9 @@ public class XdStorageYamlTokenizer {
     /**
      * Потребляет и возвращает следующий валидный токен из YAML-файла.
      * Если перед этим вызывался peekToken(), бесшовно отдаёт объект из буфера.
+     *
+     * @return the consumed next token ({@code null} at end of file)
+     * @throws IOException when the underlying stream cannot be read
      */
     public YamlLineToken nextToken() throws IOException {
         if (peekedToken != null) {

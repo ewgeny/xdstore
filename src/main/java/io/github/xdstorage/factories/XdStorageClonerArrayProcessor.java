@@ -14,6 +14,22 @@ import java.util.Map;
  */
 public class XdStorageClonerArrayProcessor {
 
+    /** Instantiation-only utility class — no instances. */
+    public XdStorageClonerArrayProcessor() {
+    }
+
+    /**
+     * Deep-copies the given array, leaving primitives/enums/simple values as-is, copying
+     * {@code Date} values by time, recursing into nested arrays/collections/maps, and
+     * replacing entity-typed elements with the transaction's reference wrappers.
+     *
+     * @param src         the array to clone and wrap (must be an array)
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction the cloned graph belongs to
+     * @param cloner      the orchestrator used to wrap entity-typed elements
+     * @return the cloned array of the same component type and length
+     * @throws Exception if reflective access to the array elements fails
+     */
     public static Object cloneAndWrapArray(final Object src, final IXdStorage storage, final IXdStorageTransaction transaction, final XdStorageSmartCloner cloner) throws Exception {
         final int length = Array.getLength(src);
         final Object clone = Array.newInstance(src.getClass().getComponentType(), length);
@@ -38,6 +54,16 @@ public class XdStorageClonerArrayProcessor {
         return clone;
     }
 
+    /**
+     * Reverse direction: deep-copies the given array, unwrapping reference wrappers back
+     * into plain POJOs (recursing into nested arrays/collections/maps); primitives, enums,
+     * simple values and {@code Date}s are handled as in the wrap direction.
+     *
+     * @param src    the (possibly wrapped) array to unwrap and clone (must be an array)
+     * @param cloner the orchestrator used to unwrap entity-typed elements
+     * @return the plain clone of the same component type and length
+     * @throws Exception if reflective access to the array elements fails
+     */
     public static Object unwrapAndCloneArray(final Object src, final XdStorageSmartCloner cloner) throws Exception {
         final int length = Array.getLength(src);
         final Object clone = Array.newInstance(src.getClass().getComponentType(), length);

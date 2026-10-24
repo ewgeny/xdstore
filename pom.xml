@@ -389,11 +389,15 @@
                         <artifactId>maven-javadoc-plugin</artifactId>
                         <version>3.11.2</version>
                         <configuration>
-                            <!-- The codebase mixes Russian and English javadoc with loose tags;
-                                 doclint stays off for 2.0.0, tightening is a follow-up
-                                 (docs/RELEASE-PLAN.md §3). -->
-                            <doclint>none</doclint>
-                            <failOnError>false</failOnError>
+                            <!-- JAVADOC (docs/tasks/2.1.0/28): the deferred 2.0.0 promise is
+                                 closed — the whole main tree is javadoc'd (the coverage gate is
+                                 `mvn javadoc:javadoc -Ddoclint=missing` green) and the release
+                                 build now enforces it: doclint missing+syntax with
+                                 failOnWarnings, so the published javadoc jar can never silently
+                                 regress. failOnError stays default-true: a doc error fails the
+                                 release like any other build error. -->
+                            <doclint>missing,syntax</doclint>
+                            <failOnWarnings>true</failOnWarnings>
                             <quiet>true</quiet>
                         </configuration>
                         <executions>

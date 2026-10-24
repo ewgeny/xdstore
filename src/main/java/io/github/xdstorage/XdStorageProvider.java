@@ -16,17 +16,32 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * The factory and JVM-wide registry for storage instances — the entry point of the
+ * library. {@link #newOrGetFileStorage} opens (or returns the already-open) storage,
+ * {@link #verify} runs the read-only integrity walk over a folder.
+ *
+ * <p>Static state is per-JVM, not per-storage: the name&rarr;instance registry below,
+ * the codegen caches and the global MVCC commit counter (see {@code docs/EMBEDDING.md}
+ * &sect; JVM-wide static state). Instances are closed with {@link IXdStorage#shutdown()},
+ * which releases the folder lock and unregisters the name.
+ */
 public class XdStorageProvider {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageProvider.class);
 
+    /** Static factory/registry only — not instantiated (the implicit constructor stays public for source compatibility). */
+    public XdStorageProvider() {
+    }
+
     /**
-     * РАЗМЕР ФРАГМЕНТА ПО УМОЛЧАНИЮ (объектов на файл класса, политика StoreAsClassObjects).
-     * 128 — измеренный оптимум конфигурационного свипа (docs/PERFORMANCE-RECOMMENDATIONS.md §5):
-     * минимум латентности коммита, лучшая скорость вставки, ровные сканы; ~десятки-сотни КБ на файл
-     * для типичных небольших сущностей. Файлы фрагментов > ~1 МБ — красный флаг (перезапись целого
-     * файла на каждый коммит), < ~10 КБ — накладные расходы на файл (холодный скан, открытые fd).
-     * Диапазон 128-512 оставляет запас для сущностей крупнее эталонных ~430 байт.
+     * Default fragment size (objects per class file, {@code StoreAsClassObjects} policy).
+     * 128 — the measured optimum of the configuration sweep (docs/PERFORMANCE-RECOMMENDATIONS.md
+     * &sect;5): lowest commit latency, best insert throughput, flat scans; roughly tens-to-hundreds
+     * of KB per file for typical small entities. Fragment files above ~1 MB are a red flag (the
+     * whole file is rewritten on every commit), below ~10 KB they pay per-file overhead (cold
+     * scans, open file descriptors). The 128&ndash;512 range leaves headroom for entities larger
+     * than the reference ~430 bytes.
      */
     public static final int DEFAULT_FRAGMENT_SIZE = 128;
 
@@ -34,6 +49,8 @@ public class XdStorageProvider {
      * A2: the library version (semver, e.g. "2.0.0") — the same value a storage instance
      * returns from {@code getVersion()}. Read from the Maven-filtered
      * {@code /xdstorage.properties} resource; "unknown" without Maven filtering.
+     *
+     * @return the library version string (e.g. "2.1.0"), never {@code null}
      */
     public static String getVersion() {
         return XdStorageVersion.getVersion();
@@ -66,40 +83,143 @@ public class XdStorageProvider {
         return io.github.xdstorage.utils.XdStorageFolderVerifier.verify(new File(folder));
     }
 
-    /** See {@link #verify(String)}. */
+    /**
+     * {@link File} form of {@link #verify(String)}.
+     *
+     * @param folder the storage folder (open or closed)
+     * @return the report; {@link XdStorageVerifyReport#isOk()} answers "nothing to act on"
+     */
     public static XdStorageVerifyReport verify(final File folder) {
         return io.github.xdstorage.utils.XdStorageFolderVerifier.verify(folder);
     }
 
-    /** See {@link #verify(String)}. */
+    /**
+     * {@link java.nio.file.Path} form of {@link #verify(String)}.
+     *
+     * @param folder the storage folder (open or closed)
+     * @return the report; {@link XdStorageVerifyReport#isOk()} answers "nothing to act on"
+     */
     public static XdStorageVerifyReport verify(final java.nio.file.Path folder) {
         return io.github.xdstorage.utils.XdStorageFolderVerifier.verify(folder.toFile());
     }
 
 
-    /** Открытие с рекомендованным размером фрагмента {@link #DEFAULT_FRAGMENT_SIZE} и конфигурацией по умолчанию (YAML). */
+    /**
+     * Opens a storage, or returns the instance already open under this name.
+     *
+     * <p><b>The registry is keyed by name, per JVM.</b> A repeat call with the same
+     * {@code name} returns the <em>existing</em> instance and IGNORES {@code folder} (and
+     * every other argument) — a WARN is logged. Call {@code shutdown()} on the instance to
+     * unregister the name before reopening under changed parameters.
+     *
+     * <p>The folder is locked exclusively for the storage's lifetime (OS file lock +
+     * the same-JVM registry): a second opener — another process or another instance in
+     * this JVM — fails with {@code XdStorageFolderLock.XdStorageInUseException}
+     * (unchecked; the API predates the lock and cannot declare a checked exception).
+     * At open the format marker is checked: a legacy 1.x folder opens with an INFO
+     * (YAML content needs {@code acceptMissingEofSentinel(true)} until the first commit),
+     * a folder written by a NEWER library is rejected loudly.
+     *
+     * <p>The storage holds a pool of non-daemon worker threads
+     * ({@code XdStorageConfig.builder().workerPoolSize(...)}) — a forgotten
+     * {@code shutdown()} blocks JVM exit.
+     *
+     * @param name the storage name (the registry key; unique per JVM while open)
+     * @param folder the storage folder (created when missing; must be lockable exclusively)
+     * @return the open storage under this name (never {@code null})
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the folder
+     *         cannot be locked for exclusive use, or the on-disk format is not
+     *         supported by this library version
+     */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder) {
         return newOrGetFileStorage(name, folder, DEFAULT_FRAGMENT_SIZE, FilesFormat.YAML, XdStorageConfig.defaults());
     }
 
-    /** Открытие с рекомендованным размером фрагмента {@link #DEFAULT_FRAGMENT_SIZE}, явной конфигурацией, формат YAML. */
+    /**
+     * Opens (or returns the already-open) storage with an explicit configuration, YAML
+     * format and the recommended fragment size — see {@link #newOrGetFileStorage(String, String)}.
+     *
+     * @param name the storage name (the registry key)
+     * @param folder the storage folder
+     * @param config the open-time configuration; {@code null} means {@link XdStorageConfig#defaults()}
+     * @return the open storage under this name
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the folder
+     *         cannot be locked, the format is unsupported, or the config is illegal for
+     *         the format (e.g. {@code journalWrites(true)} with a non-YAML format)
+     */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final XdStorageConfig config) {
         return newOrGetFileStorage(name, folder, DEFAULT_FRAGMENT_SIZE, FilesFormat.YAML, config);
     }
 
+    /**
+     * Opens (or returns the already-open) storage with an explicit fragment size, YAML
+     * format and default configuration — see {@link #newOrGetFileStorage(String, String)}.
+     *
+     * @param name the storage name (the registry key)
+     * @param folder the storage folder
+     * @param fragmentSize objects per class file ({@code StoreAsClassObjects}); see
+     *                     {@link #DEFAULT_FRAGMENT_SIZE}
+     * @return the open storage under this name
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the folder
+     *         cannot be locked or the format is unsupported
+     */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize) {
         return newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML, XdStorageConfig.defaults());
     }
 
+    /**
+     * Opens (or returns the already-open) storage with an explicit on-disk format — see
+     * {@link #newOrGetFileStorage(String, String)}. Journaling ({@code journalWrites}) is
+     * supported for the {@link FilesFormat#YAML} format only; a non-YAML format with
+     * journaling enabled is rejected at open.
+     *
+     * @param name the storage name (the registry key)
+     * @param folder the storage folder
+     * @param fragmentSize objects per class file; see {@link #DEFAULT_FRAGMENT_SIZE}
+     * @param format the on-disk serialization format
+     * @return the open storage under this name
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the folder
+     *         cannot be locked, the format is unsupported, or journaling was requested
+     *         for a non-YAML format
+     */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize, FilesFormat format) {
         return newOrGetFileStorage(name, folder, fragmentSize, format, XdStorageConfig.defaults());
     }
 
-    /** Config overload: YAML format (the engine default) with explicit open-time configuration. */
+    /**
+     * Opens (or returns the already-open) storage: YAML format (the engine default) with
+     * an explicit fragment size and configuration — see
+     * {@link #newOrGetFileStorage(String, String)}.
+     *
+     * @param name the storage name (the registry key)
+     * @param folder the storage folder
+     * @param fragmentSize objects per class file; see {@link #DEFAULT_FRAGMENT_SIZE}
+     * @param config the open-time configuration; {@code null} means defaults
+     * @return the open storage under this name
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the folder
+     *         cannot be locked or the format/config combination is illegal
+     */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize, final XdStorageConfig config) {
         return newOrGetFileStorage(name, folder, fragmentSize, FilesFormat.YAML, config);
     }
 
+    /**
+     * Opens (or returns the already-open) storage with every parameter explicit — the
+     * full form; the other overloads delegate here. See
+     * {@link #newOrGetFileStorage(String, String)} for the registry, folder-lock and
+     * format-marker contract.
+     *
+     * @param name the storage name (the registry key)
+     * @param folder the storage folder
+     * @param fragmentSize objects per class file; see {@link #DEFAULT_FRAGMENT_SIZE}
+     * @param format the on-disk serialization format
+     * @param config the open-time configuration; {@code null} means
+     *               {@link XdStorageConfig#defaults()}
+     * @return the open storage under this name
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the folder
+     *         cannot be locked, the on-disk format is newer than this library, or the
+     *         format/config combination is illegal
+     */
     public static IXdFileStorage newOrGetFileStorage(final String name, final String folder, final int fragmentSize,
                                                      final FilesFormat format, final XdStorageConfig config) {
         final XdStorageConfig cfg = config == null ? XdStorageConfig.defaults() : config;

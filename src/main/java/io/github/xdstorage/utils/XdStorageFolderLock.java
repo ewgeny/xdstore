@@ -35,6 +35,7 @@ public final class XdStorageFolderLock implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageFolderLock.class);
 
+    /** Name of the lock file placed inside the storage folder ({@code .xdstorage.lock}). */
     public static final String LOCK_FILE_NAME = ".xdstorage.lock";
 
     /** canonical folder path → held lock (same-JVM guard: POSIX locks do not fail twice in-process). */
@@ -55,6 +56,11 @@ public final class XdStorageFolderLock implements AutoCloseable {
      * Acquires the exclusive lock on {@code folder}. Throws {@link XdStorageInUseException}
      * when the folder is already open — in this JVM (any storage instance) or in another
      * process (holder pid is reported when the lock file carries one).
+     *
+     * @param folder the storage folder to lock; created when absent
+     * @return the held lock; keep it open for the storage's lifetime and {@link #close()} it on shutdown
+     * @throws IOException when the folder cannot be created or the lock file cannot be opened/written
+     * @throws XdStorageInUseException when the folder is already locked in this JVM or by another process
      */
     public static XdStorageFolderLock acquire(final File folder) throws IOException {
         if (!folder.exists() && !folder.mkdirs()) {
@@ -134,6 +140,7 @@ public final class XdStorageFolderLock implements AutoCloseable {
         return "";
     }
 
+    /** Releases the OS lock and the same-JVM registry entry; idempotent, safe to call from any thread. */
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
@@ -164,6 +171,11 @@ public final class XdStorageFolderLock implements AutoCloseable {
     public static final class XdStorageInUseException extends RuntimeException {
         private static final long serialVersionUID = 1L;
 
+        /**
+         * Creates the in-use error with a diagnostic message.
+         *
+         * @param message the human-readable description of who holds the folder and why the open failed
+         */
         public XdStorageInUseException(final String message) {
             super(message);
         }

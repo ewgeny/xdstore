@@ -12,20 +12,27 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Контроль структурных инвариантов B+ Дерева индексов на границе транзакционных операций.
- * Прогоняется после мутаций индекса (insert/delete) в контуре транзакции.
+ * Structural invariant checks for the B+tree indexes, run at transaction-operation
+ * boundaries after index mutations (insert/delete) inside the transaction contour.
  *
- * Проверяет три инварианта:
- * 1. Целостность вершин: каждый child каждого внутреннего узла разрешается в живую ноду
- *    (ловит висячие ссылки после слияний — merge удалил ноду, а родитель ее все еще держит).
- * 2. Паритет keys/objects в каждом листе (ловит разъехавшиеся списки после split).
- * 3. Эквивалентность множества листьев, достижимых из корня, и множества листьев,
- *    достижимых из firstLeaf по цепочке next (ловит обрыв цепочки: лист существует
- *    в дереве, но диапазонные сканы его не видят — дефект 268/1250).
- * 4. Глобальную неубываемость ключей вдоль цепочки листьев (ловит неверную сшивку split/merge).
+ * <p>Checks the following invariants:</p>
+ * <ol>
+ *   <li>vertex integrity: every child of every internal node resolves to a live node
+ *       (catches dangling references after merges — the merge removed the node but the
+ *       parent still holds it);</li>
+ *   <li>keys/objects parity in every leaf (catches the parallel lists drifting apart
+ *       after a split);</li>
+ *   <li>the set of leaves reachable from the root equals the set reachable from
+ *       {@code firstLeaf} along the next chain (catches a broken chain: a leaf exists in
+ *       the tree but range scans never see it);</li>
+ *   <li>global non-decreasing key order along the leaf chain (catches a bad split/merge
+ *       stitching).</li>
+ * </ol>
  *
- * При любом нарушении выбрасывается XdStorageException — транзакция обязана откатиться громко,
- * а не фиксировать битую структуру на диск молча.
+ * <p>Any violation throws {@code XdStorageException} — the transaction must roll back
+ * loudly instead of silently committing a corrupt structure to disk.</p>
+ *
+ * <p>Engine-internal — not part of the public API.</p>
  */
 public final class XdStorageBTreeInvariants {
 
@@ -46,6 +53,13 @@ public final class XdStorageBTreeInvariants {
     private static final java.util.concurrent.atomic.AtomicLong VALIDATION_SAMPLER =
             new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * R-32 sampling gate for the full O(N) validation: the full root descent plus leaf-chain
+     * walk runs once per sampling interval only (cheap O(1) tripwires run after every
+     * mutation regardless); R-56 makes the interval configurable for structural bisection.
+     *
+     * @return {@code true} when the caller should run the full structural validation now
+     */
     public static boolean shouldRunFullValidation() {
         return VALIDATION_SAMPLER.incrementAndGet() % FULL_VALIDATION_INTERVAL == 1;
     }
@@ -76,6 +90,23 @@ public final class XdStorageBTreeInvariants {
         }
     }
 
+    /**
+     * Full structural validation of the index tree after a mutation, run under the tree
+     * write lock: mutators hold that lock for a whole operation, so the validator cannot
+     * observe intermediate rebalance states. Sample-consistent (R-56): when the tree's
+     * (structureVersion, activeMutations) pair changes between the two traversals, the
+     * observation was not atomic — validation is retried up to a small limit and, if the
+     * structure never quiesces, skipped with a WARN (the per-mutation tripwires carry the
+     * real integrity guarantee); a genuine violation under a stable version still fails
+     * loudly and is logged at ERROR before propagating.
+     *
+     * @param tree        the tree to validate ({@code null} — no-op)
+     * @param storage     the storage facade used to resolve node stubs
+     * @param transaction the owning transaction (provides the lock timeout)
+     * @param context     an operation label included in every violation message
+     * @throws XdStorageException           on any invariant violation (rollback trigger)
+     * @throws XdStorageConnectionException when resolving a node stub fails
+     */
     public static void validateLeafChain(final XdStorageBTree tree, final IXdStorage storage,
                                          final XdStorageTransaction transaction, final String context)
             throws XdStorageException, XdStorageConnectionException {

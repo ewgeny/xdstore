@@ -15,24 +15,51 @@ import io.github.xdstorage.utils.XdStorageObjectIdField;
 
 import java.util.Collection;
 
+/**
+ * Common base of the transactional resource objects: binds a resource id, entity class
+ * metadata, the id field and the per-resource MVCC cache, and implements both sides of the
+ * resource contract — the transactional lifecycle ({@code IXdStorageResourceObject}) and the
+ * record-level DAO operations ({@code IXdStorageDaoResource}) — in front of the shared cache.
+ * Instances are shared between threads: cache operations run inside the caller's transaction
+ * critical section, while commit phases are serialized per resource by the manager's locking
+ * protocol. Subclasses add the physical I/O and the real commit phases.
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 public abstract class XdStorageAbstractResource implements IXdStorageResourceObject<IXdStorageDaoResource>, IXdStorageDaoResource {
 
+    /** Engine services shared with collaborators (storage, config, cloner, transactions manager). */
     protected final XdStorageServicesLocator services;
 
+    /** The resources manager that owns this resource, hands it out and keeps its counters. */
     protected final XdStorageAbstractResourcesManager manager;
 
+    /** The storage-wide unique id of this resource (its relative file path). */
     protected final Object resourceId;
 
+    /** External id generator for database/custom id strategies; {@code null} otherwise. */
     protected final IXdStorageIdGenerator idGenerator;
 
+    /** Metadata of the entity class this resource stores. */
     protected final XdStorageClassInfo clInfo;
 
+    /** Metadata of the entity id field (accessors and id-generation strategy). */
     protected final XdStorageObjectIdField idField;
 
+    /** Whether this is a references resource (parent/child bookkeeping of per-object files). */
     protected final boolean isReferences;
 
+    /** The per-resource MVCC cache — every read and staged write resolves through it. */
     protected final XdStorageResourceCache cache;
 
+    /**
+     * Builds a non-references resource with in-process id generation.
+     *
+     * @param services   engine services shared with collaborators
+     * @param manager    the owning resources manager
+     * @param resourceId the storage-wide unique resource id
+     * @param clInfo     metadata of the entity class
+     */
     protected XdStorageAbstractResource(final XdStorageServicesLocator services,
                                         final XdStorageAbstractResourcesManager manager,
                                         final Object resourceId,
@@ -40,6 +67,15 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         this(services, manager, resourceId, clInfo, null, false);
     }
 
+    /**
+     * Builds a resource with in-process id generation.
+     *
+     * @param services     engine services shared with collaborators
+     * @param manager      the owning resources manager
+     * @param resourceId   the storage-wide unique resource id
+     * @param clInfo       metadata of the entity class
+     * @param isReferences whether this is a references resource
+     */
     protected XdStorageAbstractResource(final XdStorageServicesLocator services,
                                         final XdStorageAbstractResourcesManager manager,
                                         final Object resourceId,
@@ -48,6 +84,16 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         this(services, manager, resourceId, clInfo, null, isReferences);
     }
 
+    /**
+     * Builds a resource with full configuration.
+     *
+     * @param services     engine services shared with collaborators
+     * @param manager      the owning resources manager
+     * @param resourceId   the storage-wide unique resource id
+     * @param clInfo       metadata of the entity class
+     * @param idGenerator  external id generator, or {@code null} for in-process ids
+     * @param isReferences whether this is a references resource
+     */
     protected XdStorageAbstractResource(final XdStorageServicesLocator services,
                                         final XdStorageAbstractResourcesManager manager,
                                         final Object resourceId,
@@ -64,6 +110,11 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         this.idGenerator = idGenerator;
     }
 
+    /**
+     * The resources manager that owns this resource.
+     *
+     * @return the owning manager
+     */
     public XdStorageAbstractResourcesManager getManager() {
         return manager;
     }
@@ -87,14 +138,32 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
         return cache.hasChanges(transaction);
     }
 
+    /**
+     * Subclass hook invoked at the end of {@code prepare} — e.g. to load derived state
+     * after the base file is in the cache. The default does nothing.
+     *
+     * @param transaction the transaction the resource is prepared for
+     */
     protected void postPrepare(final XdStorageTransaction transaction) {
         // do nothing
     }
 
+    /**
+     * Subclass hook invoked at the end of phase 2 (after the changes are published) — e.g.
+     * to refresh derived state. The default does nothing.
+     *
+     * @param transaction the committed transaction
+     */
     protected void postCommit(final XdStorageTransaction transaction) {
         // do nothing
     }
 
+    /**
+     * Subclass hook invoked at the end of a rollback — e.g. to restore derived state.
+     * The default does nothing.
+     *
+     * @param transaction the rolled-back transaction
+     */
     protected void postRollback(final XdStorageTransaction transaction) {
         // do nothing
     }

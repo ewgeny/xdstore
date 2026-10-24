@@ -15,6 +15,18 @@ import java.lang.reflect.TypeVariable;
  */
 public class XdStorageUnmodifiableBlockGettersGenerator {
 
+    /** Inert holder: the generator blocks are fully static. */
+    public XdStorageUnmodifiableBlockGettersGenerator() {
+    }
+
+    /**
+     * Emits overriding delegating getters for the simple-typed fields of the context:
+     * each generated accessor forwards to the wrapped object.
+     *
+     * @param builder target of the generated source
+     * @param ctx     method classification of the current generation run
+     * @param gen     host generator supplying method-header emission
+     */
     public static void generateSimpleGetters(final StringBuilder builder, final XdStorageAbstractClassCodeGenerator.GenerationContext ctx, final XdStorageAbstractClassCodeGenerator gen) {
         for (Method getter : ctx.fieldsGetters) {
             builder.append("\r\n\t@Override\r\n\t");
@@ -23,6 +35,16 @@ public class XdStorageUnmodifiableBlockGettersGenerator {
         }
     }
 
+    /**
+     * Emits overriding getters for the strong (reference) fields of the context: the
+     * parent getter returns the parent wrapper when present, and every other reference
+     * is materialized through {@code XdStorageObjectUtils.wrapAsUnmodifiableObject}
+     * against the view's storage and transaction.
+     *
+     * @param builder target of the generated source
+     * @param ctx     method classification of the current generation run
+     * @param gen     host generator supplying method-header emission
+     */
     public static void generateStrongGetters(final StringBuilder builder, final XdStorageAbstractClassCodeGenerator.GenerationContext ctx, final XdStorageAbstractClassCodeGenerator gen) {
         for (Method getter : ctx.strongGetters) {
             final Class<?> returnType = getter.getReturnType();
@@ -43,6 +65,18 @@ public class XdStorageUnmodifiableBlockGettersGenerator {
         }
     }
 
+    /**
+     * Emits overriding lazy-load getters for the {@code XdStorageLoadByGetMethod}
+     * fields of the context: on first access the referenced object is loaded through
+     * the view's storage and transaction (a {@code null} reference skips the load);
+     * storage failures mark the transaction rollback-only and surface as
+     * {@code XdStorageRuntimeException}. The parent getter variant returns the parent
+     * wrapper when present instead of loading.
+     *
+     * @param builder target of the generated source
+     * @param ctx     method classification of the current generation run
+     * @param gen     host generator supplying method-header emission
+     */
     public static void generateLoadByGetGetters(final StringBuilder builder, final XdStorageAbstractClassCodeGenerator.GenerationContext ctx, final XdStorageAbstractClassCodeGenerator gen) {
         for (Method getter : ctx.strongLoadByGetGetters) {
             final Class<?> returnType = getter.getReturnType();

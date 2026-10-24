@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AUTOSAVE (docs/tasks/2.1.0/22) cascade engine — the walk that upserts
- * {@link XdStorageAutoSave @XdStorageAutoSave} annotated children after their parent's own
+ * {@link io.github.xdstorage.annotations.XdStorageAutoSave @XdStorageAutoSave} annotated children after their parent's own
  * persistence. Called at the tail of the facade save/update; child saves re-enter the
  * facade's public save/update (the guards are idempotent), so triggers, observers, id
  * generation, rollback and MVCC behave exactly as for explicit saves.
@@ -52,6 +52,15 @@ public final class XdStorageAutoSaveCascadeEngine {
      * The cascade entry — called at the tail of the facade save/update AFTER the object's own
      * persistence. The depth counter detects the outermost cascade and clears the visited set
      * when the whole operation unwinds.
+     *
+     * @param object the just-persisted parent whose {@code @XdStorageAutoSave} fields are walked
+     * @param tx the transaction of the enclosing save/update, reused for every child upsert
+     * @param services the storage service locator providing the resources manager
+     * @param facade the storage facade child saves re-enter (triggers, id generation and MVCC
+     *               therefore behave exactly as for explicit saves)
+     * @throws io.github.xdstorage.exceptions.XdStorageException when a child upsert fails
+     * @throws io.github.xdstorage.exceptions.XdStorageConnectionException when the underlying
+     *         resource is unavailable
      */
     public static void cascadeAfterPersist(final Object object, final IXdStorageTransaction tx,
                                            final XdStorageServicesLocator services,

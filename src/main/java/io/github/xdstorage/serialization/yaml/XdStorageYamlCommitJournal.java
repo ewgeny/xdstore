@@ -67,8 +67,11 @@ public final class XdStorageYamlCommitJournal {
     // JRNLNAME (docs/tasks/2.1.0/24): journals live in the journal SUBDIRECTORY of their
     // resource's directory, named with a SUFFIX on the extension-less base — never a stacked
     // extension. The journal content is YAML for every storage format, so the name ends in .yaml.
+    /** Name of the journal subdirectory inside a resource's directory: {@code <dir>/journal/}. */
     public static final String JOURNAL_DIR = "journal";
 
+    /** Canonical journal file suffix appended to the extension-less base name:
+     * {@code Order-1.yaml → Order-1-journal.yaml}. */
     public static final String JOURNAL_SUFFIX = "-journal.yaml";
 
     /** The 2.0.0-era naming (baseFileName + ".journal.yaml", a stacked extension, base's dir) —
@@ -78,7 +81,11 @@ public final class XdStorageYamlCommitJournal {
     private XdStorageYamlCommitJournal() {
     }
 
-    /** The journal path for one base file: {@code <dir-of-base>/journal/<base-without-ext>-journal.yaml}. */
+    /** The journal path for one base file: {@code <dir-of-base>/journal/<base-without-ext>-journal.yaml}.
+     *
+     * @param baseFileName the path of the resource's base file
+     * @return the canonical journal path (which may not exist yet)
+     */
     public static Path journalFileFor(final String baseFileName) {
         final File base = new File(baseFileName);
         final File parent = base.getParentFile();
@@ -89,17 +96,29 @@ public final class XdStorageYamlCommitJournal {
     }
 
     /** The 2.1.0-dev sibling spelling (the journal NEXT to the base, no subdirectory) —
-     * read-compatible within the unreleased train: replayed and migrated into {@link #JOURNAL_DIR}. */
+     * read-compatible within the unreleased train: replayed and migrated into {@link #JOURNAL_DIR}.
+     *
+     * @param baseFileName the path of the resource's base file
+     * @return the sibling journal path (which may not exist yet)
+     */
     public static Path siblingJournalFileFor(final String baseFileName) {
         return new File(stripFormatExtension(baseFileName) + JOURNAL_SUFFIX).toPath();
     }
 
-    /** The 2.0.0-era path (the stacked-extension name in the base's dir) — resolution + migration only. */
+    /** The 2.0.0-era path (the stacked-extension name in the base's dir) — resolution + migration only.
+     *
+     * @param baseFileName the path of the resource's base file
+     * @return the legacy stacked-name journal path (which may not exist yet)
+     */
     public static Path legacyJournalFileFor(final String baseFileName) {
         return new File(baseFileName + LEGACY_JOURNAL_SUFFIX).toPath();
     }
 
-    /** Strips a known format extension (yaml/xml/json) — class-derived base names carry no other dots. */
+    /** Strips a known format extension (yaml/xml/json) — class-derived base names carry no other dots.
+     *
+     * @param baseFileName the base file name, with or without a format extension
+     * @return the extension-less base name (the input itself when no known format extension ends it)
+     */
     public static String stripFormatExtension(final String baseFileName) {
         if (baseFileName.endsWith(".yaml")) return baseFileName.substring(0, baseFileName.length() - 5);
         if (baseFileName.endsWith(".json")) return baseFileName.substring(0, baseFileName.length() - 5);
@@ -124,6 +143,10 @@ public final class XdStorageYamlCommitJournal {
      * JRNLNAME resolution, priority order: the journal-directory file wins; a sibling-named
      * (pre-subdirectory) or legacy stacked-named journal without the newer ones is the replay
      * source (migrate after a successful replay); the fresh case creates in the journal directory.
+     *
+     * @param baseFileName the path of the resource's base file
+     * @return the resolution: the journal file all future I/O must use, plus any
+     *         older-named twins found on disk
      */
     public static Resolution resolveFor(final String baseFileName) {
         Path chosen = null;
@@ -145,6 +168,12 @@ public final class XdStorageYamlCommitJournal {
      * JRNLNAME: called after a successful journal replay — migrates a replayed older-named
      * file into the journal directory, and drops any additional superseded twin (the
      * both-present anomaly, WARN). Returns the path all future journal I/O must use.
+     *
+     * @param replayedFile the journal actually replayed (may already be the canonical one)
+     * @param superseded   the lower-priority journals returned by {@link #resolveFor}
+     * @param baseFileName the path of the resource's base file
+     * @return the canonical journal path inside {@link #JOURNAL_DIR} for all future I/O
+     * @throws java.io.IOException when the move or a stale-file deletion fails
      */
     public static Path settleAfterReplay(final Path replayedFile, final java.util.List<Path> superseded,
                                          final String baseFileName) throws java.io.IOException {
@@ -166,9 +195,14 @@ public final class XdStorageYamlCommitJournal {
 
     /** One durable redo/compensation record waiting to be appended. */
     public static final class Record {
+        /** The commit serial of the owning commit (0 for compensation records). */
         public final long serial;
+        /** {@code true} for a DELETE record (only {@link #id} is meaningful), {@code false}
+         * for an UPSERT carrying a full {@link #object} body. */
         public final boolean delete;
+        /** The id of the affected object, already materialized to its id type. */
         public final Object id;
+        /** The full new object body for an UPSERT, or {@code null} for a DELETE. */
         public final Object object;
 
         Record(final long serial, final boolean delete, final Object id, final Object object) {
@@ -182,6 +216,17 @@ public final class XdStorageYamlCommitJournal {
     /**
      * Appends REDO records for a successfully prepared commit:
      * Insert/Update → UPSERT(newObject), Delete → DELETE(id).
+     *
+     * @param file         the journal file to append to (created with its parent directory)
+     * @param commitSerial the serial of the commit being journaled
+     * @param changes      the commit's object changes (entries without an id are skipped)
+     * @param services     the storage services locator (used by the object body encoder)
+     * @param factory      the YAML I/O factory supplying the simple-type helper and id generator
+     * @param durable      {@code true} to fsync the append ({@code FileDescriptor.sync}) — the
+     *                     journal is the durability point while it holds the commit
+     * @throws IOException        when the file cannot be appended to
+     * @throws io.github.xdstorage.exceptions.XdStorageException when id generation fails while
+     *         encoding an object body
      */
     public static void appendRedo(final Path file, final long commitSerial,
                                   final Collection<XdStorageObjectChange> changes,
@@ -205,6 +250,15 @@ public final class XdStorageYamlCommitJournal {
     /**
      * Appends COMPENSATION records for a rolled-back first phase: the restored (pre-tx
      * committed) state per changed id — oldObject → UPSERT, insert-without-old → DELETE.
+     *
+     * @param file         the journal file to append to (created with its parent directory)
+     * @param changes      the aborted commit's object changes (entries without an id are skipped)
+     * @param services     the storage services locator (used by the object body encoder)
+     * @param factory      the YAML I/O factory supplying the simple-type helper and id generator
+     * @param durable      {@code true} to fsync the append ({@code FileDescriptor.sync})
+     * @throws IOException        when the file cannot be appended to
+     * @throws io.github.xdstorage.exceptions.XdStorageException when id generation fails while
+     *         encoding an object body
      */
     public static void appendCompensation(final Path file,
                                           final Collection<XdStorageObjectChange> changes,
@@ -233,7 +287,12 @@ public final class XdStorageYamlCommitJournal {
      */
     /** W-4a/c: the per-file append lock exposed for atomic checkpointing — a checkpoint
      * (base rewrite + journal reset) holds the same lock as appends, so a concurrent
-     * commit's redo can never be lost between the base write and the reset. */
+     * commit's redo can never be lost between the base write and the reset.
+     *
+     * @param file the journal file whose appends are to be excluded
+     * @return the lock identity ({@code synchronized} monitor) shared by all appends and
+     *         checkpoints of that file
+     */
     public static Object lockFor(final Path file) {
         return appendLockFor(file);
     }
@@ -294,8 +353,20 @@ public final class XdStorageYamlCommitJournal {
 
     /** One resource journal checkpoint entry: result of {@link #readForReplay}. */
     public static final class Replay {
+
+        /**
+         * Creates an empty replay accumulator.
+         */
+        public Replay() {
+        }
+
+        /** UPSERT bodies in file (commit) order: full object instances restored from the
+         * journal's {@code object} blocks. */
         public final List<Object> upserts = new ArrayList<>();
+        /** DELETE ids in file (commit) order, materialized to the resource's id type. */
         public final List<Object> deletes = new ArrayList<>();
+        /** How many trailing records were discarded as a torn tail (crash mid-append);
+         * {@code 0} for a clean journal. */
         public int discardedTailRecords = 0;
     }
 
@@ -303,7 +374,16 @@ public final class XdStorageYamlCommitJournal {
      * Reads the journal for recovery replay. Records after the last sentinel (a torn tail
      * from a crash mid-append) are DISCARDED with a loud WARN — unlike a truncated base
      * file (S-1: loud failure), the journal tail is by-design discardable because the
-     * interrupted commit was never reported durable.
+     * interrupted commit was never reported durable. Replay itself is idempotent: records
+     * are returned in file order (commit order), last write per id wins at the call site.
+     *
+     * @param file    the journal file to read (a missing file yields an empty replay)
+     * @param idType  the id class of the resource, used to materialize DELETE record ids
+     * @param factory the YAML I/O factory supplying the simple-type helper and the object
+     *                body reader
+     * @return the parsed replay: in-order upsert bodies, delete ids, and the count of
+     *         discarded torn-tail records
+     * @throws IOException when the file exists but cannot be read
      */
     public static Replay readForReplay(final Path file, final Class<?> idType,
                                        final XdStorageYamlIOFactory factory) throws IOException {
@@ -391,11 +471,21 @@ public final class XdStorageYamlCommitJournal {
         return new Object[]{false, payload};
     }
 
-    /** Checkpoint: the journal is dropped after the base file rewrite has been written atomically. */
+    /** Checkpoint: the journal is dropped after the base file rewrite has been written atomically.
+     *
+     * @param file the journal file to reset
+     * @throws IOException when the deletion fails
+     */
     public static void reset(final Path file) throws IOException {
         Files.deleteIfExists(file);
     }
 
+    /**
+     * Current size of the journal file in bytes — the checkpoint threshold metric.
+     *
+     * @param file the journal file to measure
+     * @return the file size in bytes, or {@code 0} when the journal does not exist
+     */
     public static long sizeOf(final Path file) {
         return Files.exists(file) ? file.toFile().length() : 0L;
     }

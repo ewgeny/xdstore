@@ -17,5 +17,12 @@ package io.github.xdstorage.code;
  */
 public interface IXdStorageReferenceMarked {
 
+    /**
+     * Whether this instance is a parser stub — a reference materialized as an id-only
+     * placeholder that has not been loaded from disk yet.
+     *
+     * @return {@code true} for a parser stub, {@code false} for a real (materialized
+     *         or in-memory created) instance
+     */
     boolean isReference();
 }

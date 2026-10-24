@@ -37,10 +37,36 @@ public final class XdStorageAtomicFile {
     private XdStorageAtomicFile() {
     }
 
+    /**
+     * Non-durable convenience overload: writes the new content over the target through a
+     * temporary sibling file and an atomic rename, without the fsync round of
+     * {@link #writeReplacing(String, boolean, ContentWriter)}.
+     *
+     * @param fileName the target resource file path, replaced in whole on success
+     * @param content the callback that streams the new content into the writer
+     * @throws IOException when the write or the replace fails; the target keeps its previous
+     *         content and the temporary file is removed
+     */
     public static void writeReplacing(final String fileName, final ContentWriter content) throws IOException {
         writeReplacing(fileName, false, content);
     }
 
+    /**
+     * Crash-safe full replacement of one resource file: the content is streamed into a
+     * temporary sibling ({@code fileName + ".tmp"}) which is then atomically renamed over the
+     * target, so no reader or crash can ever observe a half-written resource. A stale temp
+     * file from an earlier mid-write crash is removed first, and any failure deletes the temp
+     * file and leaves the target with its previous content. With {@code durable} the temp file
+     * is {@code fsync}ed before the rename and the parent directory after it, extending the
+     * guarantee to power loss (directory sync is best-effort — see the class doc).
+     *
+     * @param fileName the target resource file path
+     * @param durable {@code true} to sync the file to disk before the rename and the directory
+     *                after it; {@code false} stops the guarantee at the process boundary
+     * @param content the callback producing the new content
+     * @throws IOException when the write or the replace fails, wrapping any non-IOException
+     *         thrown by the callback
+     */
     public static void writeReplacing(final String fileName, final boolean durable, final ContentWriter content) throws IOException {
         final File target = new File(fileName);
         final File tmp = new File(fileName + ".tmp");
@@ -125,6 +151,9 @@ public final class XdStorageAtomicFile {
     /**
      * S-5: removes stale {@code *.tmp} litter left by a previous crash, before the first
      * write of each resource would lazily clean its own. Returns the number removed.
+     *
+     * @param folder the storage folder to sweep, recursively into subfolders
+     * @return the number of stale temp files actually removed
      */
     public static int sweepStaleTempFiles(final File folder) {
         int removed = 0;
@@ -146,7 +175,15 @@ public final class XdStorageAtomicFile {
         return removed;
     }
 
+    /** Streaming callback producing the new content of one resource file (engine-internal). */
     public interface ContentWriter {
+        /**
+         * Streams the full new content of the resource; the engine opens and closes the writer
+         * and discards the temporary file when this throws.
+         *
+         * @param writer the buffered writer over the temporary sibling file
+         * @throws Exception any failure aborts the whole replacement; the target file stays untouched
+         */
         void write(Writer writer) throws Exception;
     }
 }

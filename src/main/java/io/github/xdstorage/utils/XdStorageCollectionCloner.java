@@ -3,9 +3,27 @@ package io.github.xdstorage.utils;
 import java.lang.reflect.Array;
 import java.util.*;
 
+/**
+ * Deep-clone helpers for the container members of an object graph (arrays, collections, maps)
+ * used by the MVCC snapshot machinery: simple values, enums and {@code Date}s are copied
+ * element-wise, nested containers recurse, entities delegate to {@link XdStoragePojoCloner};
+ * the shared {@code visited} map keeps cycles and repeats single-instance. The source
+ * containers are expected to be engine-owned (mutation quiesced) during the walk.
+ * Engine-internal — not part of the public API.
+ */
 public final class XdStorageCollectionCloner {
     private XdStorageCollectionCloner() {}
 
+    /**
+     * Clones an array element-wise into a new array of the same component type; null,
+     * primitive, enum and simple-typed elements are shared, everything else is deep-copied.
+     *
+     * @param parent the clone of the array's owner (used to rewire back-references), may be {@code null}
+     * @param array the source array (a real array object, not {@code null})
+     * @param visited the identity map of already-cloned sources to their clones
+     * @return the cloned array of the same length and component type
+     * @throws Exception when a nested entity clone fails (delegated reflective instantiation)
+     */
     public static Object cloneArray(final Object parent, final Object array, final Map<Object, Object> visited) throws Exception {
         final int length = Array.getLength(array);
         final Object clone = Array.newInstance(array.getClass().getComponentType(), length);
@@ -30,6 +48,17 @@ public final class XdStorageCollectionCloner {
         return clone;
     }
 
+    /**
+     * Clones a collection into a fresh instance of the same class, element-wise: simple values
+     * are shared, {@code Date}s and nested containers are copied, entities are deep-cloned.
+     * Any failure (e.g. a source class without a no-arg constructor) is swallowed and yields
+     * {@code null}.
+     *
+     * @param parent the clone of the collection's owner (used to rewire back-references), may be {@code null}
+     * @param collection the source collection, may be {@code null}
+     * @param visited the identity map of already-cloned sources to their clones
+     * @return the cloned collection (empty when the source is empty), or {@code null} on failure
+     */
     @SuppressWarnings("unchecked")
     public static Object cloneCollection(final Object parent, final Object collection, final Map<Object, Object> visited) {
         try {
@@ -58,6 +87,17 @@ public final class XdStorageCollectionCloner {
         } catch (Exception e) { return null; }
     }
 
+    /**
+     * Clones a map into a fresh instance of the same class: keys and values are copied with the
+     * same simple/Date/entity rules (keys only ever delegate to {@link XdStoragePojoCloner}),
+     * entries with a null key are dropped, cycles resolve through the visited map. Any failure
+     * (e.g. a source class without a no-arg constructor) is swallowed and yields {@code null}.
+     *
+     * @param parent the clone of the map's owner (used to rewire back-references), may be {@code null}
+     * @param map the source map, may be {@code null}
+     * @param visited the identity map of already-cloned sources to their clones
+     * @return the cloned map (empty when the source is empty), or {@code null} on failure
+     */
     @SuppressWarnings("unchecked")
     public static Object cloneMap(final Object parent, final Object map, final Map<Object, Object> visited) {
         try {

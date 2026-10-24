@@ -14,17 +14,51 @@ import java.util.Collection;
 import java.util.Map;
 
 /**
- * Выделенный stateless-маршаллер для форматирования Java Collections, Maps и Enums.
- * Реализует строгую объектную изоляцию ячеек с явным сохранением метаданных типов.
+ * Dedicated stateless marshaller for Java collections, maps, arrays and enums. Every
+ * element is written as an isolated typed cell — an explicit {@code type:} key plus a
+ * scalar or nested {@code value:} block ({@code - item:}, {@code - entry:} with
+ * {@code key:}/{@code value:}) — so the reader can restore exact runtime types. Live
+ * collections/maps are snapshotted under their monitor before iteration (R-43), so a
+ * concurrent mutator cannot tear the write-out with a
+ * {@code ConcurrentModificationException}.
+ *
+ * <p>Thread-safety: all methods are static and stateless, so the class is thread-safe;
+ * the caller supplies the shared services and helper. Engine-internal — not part of
+ * the public API.</p>
  */
 public class XdStorageYamlBlockContainersWriter {
 
+    /**
+     * Utility class — no instances.
+     */
+    public XdStorageYamlBlockContainersWriter() {
+    }
+
+    /**
+     * Writes a named enum property: an {@code <name>:} block wrapping the enum's
+     * {@code class}/{@code value} pair.
+     *
+     * @param name     the property name to emit as the wrapping block key
+     * @param cl       the enum class
+     * @param value    the enum constant to persist
+     * @param emitter  the YAML output target
+     * @throws IOException when the underlying writer fails
+     */
     public static void writeEnum(final String name, final Class<?> cl, final Object value, final XdStorageYamlEmitter emitter) throws IOException {
         emitter.openBlock(name);
         writeEnumInline(cl, value, emitter);
         emitter.closeBlock();
     }
 
+    /**
+     * Writes the enum body itself: an {@code enum:} block with the {@code class} name and
+     * the encoded constant {@code value}.
+     *
+     * @param cl      the enum class
+     * @param value   the enum constant to persist
+     * @param emitter the YAML output target
+     * @throws IOException when the underlying writer fails
+     */
     public static void writeEnumInline(final Class<?> cl, final Object value, final XdStorageYamlEmitter emitter) throws IOException {
         emitter.openBlock("enum");
         emitter.writeKey("class");
@@ -34,6 +68,20 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.closeBlock();
     }
 
+    /**
+     * Writes a named collection property: an {@code <name>:} block wrapping the typed
+     * collection body.
+     *
+     * @param name             the property name to emit as the wrapping block key
+     * @param cl               the collection's runtime class
+     * @param collection       the collection to persist
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by nested reference decisions)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar item values
+     * @param idGenerator      the engine id generator applied to nested engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails for a nested entity
+     */
     public static void writeCollection(final String name, final Class<?> cl, final Collection<?> collection,
                                        final XdStorageYamlEmitter emitter,
                                        final XdStorageServicesLocator services,
@@ -44,6 +92,20 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.closeBlock();
     }
 
+    /**
+     * Writes the collection body itself: a {@code collection:} block with the stored
+     * {@code class} and one typed {@code - item:} cell per element. The collection is
+     * snapshotted under its monitor before iteration (R-43).
+     *
+     * @param cl               the collection's runtime class
+     * @param collection       the collection to persist
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by nested reference decisions)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar item values
+     * @param idGenerator      the engine id generator applied to nested engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails for a nested entity
+     */
     public static void writeCollectionInline(final Class<?> cl, final Collection<?> collection,
                                              final XdStorageYamlEmitter emitter,
                                              final XdStorageServicesLocator services,
@@ -96,6 +158,16 @@ public class XdStorageYamlBlockContainersWriter {
     /**
      * Пишет массив как блок array с типом КОМПОНЕНТА и элементами-ячейками '- item'.
      * Формат зеркален коллекции: читатель восстанавливает массив через Array.newInstance.
+     *
+     * @param arrayClass       the array's runtime class (the component type is stored, not
+     *                         the array type)
+     * @param array            the array to persist
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by nested reference decisions)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar item values
+     * @param idGenerator      the engine id generator applied to nested engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails for a nested entity
      */
     public static void writeArrayInline(final Class<?> arrayClass, final Object array,
                                         final XdStorageYamlEmitter emitter,
@@ -137,6 +209,19 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.closeBlock(); // Закрываем "array"
     }
 
+    /**
+     * Writes a named map property: an {@code <name>:} block wrapping the typed map body.
+     *
+     * @param name             the property name to emit as the wrapping block key
+     * @param cl               the map's runtime class
+     * @param map              the map to persist
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by nested reference decisions)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar key/value values
+     * @param idGenerator      the engine id generator applied to nested engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails for a nested entity
+     */
     public static void writeMap(final String name, final Class<?> cl, final Map<?, ?> map,
                                 final XdStorageYamlEmitter emitter,
                                 final XdStorageServicesLocator services,
@@ -147,6 +232,21 @@ public class XdStorageYamlBlockContainersWriter {
         emitter.closeBlock();
     }
 
+    /**
+     * Writes the map body itself: a {@code map:} block with the stored {@code class} and
+     * one {@code - entry:} cell per mapping, each carrying the key and the value as
+     * independent typed nodes. The map is snapshotted under its monitor before iteration
+     * (R-43).
+     *
+     * @param cl               the map's runtime class
+     * @param map              the map to persist
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by nested reference decisions)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar key/value values
+     * @param idGenerator      the engine id generator applied to nested engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails for a nested entity
+     */
     public static void writeMapInline(final Class<?> cl, final Map<?, ?> map,
                                       final XdStorageYamlEmitter emitter,
                                       final XdStorageServicesLocator services,

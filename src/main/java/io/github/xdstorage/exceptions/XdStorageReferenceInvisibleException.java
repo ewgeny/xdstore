@@ -10,10 +10,19 @@ package io.github.xdstorage.exceptions;
  */
 public class XdStorageReferenceInvisibleException extends XdStorageException {
 
+    /** Creates the exception with a message.
+     *
+     * @param message the detail message
+     */
     public XdStorageReferenceInvisibleException(final String message) {
         super(message);
     }
 
+    /** Creates the exception with a message and a cause.
+     *
+     * @param message the detail message
+     * @param cause   the underlying cause
+     */
     public XdStorageReferenceInvisibleException(final String message, final Throwable cause) {
         super(message, cause);
     }

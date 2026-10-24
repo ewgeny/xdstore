@@ -9,13 +9,48 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.Map;
 
+/**
+ * The reflective deep cloner behind the MVCC snapshot: copies a POJO graph via the engine's
+ * scanned field metadata. Entities whose policy is an independent resource are cloned SHALLOW
+ * below the id (their nested graphs live in their own records), the root object and embedded
+ * types are cloned deep; generated wrappers are unwrapped before reflection, cycles and
+ * repeats resolve through the shared visited map. The source graph is expected to be
+ * engine-owned (mutation quiesced; each field read is latched on the source). Engine-internal —
+ * not part of the public API.
+ */
 public final class XdStoragePojoCloner {
     private XdStoragePojoCloner() {}
 
+    /**
+     * Non-root overload: the object is cloned as a nested (non-root) node of a larger walk.
+     *
+     * @param parent the clone of the object's owner (used to rewire back-references), may be {@code null}
+     * @param src the object to clone, may be {@code null}
+     * @param visited the identity map of already-cloned sources to their clones
+     * @return the clone (a new instance or a shared simple value)
+     * @throws Exception when reflective instantiation or field access fails
+     */
     public static Object clonePojo(final Object parent, final Object src, final Map<Object, Object> visited) throws Exception {
         return clonePojo(parent, src, visited, false);
     }
 
+    /**
+     * Deep-clones one POJO into a fresh instance of its class: wrappers are unwrapped first;
+     * enums and simple types are shared; {@code Date}s, arrays, collections and maps are copied
+     * element-wise. For an independent-resource entity (non-root walk) only the id is copied —
+     * nested graphs stay in their own records; an id-less such entity is handed back as the
+     * observable wrapper instead of a clone. The root object and embedded types are copied
+     * field-by-field, {@code @XdStorageParentObject} back-links rewired to the parent clone.
+     *
+     * @param parent the clone of the object's owner (used to rewire back-references), may be {@code null}
+     * @param src the object to clone, may be {@code null}
+     * @param visited the identity map of already-cloned sources to their clones (cycle guard)
+     * @param isRootClone {@code true} when {@code src} is the walk's root, forcing a deep copy
+     *                    even for independent-resource entities
+     * @return the clone (a new instance, a shared simple value, or the observable wrapper for an
+     *         id-less independent-resource entity)
+     * @throws Exception when reflective instantiation or field access fails
+     */
     public static Object clonePojo(final Object parent, final Object src, final Map<Object, Object> visited, boolean isRootClone) throws Exception {
         if (src == null || src instanceof Class<?>) {
             return src;

@@ -10,12 +10,25 @@ import java.lang.reflect.Method;
 import java.util.Date;
 
 /**
- * Стандартный системный хелпер конвертации простых типов СУБД.
- * Полностью поддерживает динамическую материализацию примитивов и перечислений (Enum).
+ * The engine's built-in {@link IXdStorageSimpleTypeHelper}: classifies simple values,
+ * renders them to their canonical on-disk strings and materializes them back. Fully
+ * supports dynamic materialization of primitives, wrapper types and enums, and falls
+ * back to any target type with a {@code String}-argument constructor (typical for id
+ * types). {@code Class} values are resolved by name, with a registry fallback for
+ * classes the application loaded through its own classloader.
+ *
+ * <p>The implementation is stateless and therefore thread-safe; a single instance is
+ * shared by all readers and writers. Engine-internal — not part of the public API.</p>
  */
 public class XdStorageDefaultSimpleTypeHelper implements IXdStorageSimpleTypeHelper {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageDefaultSimpleTypeHelper.class);
+
+    /**
+     * Creates the default helper. Stateless, so one shared instance is normally enough.
+     */
+    public XdStorageDefaultSimpleTypeHelper() {
+    }
 
     @Override
     public boolean isSimpleType(final Class<?> cl, final Object object) {

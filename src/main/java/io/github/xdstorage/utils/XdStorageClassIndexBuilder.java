@@ -8,9 +8,25 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Engine-internal builder of the secondary search indexes declared on an entity class with
+ * {@code @XdStorageObjectSearchIndex} (repeatable), including the child-index attachments for
+ * {@code @XdStorageObjectChildSearchIndex}-declared nested indexes. Stateless; all lookups go
+ * through the class metadata registry, so it is safe to call from any thread. Not part of the
+ * public API.
+ */
 public final class XdStorageClassIndexBuilder {
     private XdStorageClassIndexBuilder() {}
 
+    /**
+     * Builds the named search indexes of one entity class from its index annotations. Only
+     * simple-typed index fields get field accessors; child indexes attach when the child class
+     * declares a matching index name. A class without index annotations yields an empty map.
+     *
+     * @param cl the entity class annotated with {@code @XdStorageObjectSearchIndex}
+     * @param fields the class's scanned fields, by field name (source of the accessors)
+     * @return the search indexes by index name (an empty map when none are declared)
+     */
     public static Map<String, XdStorageSearchIndex> buildIndexes(final Class<?> cl, final Map<String, XdStorageObjectField> fields) {
         if (!cl.isAnnotationPresent(XdStorageObjectSearchIndex.class)) return Collections.emptyMap();
 

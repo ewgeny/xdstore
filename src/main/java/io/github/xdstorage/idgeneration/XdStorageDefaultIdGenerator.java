@@ -14,6 +14,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/** The engine's id-generation router: picks the generator per id field —
+ * {@code UUID_GENERATOR} routes to the UUID generator (String ids only, a numeric id
+ * fails loudly), {@code CUSTOM_GENERATOR} to the field's declared
+ * {@code IXdStorageIdGenerator} class (instantiated once, cached), and the default
+ * {@code DATABASE_GENERATOR} to the Hi-Lo generator matching the id type
+ * ({@link XdStorageLongIdGenerator}/{@link XdStorageIntegerIdGenerator}/
+ * {@link XdStorageStringIdGenerator}). Engine-internal classes (B+tree nodes) fall
+ * back to the numeric Hi-Lo generators when no generator resolves. */
 public class XdStorageDefaultIdGenerator implements IXdStorageIdGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageDefaultIdGenerator.class);
@@ -21,6 +29,9 @@ public class XdStorageDefaultIdGenerator implements IXdStorageIdGenerator {
     private final Map<Class<?>, IXdStorageIdGenerator> generatorsByIdClassName = new HashMap<>();
     private final Map<Class<? extends IXdStorageIdGenerator>, IXdStorageIdGenerator> generatorsByClassName = new ConcurrentHashMap<>();
 
+    /** Builds the router.
+     *
+     * @param services the storage services locator handed to DI-style custom generators */
     public XdStorageDefaultIdGenerator(final XdStorageServicesLocator services) {
         this.services = services;
         generatorsByIdClassName.put(String.class, new XdStorageStringIdGenerator());

@@ -11,5 +11,8 @@ package io.github.xdstorage.serialization;
  * see the migration recipe in docs/EMBEDDING.md, "Compatibility &amp; support statement".
  */
 public enum FilesFormat {
-    XML, YAML
+    /** XML content in {@code .xml}-named files (the 1.x-era format; still fully supported). */
+    XML,
+    /** YAML content (the engine default; the only format commit journaling supports). */
+    YAML
 }

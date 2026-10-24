@@ -21,6 +21,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/** The engine's Integer Hi-Lo id generator: allocates per-class batches
+ * ({@code PART_OF_IDENTIFIERS} ids at a time) from the persisted counter record
+ * ({@link XdStorageIntegerIdCounterRecord}) inside their own transactions, then serves
+ * ids from memory; the next batch is prefetched before the buffer runs dry. Per-class
+ * locking makes concurrent generation safe. */
 public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageIntegerIdGenerator.class);
@@ -31,6 +36,9 @@ public class XdStorageIntegerIdGenerator implements IXdStorageIdGenerator {
     private final Map<Class<?>, AtomicInteger> counters = new ConcurrentHashMap<>();
     private final Map<Class<?>, Integer> lastIdentifierOfPart = new ConcurrentHashMap<>();
 
+    /** Builds the generator.
+     *
+     * @param provider the storage services locator (transaction/bookkeeping access) */
     public XdStorageIntegerIdGenerator(final XdStorageServicesLocator provider) {
         this.services = provider;
     }

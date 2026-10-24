@@ -32,8 +32,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * This class presents simple working interface. This one provides simple
- * methods for object persistence.
+ * The file-storage implementation behind {@link XdStorageProvider}: the public contract is
+ * {@link IXdStorage}/{@link IXdFileStorage}, whose javadoc this class inherits method by
+ * method. Engine internals (services locator, resources, transactions) hang off
+ * {@link XdStorageServicesLocator}; never instantiate directly — open storages through
+ * the provider, which owns the folder lock and the name registry.
  */
 class XdStorage implements IXdFileStorage {
 
@@ -55,10 +58,14 @@ class XdStorage implements IXdFileStorage {
     private Thread shutdownHook;
 
     /**
-     * This constructor initialize storage for specified folder. All files will be
-     * storaged in this folder.
+     * Builds the storage over the given folder: wires the services locator (which
+     * prepares the folder layout), and registers the JVM-exit shutdown hook when the
+     * configuration asks for one. Not public — {@link XdStorageProvider} is the factory,
+     * it also owns the folder lock and the name registry.
      *
-     * @param folder Storage path.
+     * @param name          the storage name (registry key)
+     * @param folder        the storage folder; all engine files live under it
+     * @param fragmentSize  objects per class file ({@code StoreAsClassObjects} policy)
      */
     XdStorage(final String name, final String folder, final int fragmentSize) {
         this(name, folder, fragmentSize, FilesFormat.YAML, XdStorageConfig.defaults());

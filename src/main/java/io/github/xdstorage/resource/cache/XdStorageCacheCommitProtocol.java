@@ -27,10 +27,26 @@ public final class XdStorageCacheCommitProtocol {
 
     private final XdStorageCacheContext cache;
 
+    /**
+     * Binds the protocol to a cache context.
+     *
+     * @param cache the cache context (records registry, workspace, id field) this protocol operates on
+     */
     public XdStorageCacheCommitProtocol(final XdStorageCacheContext cache) {
         this.cache = cache;
     }
 
+    /**
+     * Phase 1 of the two-phase commit: snapshots the transaction's write-set into the collector.
+     * For every changed record the pending operation type and the old/new object pair (cloned
+     * where required, and preferring the transaction's materialized instance for inserts and
+     * updates) are added to {@code collector}, after which the record is marked prepare-committed;
+     * not-yet-identified observable wrappers are contributed as inserts without an id. After this
+     * phase the collector holds everything the resource needs to write the changes out to disk.
+     *
+     * @param transaction the committing transaction whose write-set is snapshotted
+     * @param collector   the per-resource change buffer that receives the prepared change objects
+     */
     public void prepareCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
         final String transactionId = transaction.getTransactionId();
 
@@ -90,6 +106,16 @@ public final class XdStorageCacheCommitProtocol {
         }
     }
 
+    /**
+     * Phase 2 of the two-phase commit: feeds the collector the same change objects as
+     * {@code prepareCommit} and marks every record perform-committed. Running it after the
+     * prepare phase sets both two-phase flags on each record, which is the precondition the
+     * record's later {@code commit} requires; unidentified observable wrappers are again
+     * contributed as inserts without an id.
+     *
+     * @param transaction the committing transaction whose write-set is contributed
+     * @param collector   the per-resource change buffer receiving the final change objects
+     */
     public void performCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges collector) {
         final String transactionId = transaction.getTransactionId();
 
@@ -149,6 +175,16 @@ public final class XdStorageCacheCommitProtocol {
         }
     }
 
+    /**
+     * Finalizes a successful commit: discards the transaction's undo journal (the mutations
+     * are permanent now), commits every write-set record, releases each record's lock and
+     * closes the transaction's workspace contour. A record that reports an already-committed
+     * state (nested/double commit path) is skipped with a warning instead of failing, since
+     * its data is already permanent; records in any other illegal state fail loudly.
+     *
+     * @param transaction the transaction whose cached changes become permanent
+     * @throws XdStorageException if a record's lock cannot be released
+     */
     public void commit(final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
         cache.workspace().removeUndoLog(transactionId); // изменения стали постоянными — журнал отката не нужен
@@ -193,6 +229,18 @@ public final class XdStorageCacheCommitProtocol {
         cache.workspace().finishTransaction(transactionId);
     }
 
+    /**
+     * Reverts every cached change of the transaction. The undo journal — populated at the
+     * first mutation of each record — is replayed in reverse order, so rollback strictly
+     * inverts the transaction's chronology with exactly one undo point per record: inserts
+     * by this transaction are undone (infrastructure-cache inserts keep serving their live
+     * instance), other records are restored to their previous version, and every processed
+     * record is unlocked. If no journal exists (legacy contour), the write-set map is rolled
+     * back in iteration order instead. Finally the transaction's workspace contour is closed.
+     *
+     * @param transaction the transaction whose cached changes are reverted
+     * @throws XdStorageException if a record's lock cannot be released
+     */
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
         final Map<Object, XdStorageCacheRecord> map = cache.workspace().removeChanges(transactionId);
@@ -263,6 +311,18 @@ public final class XdStorageCacheCommitProtocol {
         cache.workspace().finishTransaction(transactionId);
     }
 
+    /**
+     * Restores the cache after the disk write-out of a commit failed. The change objects the
+     * collector already committed are replayed in reverse effect: objects this transaction
+     * deleted are put back into the records registry (reusing the write-set record when it
+     * still holds one), objects it inserted are removed again, and updated objects get their
+     * pre-transaction record back; each affected record is rolled back and unlocked. The
+     * transaction's workspace contour is then closed.
+     *
+     * @param transaction the transaction whose commit failed on disk
+     * @param committed   the change objects the collector reported as applied before the failure
+     * @throws XdStorageException if a record's lock cannot be released
+     */
     public void rollbackFailedCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> committed) throws XdStorageException {
         final String transactionId = transaction.getTransactionId();
         cache.workspace().removeUndoLog(transactionId);

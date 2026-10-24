@@ -84,7 +84,14 @@ public final class XdStorageCacheRecord {
         this.cache = cache;
     }
 
-    /** Запись чистого чтения (объект пришел с диска / из живой структуры). */
+    /**
+     * Запись чистого чтения (объект пришел с диска / из живой структуры).
+     *
+     * @param cache  the cache context this record belongs to
+     * @param field  the id field accessor used to derive the record's id from the object
+     * @param object the materialized committed object the record will hold
+     * @return a new cache record in the clean-read state
+     */
     public static XdStorageCacheRecord newReadRecord(final XdStorageCacheContext cache, final XdStorageObjectIdField field, final Object object) {
         final XdStorageCacheRecord record = new XdStorageCacheRecord(cache);
         record.id = field.get(object);
@@ -96,7 +103,15 @@ public final class XdStorageCacheRecord {
         return record;
     }
 
-    /** Запись незакоммиченной вставки: контент в newObject, object == null до коммита. */
+    /**
+     * Запись незакоммиченной вставки: контент в newObject, object == null до коммита.
+     *
+     * @param cache       the cache context this record belongs to
+     * @param field       the id field accessor used to derive the record's id from the object
+     * @param newObject   the object being inserted (held as the pending content until commit)
+     * @param transaction the inserting transaction, which becomes the record's owner
+     * @return a new cache record in the uncommitted-insert state
+     */
     public static XdStorageCacheRecord newInsertRecord(final XdStorageCacheContext cache, final XdStorageObjectIdField field, final Object newObject, final XdStorageTransaction transaction) {
         final XdStorageCacheRecord record = new XdStorageCacheRecord(cache);
         record.id = field.get(newObject);
@@ -109,44 +124,86 @@ public final class XdStorageCacheRecord {
         return record;
     }
 
+    /**
+     * Returns the id this record is registered under.
+     *
+     * @return the object id this record is keyed by in the cache registry (may be {@code null}
+     *         for a not-yet-identified insert)
+     */
     public Object getId() {
         return this.id;
     }
 
+    /**
+     * Returns the record's monotonic state version.
+     *
+     * @return the record's state version, incremented on every state mutation (used for
+     *         READ_COMMITTED refresh detection)
+     */
     public long getVersion() {
         return version;
     }
 
-    /** R-58 диагностика: serial закоммиченной версии записи. */
+    /** R-58 диагностика: serial закоммиченной версии записи.
+     *
+     * @return the commit serial of the record's current version, or {@code 0} if it has not
+     *         been committed in memory yet
+     */
     public long getCommitSerial() {
         return commitSerial;
     }
 
-    /** R-58 диагностика: timestamp текущей версии записи. */
+    /** R-58 диагностика: timestamp текущей версии записи.
+     *
+     * @return the timestamp of the record's current version (the owning transaction's start
+     *         time, or {@link java.lang.Long#MIN_VALUE} if never mutated)
+     */
     public long getTimestamp() {
         return timestamp;
     }
 
-    /** R-40 диагностика отказов: состояние записи на момент отказа обновления. */
+    /** R-40 диагностика отказов: состояние записи на момент отказа обновления.
+     *
+     * @return the record's current internal state as text (one of {@code undefined},
+     *         {@code locked}, {@code committed}, {@code rolledback})
+     */
     public String getState() {
         return String.valueOf(state);
     }
 
-    /** R-40 диагностика отказов: id транзакции-владельца записи (или null). */
+    /** R-40 диагностика отказов: id транзакции-владельца записи (или null).
+     *
+     * @return the id of the transaction currently owning this record, or {@code null} if unowned
+     */
     public String getOwnerTransactionId() {
         return transaction != null ? transaction.getTransactionId() : null;
     }
 
-    /** Владелец записи (транзакция, захватившая ее последней) или null. */
+    /** Владелец записи (транзакция, захватившая ее последней) или null.
+     *
+     * @return the transaction that captured this record last, or {@code null} if unowned
+     */
     public XdStorageTransaction getOwnerTransaction() {
         return transaction;
     }
 
-    /** R-40 диагностика отказов: timestamp записи на момент отказа обновления. */
+    /** R-40 диагностика отказов: timestamp записи на момент отказа обновления.
+     *
+     * @return the timestamp of the record's current version (see {@link #getTimestamp()})
+     */
     public long getRecordTimestamp() {
         return timestamp;
     }
 
+    /**
+     * Whether this transaction may write the record: the state is fresh, the owner is dead
+     * (the record is adoptable), the transaction already owns this very mutation (directly or
+     * through the nested-transaction chain, R-40), or the record is committed and the
+     * transaction started after the version's timestamp.
+     *
+     * @param transaction the transaction attempting the change
+     * @return {@code true} if the change would not conflict with the record's current state
+     */
     public boolean canBeChangedByTransaction(final XdStorageTransaction transaction) {
         boolean isOwnerTxAlive = this.transaction != null &&
                 cache.isTransactionAlive(this.transaction);
@@ -192,6 +249,16 @@ public final class XdStorageCacheRecord {
         return false;
     }
 
+    /**
+     * Whether this transaction may write the record, judged against the timestamp at which the
+     * transaction read the object: identical to {@link #canBeChangedByTransaction(XdStorageTransaction)}
+     * except that a committed record requires the read timestamp (rather than the transaction's
+     * start time) to be newer than the version's timestamp.
+     *
+     * @param transaction                        the transaction attempting the change
+     * @param readObjectByTransactionTimestamp   the timestamp of the version the transaction read
+     * @return {@code true} if the change would not conflict with the version the transaction saw
+     */
     public boolean canBeChangedByTransaction(final XdStorageTransaction transaction, final long readObjectByTransactionTimestamp) {
         boolean isOwnerTxAlive = this.transaction != null &&
                 cache.isTransactionAlive(this.transaction);
@@ -212,41 +279,90 @@ public final class XdStorageCacheRecord {
         return result;
     }
 
+    /**
+     * Whether the record currently holds an uncommitted mutation made by this transaction.
+     *
+     * @param transaction the transaction to test ownership against
+     * @return {@code true} if the record's pending change is a non-read mutation stamped by
+     *         exactly this transaction instance
+     */
     public boolean isChangedByTransaction(final XdStorageTransaction transaction) {
         return this.change != XdStorageCacheChange.read && this.transaction != null && this.transaction == transaction
                 && transaction.getTimestart() == timestamp;
     }
 
+    /**
+     * Returns the record's committed object.
+     *
+     * @return the committed (or last write-out) object held by the record; {@code null} for a
+     *         record whose insert has not been committed yet
+     */
     public Object getObject() {
         return this.object;
     }
 
+    /**
+     * Returns the record's pending (uncommitted) content.
+     *
+     * @return the pending (uncommitted) content of the record — the inserted or updated
+     *         object, or {@code null} for a pending delete or when nothing is pending
+     */
     public Object getNewObject() {
         return this.newObject;
     }
 
+    /**
+     * Replaces the record's pending (uncommitted) content.
+     *
+     * @param newObject the new pending content ({@code null} marks a pending delete)
+     */
     public void setNewObject(final Object newObject) {
         this.newObject = newObject;
     }
 
+    /**
+     * Whether the record's current version is committed.
+     *
+     * @return {@code true} if the record's current version has been committed
+     */
     public boolean isCommitedState() {
         return this.state == State.committed;
     }
 
+    /**
+     * Whether the record is a clean read.
+     *
+     * @return {@code true} if the record holds a clean read with no pending mutation
+     */
     public boolean isReadChange() {
         return this.change == XdStorageCacheChange.read;
     }
 
+    /**
+     * Whether the record has a pending insert.
+     *
+     * @return {@code true} if the record's pending change is an insert
+     */
     public boolean isInsertChange() {
         // Было: return this.change == Change.insert; (но из-за опечаток в CHM проверялся Change.change)
         // Стало: Прямое, строгое и кристальное вычисление типа транзакционной вставки!
         return this.change == XdStorageCacheChange.insert;
     }
 
+    /**
+     * Whether the record has a pending update.
+     *
+     * @return {@code true} if the record's pending change is an update
+     */
     public boolean isUpdateChange() {
         return this.change == XdStorageCacheChange.update;
     }
 
+    /**
+     * Whether the record has a pending delete.
+     *
+     * @return {@code true} if the record's pending change is a delete
+     */
     public boolean isDeleteChange() {
         return this.change == XdStorageCacheChange.delete;
     }
@@ -256,6 +372,13 @@ public final class XdStorageCacheRecord {
      * шести сайтов чтения кэша (скан по предикату, watch, полный скан, unsafe-скан,
      * чтение по id, чтение по ссылке). Различия сайтов сведены к параметрам view
      * и committingSerial; сама выборка обязана выполняться под монитором записи.
+     *
+     * @param transaction      the reading transaction the visible version is resolved for
+     * @param view             the read site requesting the version (scan, by-id or write-out)
+     * @param committingSerial the single commit serial of another transaction currently in its
+     *                         commit phase and visible to the reader's snapshot, or {@code 0}
+     * @return the object version visible to the transaction ({@code null} means "not visible",
+     *         e.g. an insert by another transaction or a delete the reader must observe)
      */
     public Object resolveVisible(final XdStorageTransaction transaction, final View view, final long committingSerial) {
         if (isUpdateChange()) {
@@ -304,6 +427,13 @@ public final class XdStorageCacheRecord {
         return view == View.WRITE_OUT ? object : getObjectForTransaction(transaction);
     }
 
+    /**
+     * Marks the record as pending update by the transaction: archives the current version,
+     * stamps the record with the transaction's start time and switches the change/state
+     * markers to update/locked. Must run under the record's monitor.
+     *
+     * @param transaction the transaction making the update
+     */
     public void markUpdate(IXdStorageTransaction transaction) {
         ++version;
         this.prevObject = this.object;
@@ -325,6 +455,13 @@ public final class XdStorageCacheRecord {
         this.state = State.locked;
     }
 
+    /**
+     * Marks the record as pending delete by the transaction: archives the current version,
+     * stamps the record with the transaction's start time and switches the change/state
+     * markers to delete/locked. Must run under the record's monitor.
+     *
+     * @param transaction the transaction making the delete
+     */
     public void markDelete(IXdStorageTransaction transaction) {
         ++version;
         this.prevObject = this.object;
@@ -341,6 +478,17 @@ public final class XdStorageCacheRecord {
         this.state = State.locked;
     }
 
+    /**
+     * Captures the record for the transaction, blocking until any previous holder releases it
+     * or is dead (its record is then adopted). Infrastructure-cache records skip the latch
+     * entirely (R-27) — structural contention is serialized by the tree's own locks — and just
+     * record ownership. Waits are chunked so the owner's death is noticed and the
+     * transaction's lock timeout can abort the wait.
+     *
+     * @param transaction the transaction capturing the record
+     * @throws XdStorageException if the wait exceeds the transaction's lock timeout or is
+     *                            interrupted
+     */
     public void lock(final XdStorageTransaction transaction) throws XdStorageException {
         // R-27: инфраструктурные записи (деревья/узлы) НЕ захватывают latch. Структурная
         // конкуренция уже сериализована write-локом самого дерева; удержание latch-а до
@@ -409,6 +557,13 @@ public final class XdStorageCacheRecord {
         }
     }
 
+    /**
+     * Releases the record previously captured by this transaction and wakes the next waiter;
+     * for infrastructure-cache records it only clears ownership (no latch is held, R-27).
+     *
+     * @param transaction the transaction releasing the record
+     * @throws XdStorageException if the transaction does not own the record's lock
+     */
     public void unlock(final XdStorageTransaction transaction) throws XdStorageException {
         // R-27: инфраструктурные записи не держат latch — просто разъединяем владельца
         if (cache.isInfrastructureCache()) {
@@ -430,14 +585,33 @@ public final class XdStorageCacheRecord {
         }
     }
 
+    /**
+     * Phase 1 of the record's two-phase commit protocol: arms the prepare flag so that the
+     * subsequent {@code commit} accepts the record (both phase flags must be set by then).
+     */
     public void prepareCommit() {
         firstPhaseCommit = true;
     }
 
+    /**
+     * Phase 2 of the record's two-phase commit protocol: arms the perform flag, completing the
+     * precondition pair checked by {@code commit}.
+     */
     public void performCommit() {
         secondPhaseCommit = true;
     }
 
+    /**
+     * Makes the record's pending change permanent: the pending content becomes the committed
+     * object, the previous object is archived for snapshot readers, and the version is stamped
+     * with the transaction's single commit serial — the atomic-visibility boundary for
+     * SNAPSHOT readers (R-45). Both two-phase flags must have been armed by
+     * {@code prepareCommit} and {@code performCommit} first.
+     *
+     * @param tx the committing transaction supplying the commit serial and timestamp
+     * @throws XdStorageRuntimeException if either two-phase commit flag was not armed (the
+     *                                   record is in an illegal state for commit)
+     */
     public void commit(IXdStorageTransaction tx) {
         ++version;
         if (!firstPhaseCommit || !secondPhaseCommit) {
@@ -478,6 +652,13 @@ public final class XdStorageCacheRecord {
         this.change = XdStorageCacheChange.undefined;
     }
 
+    /**
+     * Reverts the record's pending change: the archived previous object and state become
+     * current again, the pending content is dropped, both two-phase flags are cleared and the
+     * timestamp is rolled back — the exact inverse of the mutation that created the record's
+     * undo point. A late or racing rollback of an already-committed record is suppressed with
+     * a warning instead of inverting committed data (R-58).
+     */
     public void rollback() {
         // R-58: откат ЗАКОММИЧЕННОЙ записи запрещен. Поздний/гонный откат (mark-rollback-only
         // «догнавший» уже идущий или завершенный коммит; commit-флаги к этому моменту уже
@@ -532,6 +713,10 @@ public final class XdStorageCacheRecord {
      * R-45: если запись захвачена чужой транзакцией, УЖЕ ВСТУПИВШЕЙ в фазу коммита, и
      * снапшот читателя включает ее единый commit-serial — возвращает этот serial
      * (новое состояние записи обязано быть видно читателю атомарно). Иначе 0.
+     *
+     * @param reader the snapshot-reading transaction testing visibility
+     * @return the owner's commit serial if it is inside the reader's snapshot (so the record's
+     *         new state must be resolved as visible), otherwise {@code 0}
      */
     public long committingSerialVisibleTo(final XdStorageTransaction reader) {
         final XdStorageTransaction owner = this.transaction;

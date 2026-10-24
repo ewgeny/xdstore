@@ -9,11 +9,27 @@ import io.github.xdstorage.search.XdStorageSearchIndexResource;
 import io.github.xdstorage.services.XdStorageServicesLocator;
 import io.github.xdstorage.utils.XdStorageClassInfo;
 
+/**
+ * The concrete resources manager of a file-backed storage: creates plain data and references
+ * resources, and hash or B-tree id-index resources depending on the entity's declared index
+ * type. New {@code StoreAsClassObjects} fragments are capped at the configured fragment size
+ * (see {@link #getFreeResourceId}). Thread-safety as of the abstract base: all state is kept
+ * in concurrent maps.
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageResourcesManager
         extends XdStorageAbstractResourcesManager {
 
+    /** Maximum number of objects per {@code StoreAsClassObjects} fragment file. */
     protected final int fragmentSize;
 
+    /**
+     * Builds the manager.
+     *
+     * @param services     engine services shared with collaborators
+     * @param fragmentSize the maximum number of objects per class-shared fragment file
+     */
     public XdStorageResourcesManager(final XdStorageServicesLocator services, final int fragmentSize) {
         super(services);
 

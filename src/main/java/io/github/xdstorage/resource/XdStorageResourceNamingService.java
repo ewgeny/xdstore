@@ -5,6 +5,14 @@ import io.github.xdstorage.utils.XdStorageObjectIdField;
 import io.github.xdstorage.utils.XdStorageObjectUtils;
 import io.github.xdstorage.utils.XdStorageStringUtils;
 
+/**
+ * The default naming service: builds resource ids as relative file paths under the storage
+ * folder — data resources under {@code <folder>/data/<Class>/...}, index resources under the
+ * same class directory, structure records under {@code <folder>/structure/} — with the
+ * configured file suffix. Stateless after construction and thread-safe.
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageResourceNamingService implements IXdStorageResourceNamingService {
 
     private static final String STRUCTURE_DIR = "structure";
@@ -15,6 +23,12 @@ public class XdStorageResourceNamingService implements IXdStorageResourceNamingS
 
     private final String fileSuffix;
 
+    /**
+     * Builds a naming service rooted at the given storage folder.
+     *
+     * @param folder     the storage folder the paths are relative to (its prefix)
+     * @param fileSuffix the file suffix of resource files
+     */
     public XdStorageResourceNamingService(final String folder, final String fileSuffix) {
         this.folder = folder;
         this.fileSuffix = fileSuffix;

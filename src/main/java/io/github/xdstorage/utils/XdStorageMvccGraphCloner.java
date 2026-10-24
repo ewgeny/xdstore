@@ -9,12 +9,30 @@ import java.lang.reflect.Field;
 import java.util.Date;
 import java.util.Map;
 
+/**
+ * The MVCC snapshot graph cloner: builds an in-memory deep copy of an object graph so that
+ * transaction writes never mutate an object handed to (or read from) another transaction.
+ * Cloning state lives in the thread-confined {@link XdStorageCloningContext}: cycles terminate,
+ * repeated references stay single-instance, and the caller's wrapper objects are unwrapped to
+ * the underlying entity first. Engine-internal — not part of the public API.
+ */
 public final class XdStorageMvccGraphCloner {
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(XdStorageMvccGraphCloner.class);
 
     private XdStorageMvccGraphCloner() {}
 
+    /**
+     * Deep-clones one object for the transaction's snapshot: wrappers are unwrapped,
+     * {@code XdStorageIdentifiableObject} holders are converted, everything else is copied
+     * through {@link XdStoragePojoCloner} under the thread's visited map (the root call clears
+     * it when done). A clone failure is logged and yields {@code null} — callers must treat a
+     * {@code null} result as a data-loss signal, never write it into an object field.
+     *
+     * @param <TObject> the static type of the object being cloned
+     * @param object the source object, may be {@code null}
+     * @return the deep clone, or {@code null} when {@code object} is {@code null} or cloning failed
+     */
     @SuppressWarnings("unchecked")
     public static <TObject> TObject cloneObject(final TObject object) {
         if (object == null) return null;
@@ -57,6 +75,16 @@ public final class XdStorageMvccGraphCloner {
         }
     }
 
+    /**
+     * Copies the state of {@code object} into the existing same-type instance {@code reference}
+     * (field references rebinding through the thread's visited map), the in-place variant of
+     * {@link #cloneObject(Object)} used to refresh a previously returned object. Identifiable
+     * objects delegate to the converter; failures are swallowed (the reference keeps its prior
+     * state) and the root call clears the visited map.
+     *
+     * @param reference the target instance receiving the copied state, same runtime type as {@code object}
+     * @param object the source instance whose state is copied
+     */
     public static void fillFromSameTypeObject(final Object reference, final Object object) {
         final Map<Object, Object> visited = XdStorageCloningContext.get();
         boolean isRootCall = XdStorageCloningContext.isRootCall();

@@ -1,9 +1,12 @@
 package io.github.xdstorage.resource;
 
-/** Уровень изоляции чтений кэша ресурсов. */
+/** The read isolation applied to every resource cache of a storage
+ * (open-time configuration: {@code XdStorageConfig.builder().isolationLevel(...)},
+ * default {@link #SNAPSHOT}). */
 public enum XdStorageIsolationLevel {
-    /** Повторяемое чтение/снимок: читатель, начавший до чужого коммита, видит старую версию. */
+    /** Repeatable-read/snapshot: a reader that started before another's commit keeps
+     * seeing the older version for its whole transaction (the default). */
     SNAPSHOT,
-    /** Read Committed: читатель всегда видит ПОСЛЕДНЕЕ закоммиченное состояние. */
+    /** Read committed: a reader always sees the LATEST committed state. */
     READ_COMMITTED
 }

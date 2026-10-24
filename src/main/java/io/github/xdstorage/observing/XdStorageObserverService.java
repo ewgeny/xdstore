@@ -8,7 +8,23 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * JVM-global registry of id-observable wrappers, keyed by domain class: hands out one
+ * stable observable wrapper per (class, object) pair and clears the mapping through a
+ * self-registered observer as soon as the wrapper's id is set (deferred-id
+ * notification), letting the GC reclaim the entry.
+ *
+ * <p>The registry is a static {@code ConcurrentHashMap} of per-class segments, each a
+ * synchronized {@code WeakHashMap} keyed weakly by the wrapped object — completed
+ * transactions are reclaimed by the GC without explicit eviction; concurrent access is
+ * safe through the concurrent map's per-segment atomicity. Engine-internal — not part
+ * of the public API.</p>
+ */
 public class XdStorageObserverService {
+
+    /** Registry-only holder: all functionality is static. */
+    public XdStorageObserverService() {
+    }
 
     // АРХИТЕКТУРНОЕ ИСПРАВЛЕНИЕ ЯДРА (Ликвидация скрытой утечки памяти Heap):
     // Переводим внутренние сегменты кэша на Collections.synchronizedMap(new WeakHashMap<>()).
@@ -17,6 +33,16 @@ public class XdStorageObserverService {
     // полностью исключая OutOfMemory и race conditions на фазе параллельного вызова .remove()!
     private static final Map<Class<?>, Map<Object, IXdStorageIdObservableWrapper>> wrappers = new ConcurrentHashMap<>();
 
+    /**
+     * Returns the observable wrapper registered for the given object, creating and
+     * caching it on first request (a repeated call for the same object yields the same
+     * wrapper while the entry lives). The freshly created wrapper gets a one-shot
+     * observer that removes the registry entry the first time its id is set.
+     *
+     * @param object the object to expose as an id-observable wrapper; must not be {@code null}
+     * @return the cached or newly generated observable wrapper (the underlying wrapping
+     *         helper may yield {@code null} when wrapper generation fails)
+     */
     public static IXdStorageIdObservableWrapper getObservableWrapper(final Object object) {
         final Class<?> cl = object.getClass();
 

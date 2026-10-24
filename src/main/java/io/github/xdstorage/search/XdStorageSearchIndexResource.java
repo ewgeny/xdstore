@@ -32,22 +32,44 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * One persisted search-index resource: the transactional owner of an index's B+tree pair —
+ * the search tree keyed by the composite {@code XdStorageSearchIndexKey} (PRIMARY value +
+ * object id) and the address key tree keyed by object id. Lazily creates both trees inside
+ * the caller's transaction on first insert, keeps them in step with entity changes
+ * (in-place entry rewrite when the PRIMARY value is unchanged, delete+insert when it
+ * moves), tolerates absent entries on delete, and streams the whole index for scans.
+ * Search-index resources carry no data of their own — the persisted payload lives in the
+ * trees, so every phase-2/rollback hook is a no-op.
+ *
+ * <p>Engine-internal — not part of the public API. One instance serves many concurrent
+ * transactions: per-record work runs in the caller's transaction context, tree creation
+ * is guarded by an internal lock, and the commit lifecycle is inherited from the
+ * resource-object contract.</p>
+ */
 public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResourceObject, IXdStorageSearchIndexDaoResource {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageSearchIndexResource.class);
 
+    /** The engine's service locator (storage, canonical instances registry). */
     protected final XdStorageServicesLocator services;
 
+    /** The resources manager that issued this resource and owns its lifecycle. */
     protected final XdStorageAbstractResourcesManager manager;
 
+    /** The declared index name this resource persists (the B+tree id's index part). */
     protected final String indexName;
 
+    /** The storage-wide unique resource id of this index resource. */
     protected final Object resourceId;
 
+    /** Class metadata of the indexed entity class (its declared indexes and id field). */
     protected final XdStorageClassInfo objectClInfo;
 
+    /** Class metadata of the key-tree record type the resource persists. */
     protected final XdStorageClassInfo clInfo;
 
+    /** The id field of the key-tree record type. */
     protected final XdStorageObjectIdField idField;
 
     private Map<String, Stack<IXdStorageChangeIndexRollback>> rollbacks = new ConcurrentHashMap<String, Stack<IXdStorageChangeIndexRollback>>();
@@ -56,6 +78,18 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
 
     private final IXdStorageObjectsWriter writer;
 
+    /**
+     * Creates the resource for one declared index of one entity class.
+     *
+     * @param services     the engine's service locator
+     * @param manager      the resources manager issuing this resource
+     * @param indexName    the declared index name this resource persists
+     * @param resourceId   the storage-wide unique resource id
+     * @param objectClInfo the metadata of the indexed entity class
+     * @param factory      the serialization factory for the record reader/writer
+     * @param fragmentSize the engine's fragmentation setting (objects per file); accepted
+     *                     per the resource contract, unused here — the payload lives in the B+trees
+     */
     public XdStorageSearchIndexResource(final XdStorageServicesLocator services,
                                         final XdStorageAbstractResourcesManager manager,
                                         final String indexName, final Object resourceId,
@@ -91,6 +125,11 @@ public class XdStorageSearchIndexResource implements IXdStorageSearchIndexResour
         return false;
     }
 
+    /**
+     * The backing file name of this index resource (the resource id as a string).
+     *
+     * @return the resource's file name
+     */
     public String getFileName() {
         return resourceId.toString();
     }

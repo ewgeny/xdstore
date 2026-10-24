@@ -7,6 +7,18 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * The persisted structure record of one stored class — the engine's snapshot of the class's
+ * storage policy, stored field types and search index definitions as of the last structure
+ * check. Kept in the dedicated {@code XdStorageClassStructure} resource; the structure
+ * manager rebuilds the snapshot from the class metadata and compares it with the persisted
+ * one, so a difference means the class schema evolved and the registered migration scripts
+ * must run.
+ *
+ * <p>Instances are built, mutated and read by the structure manager under its per-class
+ * lock; the mutators are not synchronized on their own. Engine-internal — not part of the
+ * public API.</p>
+ */
 public class XdStorageClassStructure {
 
     @XdStorageObjectId
@@ -18,30 +30,74 @@ public class XdStorageClassStructure {
 
     private Map<String, XdStorageClassIndexStructure> indexes;
 
+    /**
+     * Creates an empty structure record.
+     */
+    public XdStorageClassStructure() {
+    }
+
+    /**
+     * Returns the stored class whose schema this record snapshots.
+     *
+     * @return the stored class this structure record describes
+     */
     public Class<?> getType() {
         return type;
     }
 
+    /**
+     * Sets the stored class whose schema this record snapshots.
+     *
+     * @param type the stored class this structure record describes
+     */
     public void setType(final Class<?> type) {
         this.type = type;
     }
 
+    /**
+     * Returns the storage policy captured for the class.
+     *
+     * @return the storage policy of the class, or {@code null} when not set yet
+     */
     public XdStoragePolicy getPolicy() {
         return policy;
     }
 
+    /**
+     * Sets the storage policy captured for the class.
+     *
+     * @param policy the storage policy of the class
+     */
     public void setPolicy(final XdStoragePolicy policy) {
         this.policy = policy;
     }
 
+    /**
+     * Returns the stored fields of the class snapshot.
+     *
+     * @return the stored field names mapped to their declared types,
+     *         or {@code null} when no field has been added yet
+     */
     public Map<String, Class<?>> getFields() {
         return fields;
     }
 
+    /**
+     * Replaces the stored field map of the snapshot.
+     *
+     * @param fields the stored field names mapped to their declared types
+     */
     public void setFields(final Map<String, Class<?>> fields) {
         this.fields = fields;
     }
 
+    /**
+     * Adds one stored field to the snapshot, creating the field map on first use and
+     * overwriting the type of an already present name.
+     *
+     * @param name the stored field name
+     * @param cl   the declared type of the field
+     */
     public void addField(final String name, final Class<?> cl) {
         if (fields == null) {
             fields = new HashMap<>();
@@ -49,14 +105,32 @@ public class XdStorageClassStructure {
         fields.put(name, cl);
     }
 
+    /**
+     * Returns the search index snapshots of the class.
+     *
+     * @return the search index structures of the class keyed by index name,
+     *         or {@code null} when no index has been added yet
+     */
     public Map<String, XdStorageClassIndexStructure> getIndexes() {
         return indexes;
     }
 
+    /**
+     * Replaces the search index map of the snapshot.
+     *
+     * @param indexes the search index structures of the class keyed by index name
+     */
     public void setIndexes(final Map<String, XdStorageClassIndexStructure> indexes) {
         this.indexes = indexes;
     }
 
+    /**
+     * Adds one search index to the snapshot, creating the index map on first use and
+     * overwriting the structure of an already present index name.
+     *
+     * @param name  the search index name
+     * @param index the structure snapshot of the index
+     */
     public void addIndex(final String name, final XdStorageClassIndexStructure index) {
         if (indexes == null) {
             indexes = new HashMap<>();
@@ -64,6 +138,15 @@ public class XdStorageClassStructure {
         indexes.put(name, index);
     }
 
+    /**
+     * Two structure records are equal when they describe the same class with the same
+     * policy, fields and index structures — this is the comparison the structure manager
+     * uses to detect schema evolution.
+     *
+     * @param o the object to compare with
+     * @return {@code true} when {@code o} is a {@code XdStorageClassStructure} with equal
+     *         type, policy, fields and indexes
+     */
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

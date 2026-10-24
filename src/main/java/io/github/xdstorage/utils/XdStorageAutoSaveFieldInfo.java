@@ -21,8 +21,19 @@ import java.util.Map;
  */
 public final class XdStorageAutoSaveFieldInfo {
 
+    /**
+     * The declared shape of an {@code @XdStorageAutoSave} field — how the cascade extracts the
+     * child objects from the field's value (engine-internal).
+     */
     public enum Shape {
-        COLLECTION, MAP, ARRAY, REFERENCE
+        /** A {@link Collection}-typed field: every non-null element is a cascade candidate. */
+        COLLECTION,
+        /** A {@link Map}-typed field: only the VALUES are cascade candidates, never the keys. */
+        MAP,
+        /** An array-typed field: every non-null element is a cascade candidate. */
+        ARRAY,
+        /** A single-reference field: the value itself is the one cascade candidate. */
+        REFERENCE
     }
 
     private final XdStorageObjectField accessor;
@@ -33,24 +44,47 @@ public final class XdStorageAutoSaveFieldInfo {
         this.shape = shape;
     }
 
+    /**
+     * Returns the field accessor (reflection field plus getter/setter) this metadata was built from.
+     *
+     * @return the field accessor (reflection field plus getter/setter) this metadata was built from
+     */
     public XdStorageObjectField getAccessor() {
         return accessor;
     }
 
+    /**
+     * Returns the declared shape deciding how the cascade extracts child objects.
+     *
+     * @return the declared shape deciding how the cascade extracts child objects
+     */
     public Shape getShape() {
         return shape;
     }
 
+    /**
+     * Returns the name of the annotated field.
+     *
+     * @return the name of the annotated field
+     */
     public String getFieldName() {
         return accessor.getName();
     }
 
-    /** true when the underlying reflection field carries the @XdStorageAutoSave annotation. */
+    /** true when the underlying reflection field carries the @XdStorageAutoSave annotation.
+     *
+     * @param field the reflection field to test
+     * @return {@code true} when the field is annotated for cascade save
+     */
     public static boolean isAutoSaveField(final Field field) {
         return field.isAnnotationPresent(XdStorageAutoSave.class);
     }
 
-    /** Shape from the declared field type: Collection → COLLECTION, Map → MAP, array → ARRAY, else REFERENCE. */
+    /** Shape from the declared field type: Collection → COLLECTION, Map → MAP, array → ARRAY, else REFERENCE.
+     *
+     * @param accessor the scanned field accessor to classify
+     * @return the cascade metadata for the field
+     */
     public static XdStorageAutoSaveFieldInfo of(final XdStorageObjectField accessor) {
         final Class<?> declared = accessor.field.getType();
         final Shape shape;
@@ -71,6 +105,9 @@ public final class XdStorageAutoSaveFieldInfo {
      * ready for the engine's per-child checks. MAP shapes contribute their VALUES (never the
      * keys); values that are not id-field-bearing entities are filtered later by the engine's
      * id-field check, not here (the holder does not know the value classes).
+     *
+     * @param owner the instance whose field value is read
+     * @return the (possibly empty) child objects to cascade, in field iteration order
      */
     public List<Object> childrenOf(final Object owner) {
         final Object value = accessor.get(owner);

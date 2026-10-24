@@ -8,11 +8,25 @@ import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * The persistence-field scanner: walks an entity class and its superclasses collecting
+ * JavaBeans properties (get/is getters) that have BOTH a backing reflection field and a type-
+ * matched setter. A getter without a field is a computed property (skipped); a getter without
+ * a setter is dropped with a loud WARN — silently persisting a field that cannot be read back
+ * would lose data. Stateless and thread-safe. Engine-internal — not part of the public API.
+ */
 public final class XdStorageReflectionFieldScanner {
     private static final Logger log = LoggerFactory.getLogger(XdStorageReflectionFieldScanner.class);
 
     private XdStorageReflectionFieldScanner() {}
 
+    /**
+     * Scans the class hierarchy for persistence properties and binds each with its setter,
+     * backing field and shape info.
+     *
+     * @param cl the class to scan (superclasses up to {@code Object} included)
+     * @return the persistence fields by field name, possibly empty
+     */
     public static Map<String, XdStorageObjectField> scanFields(final Class<?> cl) {
         final Map<String, XdStorageObjectField> properties = new HashMap<>();
         for (Class<?> clazz = cl; !clazz.equals(Object.class); clazz = clazz.getSuperclass()) {

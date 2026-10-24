@@ -16,6 +16,28 @@ import io.github.xdstorage.utils.XdStorageObjectUtils;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * One node of a {@code XdStorageBTree} — and one file on disk (persisted with
+ * {@code StoreAsSingleObject}). A leaf stores parallel lists of keys and records; an
+ * internal node stores separator keys and child links (children == keys + 1); every node
+ * keeps a next pointer stitching the ordered leaf chain that scans walk. The tree's fill
+ * factor {@code t} bounds a node's occupancy ([t-1 .. 2t-1] keys): insertions split
+ * overfilled nodes bottom-up, deletions borrow from a sibling or merge with one when a leaf
+ * drops below the minimum, and a collapsed root hands the tree to its single child.
+ *
+ * <p>Thread safety: every node carries its own read/write lock. Structural mutations run
+ * under write locks captured along the ancestor path by a non-blocking try-deep protocol
+ * (a busy path aborts the attempt; the tree-level operation retries with a bounded budget);
+ * readers couple read locks hand-over-hand and snapshot the key/record lists under the
+ * lists' monitors. The same monitors exclude the disk serializer from concurrent list
+ * mutation (synchronized-list wrappers, R-43).</p>
+ *
+ * <p>A deserialized instance may be a parser stub ({@code isReference()} == {@code true},
+ * id only); stubs are replaced by the canonical instance via {@code materialize} on first
+ * touch (R-53).</p>
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
 public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstorage.serialization.IXdStorageSerializationGuard,
         io.github.xdstorage.code.IXdStorageReferenceMarked {
@@ -68,77 +90,174 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * Returns the node's persistent id.
+     *
+     * @return the node's persistent id (database-assigned); {@code null} until first saved
+     */
     public Long getId() {
         return id;
     }
 
+    /**
+     * Sets the node's persistent id (assigned by the database on first save).
+     *
+     * @param id the persistent id to set
+     */
     public void setId(final Long id) {
         this.id = id;
     }
 
+    /**
+     * Parser-stub marker (R-53 contract of {@code IXdStorageReferenceMarked}): a stub
+     * carries only the id and must be materialized from storage before use.
+     *
+     * @return {@code true} while this instance is an unloaded parser stub
+     */
     @Override
     public boolean isReference() {
         return reference;
     }
 
+    /**
+     * Sets the parser-stub marker (cleared when the node is materialized from storage).
+     *
+     * @param reference the parser-stub marker to set ({@code false} for a live instance)
+     */
     public void setReference(final boolean reference) {
         this.reference = reference;
     }
 
+    /**
+     * Returns the tree this node belongs to.
+     *
+     * @return the owning tree (back reference fixed up on materialization)
+     */
     public XdStorageBTree getTree() {
         return tree;
     }
 
+    /**
+     * Sets the tree this node belongs to.
+     *
+     * @param tree the owning tree to set
+     */
     public void setTree(final XdStorageBTree tree) {
         this.tree = tree;
     }
 
+    /**
+     * Returns the node's parent in the tree structure.
+     *
+     * @return the parent node ({@code null} for the root)
+     */
     public XdStorageBTreeNode getParent() {
         return parent;
     }
 
+    /**
+     * Sets the node's parent in the tree structure.
+     *
+     * @param parent the parent node to set
+     */
     public void setParent(final XdStorageBTreeNode parent) {
         this.parent = parent;
     }
 
+    /**
+     * The list is a synchronized wrapper: its monitor also excludes the disk serializer
+     * during list iteration (R-43).
+     *
+     * @return the separator keys (internal node) or the entry keys (leaf, parallel to the
+     *         objects list)
+     */
     public List<Comparable> getKeys() {
         return keys;
     }
 
+    /**
+     * Installs the key list wrapped into a synchronized wrapper (R-43 serializer exclusion).
+     *
+     * @param keys the key list to set
+     */
     public void setKeys(final List<Comparable> keys) {
         this.keys = keys != null ? java.util.Collections.synchronizedList(keys) : keys;
     }
 
+    /**
+     * The list is a synchronized wrapper: its monitor also excludes the disk serializer
+     * during list iteration (R-43).
+     *
+     * @return the records stored under the keys (leaf nodes only; empty for internal nodes)
+     */
     public List<Object> getObjects() {
         return objects;
     }
 
+    /**
+     * Installs the record list wrapped into a synchronized wrapper (R-43 serializer exclusion).
+     *
+     * @param objects the record list to set
+     */
     public void setObjects(final List<Object> objects) {
         this.objects = objects != null ? java.util.Collections.synchronizedList(objects) : objects;
     }
 
+    /**
+     * The list is a synchronized wrapper: its monitor also excludes the disk serializer
+     * during list iteration (R-43).
+     *
+     * @return the child links of an internal node (one more than the separator keys);
+     *         empty for a leaf
+     */
     public List<XdStorageBTreeNode> getChildren() {
         return children;
     }
 
+    /**
+     * Installs the child list wrapped into a synchronized wrapper (R-43 serializer exclusion).
+     *
+     * @param children the child list to set
+     */
     public void setChildren(final List<XdStorageBTreeNode> children) {
         this.children = children != null ? java.util.Collections.synchronizedList(children) : children;
     }
 
+    /**
+     * The pointer is {@code volatile}: the leaf-chain prewarm reads it without the node
+     * lock while split/join writers change it under the node write lock.
+     *
+     * @return the next leaf of the ordered leaf chain ({@code null} at the chain's tail)
+     */
     public XdStorageBTreeNode getNextTreeNodeOnThisLevel() {
         return nextTreeNodeOnThisLevel;
     }
 
+    /**
+     * Sets the next leaf of the ordered leaf chain.
+     *
+     * @param nextTreeNodeOnThisLevel the next-leaf pointer to set
+     */
     public void setNextTreeNodeOnThisLevel(final XdStorageBTreeNode nextTreeNodeOnThisLevel) {
         this.nextTreeNodeOnThisLevel = nextTreeNodeOnThisLevel;
     }
 
+    /**
+     * Default constructor for the persistence layer: an empty node whose lists the
+     * deserializer fills in.
+     */
     public XdStorageBTreeNode() {
         this.keys = newSyncList();
         this.objects = newSyncList();
         this.children = newSyncList();
     }
 
+    /**
+     * Creates a live (non-stub) node of the given tree.
+     *
+     * @param tree   the owning tree (fill factor and uniqueness mode source)
+     * @param parent the parent node ({@code null} for a node about to become the root)
+     */
     public XdStorageBTreeNode(final XdStorageBTree tree, final XdStorageBTreeNode parent) {
         this.tree = tree;
         this.parent = parent;
@@ -200,16 +319,33 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
     
     private List<IXdStorageBTreeNode> lockedNodes = new LinkedList<>();
 
+    /**
+     * Reports the calling thread's hold of this node's write lock.
+     *
+     * @return {@code true} when the calling thread holds the node write lock
+     */
     @Override
     public boolean isWriteLocked() {
         return lock.isWriteLocked();
     }
 
+    /**
+     * Reports the calling thread's hold of this node's read lock.
+     *
+     * @return {@code true} when the calling thread holds the node read lock
+     */
     @Override
     public boolean isReadLocked() {
         return lock.isReadLocked();
     }
 
+    /**
+     * Acquires the node write lock, blocking (with polling) until success or the owning
+     * transaction's lock timeout expires. Mutators hold it while rebalancing this node.
+     *
+     * @param transaction the owning transaction providing the lock timeout ({@code null} — engine default)
+     * @throws XdStorageException when the acquiring thread is interrupted while waiting
+     */
     @Override
     public void lockWrite(final IXdStorageTransaction transaction) throws XdStorageException {
         try {
@@ -219,6 +355,14 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * Acquires the node read lock, blocking (with polling) until success or the owning
+     * transaction's lock timeout expires. Readers hold it only while reading this node —
+     * the walk releases it when the next node's lock is captured.
+     *
+     * @param transaction the owning transaction providing the lock timeout ({@code null} — engine default)
+     * @throws XdStorageException when the acquiring thread is interrupted while waiting
+     */
     @Override
     public void lockRead(final IXdStorageTransaction transaction) throws XdStorageException {
         try {
@@ -228,21 +372,40 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * Attempts to capture the node write lock without waiting for other holders — the
+     * primitive behind the non-blocking try-deep mutation protocol.
+     *
+     * @param transaction the owning transaction (part of the interface contract; not used by the try-variant)
+     * @return {@code true} when the lock was captured
+     */
     @Override
     public boolean tryLockWrite(final IXdStorageTransaction transaction) {
         return lock.tryLockWrite();
     }
 
+    /**
+     * Attempts to capture the node read lock without waiting for other holders.
+     *
+     * @param transaction the owning transaction (part of the interface contract; not used by the try-variant)
+     * @return {@code true} when the lock was captured
+     */
     @Override
     public boolean tryLockRead(final IXdStorageTransaction transaction) {
         return lock.tryLockRead();
     }
 
+    /**
+     * Releases one write-lock hold of the calling thread on the node lock.
+     */
     @Override
     public void unlockWrite() {
         lock.unlockWrite();
     }
 
+    /**
+     * Releases one read-lock hold of the calling thread on the node lock.
+     */
     @Override
     public void unlockRead() {
         lock.unlockRead();
@@ -259,11 +422,21 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
     // в писателе, а окна разрыва keys/children на середине сплита остаются редким
     // остаточным риском (микросекунды против секунд файлового IO).
     // =========================================================================
+    /**
+     * R-43 serialization guard: tries to take the node write lock so the disk serializer
+     * writes a stable snapshot; best-effort — when the lock is busy (a mutation is in
+     * flight) the serializer proceeds unlocked and relies on the collection-monitor
+     * snapshots. Paired with {@link #endConsistentSerialization()}.
+     */
     @Override
     public void beginConsistentSerialization() {
         tryLockWrite(null);
     }
 
+    /**
+     * R-43 serialization guard: releases the node write lock taken by
+     * {@link #beginConsistentSerialization()} (no-op when it was not captured).
+     */
     @Override
     public void endConsistentSerialization() {
         if (isWriteLocked()) {
@@ -486,6 +659,28 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * Inserts the record under the key into the subtree rooted at this node. On a leaf the
+     * key/record pair goes in under the deep write lock (ancestors pre-captured by the
+     * try-deep protocol) and an overfilled node splits upward (into the parent or into a new
+     * root); on an internal node the descent routes to the child by key order — an equal
+     * key goes to the right subtree (B+tree canon) — coupling write locks hand-over-hand.
+     * When contention defeats the attempt (busy deep lock, transiently empty child list
+     * after a parallel merge) only {@code retryInsert} is set and the tree-level caller
+     * retries the whole descent; the attempt budget lives there.
+     *
+     * @param toUnlock    the write lock to release once this node's lock is captured (the
+     *                    caller's node on a coupled descent; the tree on the first hop)
+     * @param key         the insertion key
+     * @param object      the record to store under the key
+     * @param storage     the storage facade used to persist created/changed nodes
+     * @param transaction the owning transaction
+     * @param retryInsert set to {@code true} when contention defeated this attempt and the
+     *                    caller must retry
+     * @throws XdStorageException           when a unique tree already contains the key, or a
+     *                                      lock acquisition is interrupted
+     * @throws XdStorageConnectionException when persisting a node fails
+     */
     public void insert(final IXdStorageBTreeNode toUnlock, final Comparable key, final Object object, final IXdStorage storage, final IXdStorageTransaction transaction, final AtomicBoolean retryInsert) throws XdStorageException, XdStorageConnectionException {
         loadThisNode(storage, transaction);
         if (this.getChildren().isEmpty()) {
@@ -858,6 +1053,25 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         return node.getChildren().isEmpty() ? node.getKeys().get(0) : findLeftKey(deepLockedNode, node.loadChildOfThisNode(0, storage, transaction), storage, transaction);
     }
 
+    /**
+     * Deletes the key from the subtree rooted at this node. On a leaf the entry is removed
+     * under the deep write lock (ancestors pre-captured by the try-deep protocol) and an
+     * underflowing node is rebalanced: borrow from a sibling when possible, otherwise merge;
+     * the recursion continues upward, a collapsed root is replaced by its single child, and a
+     * fully emptied root clears the tree's root and first-leaf pointers. Contention sets
+     * {@code retryDelete} instead of blocking — the tree-level caller retries the descent.
+     *
+     * @param toUnlock    the write lock to release once this node's lock is captured (the
+     *                    caller's node on a coupled descent; the tree on the first hop)
+     * @param key         the key to remove
+     * @param storage     the storage facade used to persist changed/deleted nodes
+     * @param transaction the owning transaction
+     * @param retryDelete set to {@code true} when contention defeated this attempt and the
+     *                    caller must retry
+     * @throws XdStorageException           when the key is not present in a reached leaf
+     *                                      (loud miss) or a lock acquisition is interrupted
+     * @throws XdStorageConnectionException when persisting or deleting a node fails
+     */
     public void delete(final IXdStorageBTreeNode toUnlock, final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction, final AtomicBoolean retryDelete) throws XdStorageException, XdStorageConnectionException {
         loadThisNode(storage, transaction);
         if (this.getChildren().isEmpty()) {
@@ -1402,6 +1616,23 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         storage.update(this, transaction);
     }
 
+    /**
+     * Replaces the record stored under the key in the leaf reached from this node — an
+     * in-place leaf-list write, no rebalance. The descent captures write locks with
+     * try-attempts hand-over-hand; contention sets {@code retryUpdate} and returns without
+     * touching the structure — the tree-level caller retries.
+     *
+     * @param toUnlock    the write lock to release once this node's lock is captured (the
+     *                    caller's node on a coupled descent; the tree on the first hop)
+     * @param key         the key whose record is replaced
+     * @param value       the replacement record
+     * @param storage     the storage facade used to persist the changed leaf
+     * @param transaction the owning transaction
+     * @param retryUpdate set to {@code true} when contention defeated this attempt and the
+     *                    caller must retry
+     * @throws XdStorageException           when the key is not present in the reached leaf
+     * @throws XdStorageConnectionException when persisting the leaf fails
+     */
     public void update(final IXdStorageBTreeNode toUnlock, final Comparable key, final Object value, final IXdStorage storage, final IXdStorageTransaction transaction, final AtomicBoolean retryUpdate) throws XdStorageException, XdStorageConnectionException {
         XdStorageBTreeNode current = this, child = null;
         try {
@@ -1457,6 +1688,25 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * Searches the records stored under the key in the subtree rooted at this node. The
+     * descent couples read locks hand-over-hand (key/child collections are snapshotted under
+     * their monitors, R-56); at the leaf the matching entries are collected and, on a MULTI
+     * tree, the walk continues along the ordered leaf chain while keys keep matching
+     * (iterative, R-59). Contention sets {@code retryFind} and returns {@code null} — the
+     * tree-level caller retries the whole search.
+     *
+     * @param toUnlock    the read lock to release once this node's read lock is captured
+     *                    (typically the tree read lock on the first hop)
+     * @param key         the key to look up
+     * @param storage     the storage facade used to lazily load stub children
+     * @param transaction the owning transaction
+     * @param retryFind   set to {@code true} when contention defeated this attempt
+     * @return the records stored under the key (empty when absent), or {@code null} when
+     *         {@code retryFind} was set
+     * @throws XdStorageException           when a lock acquisition is interrupted
+     * @throws XdStorageConnectionException when lazily loading a child node fails
+     */
     public List<Object> find(final IXdStorageBTreeNode toUnlock, final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction, final AtomicBoolean retryFind) throws XdStorageException, XdStorageConnectionException {
         XdStorageBTreeNode current = this, child = null;
         try {
@@ -1601,6 +1851,15 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
      * and its {@code objectId} to the entity id-field type. Reference writes are atomic;
      * a concurrent reader either sees the old (String — the pre-fix CCE) or the restored
      * key, never a torn one.
+     *
+     * @param toUnlock    the read lock to release once this node's read lock is captured
+     *                    (typically the tree read lock on the first hop)
+     * @param storage     the storage facade used to resolve next-leaf stubs
+     * @param transaction the owning transaction
+     * @param keyRestorer maps each raw key/record to its typed form (identity when already typed)
+     * @throws XdStorageException           when a walked node is not a leaf (keys/objects
+     *                                      parity breach) or a lock acquisition is interrupted
+     * @throws XdStorageConnectionException when lazily loading a next-leaf stub fails
      */
     public void restoreSearchKeyTypes(final IXdStorageBTreeNode toUnlock, final IXdStorage storage,
                                       final IXdStorageTransaction transaction,
@@ -1649,6 +1908,25 @@ public class XdStorageBTreeNode implements IXdStorageBTreeNode, io.github.xdstor
         }
     }
 
+    /**
+     * Walks the ordered leaf chain from this node, feeding every (key, record) pair to the
+     * viewer under per-node read locks with lock coupling: the lock passed in {@code toUnlock}
+     * (typically the tree read lock) is released at the first node lock, and each node's read
+     * lock goes with the capture of the next one. Each leaf's keys/records are snapshotted
+     * under the list monitors before the viewer sees them; a keys/objects parity breach fails
+     * loudly. A viewer may raise the stack-less {@code XdStorageBTree.walkTerminated()}
+     * signal to end the walk early (LIMIT pushdown in {@code readRange}) — like any viewer
+     * exception it unwinds through here while the held locks are released on the way out.
+     *
+     * @param toUnlock    the read lock to release once this node's read lock is captured
+     *                    (typically the tree read lock on the first hop)
+     * @param storage     the storage facade used to resolve next-leaf stubs
+     * @param transaction the owning transaction
+     * @param viewer      the entry sink invoked per entry in ascending key order
+     * @throws XdStorageException           when a leaf shows a keys/objects parity breach or a
+     *                                      lock acquisition is interrupted
+     * @throws XdStorageConnectionException when lazily loading a next-leaf stub fails
+     */
     public void read(final IXdStorageBTreeNode toUnlock, final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
         // R-59: обход цепочки листьев ИТЕРАЦИОНЕН (см. зеркальный комментарий в find):
         // рекурсия по next давала кадр стека на каждый лист и падала

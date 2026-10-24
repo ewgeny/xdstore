@@ -13,6 +13,19 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * The registry and dispatcher of persistence triggers: keeps a per-entity-class list of
+ * registered triggers and, at commit time, fires the insert/update/delete triggers matching the
+ * recorded changes — inside the changing transaction. The lists are copy-on-write, so trigger
+ * lookup and execution are lock-free for every engine thread and registration is safe
+ * concurrently with execution.
+ *
+ * <p>A trigger that throws a runtime exception is logged and rethrown, which fails the commit
+ * and rolls the transaction back. A trigger that needs the storage must open and finish its own
+ * nested transaction.
+ *
+ * <p>Engine-internal — not part of the public API.
+ */
 public class XdStorageTriggerManager {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageTriggerManager.class);
@@ -22,10 +35,20 @@ public class XdStorageTriggerManager {
     // всеми ForkJoin-потоками СУБД одновременно, полностью ликвидируя дедлоки на фазе коммита!
     private final Map<Class<?>, List<IXdStorageTrigger<?>>> triggers;
 
+    /**
+     * Creates a manager with an empty trigger registry.
+     */
     public XdStorageTriggerManager() {
         this.triggers = new ConcurrentHashMap<>();
     }
 
+    /**
+     * Registers a trigger for its entity class; the triggers of one class fire in registration
+     * order. A {@code null} trigger or one without an entity class is silently ignored.
+     *
+     * @param trigger the trigger to register
+     * @param <T>     the entity class the trigger observes
+     */
     public <T> void registerTrigger(final IXdStorageTrigger<T> trigger) {
         if (trigger == null || trigger.getClazz() == null) return;
 
@@ -36,6 +59,16 @@ public class XdStorageTriggerManager {
         list.add(trigger);
     }
 
+    /**
+     * Fires the triggers for every recorded change, in change order: an insert change runs the
+     * insert triggers, an update change the update triggers, a delete change the delete
+     * triggers. The first failing trigger aborts the replay.
+     *
+     * @param transaction the transaction the changes belong to
+     * @param changes     the recorded changes of the commit; must not be {@code null}
+     * @throws NullPointerException when {@code changes} is {@code null} (the canonical failure
+     *                              for an invalid call context)
+     */
     public void performTriggers(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) {
         // АЛГОРИТМИЧЕСКОЕ ВЫРАВНИВАНИЕ КОНТРАКТОВ: Убираем заглушку "if(changes == null) return;".
         // Прямой вызов stream() на коллекции изменений гарантирует естественный и каноничный

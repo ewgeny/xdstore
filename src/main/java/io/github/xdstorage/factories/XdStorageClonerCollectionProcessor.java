@@ -13,6 +13,23 @@ import java.util.Map;
  */
 public class XdStorageClonerCollectionProcessor {
 
+    /** Instantiation-only utility class — no instances. */
+    public XdStorageClonerCollectionProcessor() {
+    }
+
+    /**
+     * Deep-copies the given collection into a fresh collection of the same runtime class,
+     * leaving nulls/enums/simple values as-is, copying {@code Date} values by time,
+     * recursing into nested arrays/collections/maps, and replacing entity-typed elements
+     * with the transaction's reference wrappers.
+     *
+     * @param src         the collection to clone and wrap
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction the cloned graph belongs to
+     * @param cloner      the orchestrator used to wrap entity-typed elements
+     * @return the cloned collection of the same runtime class
+     * @throws Exception if the collection's runtime class cannot be instantiated
+     */
     @SuppressWarnings("unchecked")
     public static Object cloneAndWrapCollection(final Collection<?> src, final IXdStorage storage, final IXdStorageTransaction transaction, final XdStorageSmartCloner cloner) throws Exception {
         final Collection<Object> clone = (Collection<Object>) src.getClass().newInstance();
@@ -35,6 +52,19 @@ public class XdStorageClonerCollectionProcessor {
         return clone;
     }
 
+    /**
+     * Deep-copies the given map into a fresh map of the same runtime class: keys and
+     * values are processed like collection elements — entity-typed keys and values are
+     * replaced by the transaction's reference wrappers, nested arrays/collections/maps are
+     * recursed into, {@code Date} values are copied by time.
+     *
+     * @param src         the map to clone and wrap
+     * @param storage     the storage the transaction runs against
+     * @param transaction the transaction the cloned graph belongs to
+     * @param cloner      the orchestrator used to wrap entity-typed keys and values
+     * @return the cloned map of the same runtime class
+     * @throws Exception if the map's runtime class cannot be instantiated
+     */
     @SuppressWarnings("unchecked")
     public static Object cloneAndWrapMap(final Map<?, ?> src, final IXdStorage storage, final IXdStorageTransaction transaction, final XdStorageSmartCloner cloner) throws Exception {
         final Map<Object, Object> clone = (Map<Object, Object>) src.getClass().newInstance();
@@ -69,6 +99,16 @@ public class XdStorageClonerCollectionProcessor {
         return clone;
     }
 
+    /**
+     * Reverse direction: deep-copies the given collection into a plain collection of the
+     * same runtime class, unwrapping reference wrappers back into POJOs (recursing into
+     * nested arrays/collections/maps).
+     *
+     * @param src    the (possibly wrapped) collection to unwrap and clone
+     * @param cloner the orchestrator used to unwrap entity-typed elements
+     * @return the plain clone of the same runtime class
+     * @throws Exception if the collection's runtime class cannot be instantiated
+     */
     @SuppressWarnings("unchecked")
     public static Object unwrapAndCloneCollection(final Collection<?> src, final XdStorageSmartCloner cloner) throws Exception {
         final Collection<Object> clone = (Collection<Object>) src.getClass().newInstance();
@@ -91,6 +131,17 @@ public class XdStorageClonerCollectionProcessor {
         return clone;
     }
 
+    /**
+     * Reverse direction: deep-copies the given map into a plain map of the same runtime
+     * class, unwrapping reference-wrapped keys and values back into POJOs (recursing into
+     * nested arrays/collections/maps); entries whose unwrapped key or value is
+     * {@code null} are dropped.
+     *
+     * @param src    the (possibly wrapped) map to unwrap and clone
+     * @param cloner the orchestrator used to unwrap entity-typed keys and values
+     * @return the plain clone of the same runtime class
+     * @throws Exception if the map's runtime class cannot be instantiated
+     */
     @SuppressWarnings("unchecked")
     public static Object unwrapAndCloneMap(final Map<?, ?> src, final XdStorageSmartCloner cloner) throws Exception {
         final Map<Object, Object> clone = (Map<Object, Object>) src.getClass().newInstance();

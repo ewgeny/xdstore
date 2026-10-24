@@ -12,10 +12,25 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class XdStorageSimpleWrapperClassCodeGenerator extends XdStorageAbstractClassCodeGenerator {
 
+    /** Creates the generator with lazy-load (load-by-get) accessors enabled. */
     public XdStorageSimpleWrapperClassCodeGenerator() {
         super(true);
     }
 
+    /**
+     * Generates the simple (lazy-loading) wrapper subclass source: a subclass carrying
+     * the wrapped object, its parent reference and the engine storage, with reference
+     * flag/lock plumbing, plain and lazy-load getters, delegating setters, closed
+     * methods and wrapper-to-wrapper {@code equals}/{@code hashCode}.
+     *
+     * @param classesPackage target package of the generated class
+     * @param cl             the entity class to generate the simple wrapper for; must
+     *                       declare an {@code XdStorageObjectId}-annotated field
+     * @param code           accumulator map keyed by fully-qualified generated class name
+     * @return the same accumulator map with the generated source added
+     * @throws IllegalStateException when the entity hierarchy has no id field (a wrapper
+     *         without id plumbing would silently degrade)
+     */
     @Override
     public Map<String, String> generate(final String classesPackage, final Class<?> cl, final Map<String, String> code) {
         final GenerationContext ctx = collectMethodsAndClasses(cl);
@@ -132,6 +147,14 @@ public class XdStorageSimpleWrapperClassCodeGenerator extends XdStorageAbstractC
     }
 
 
+    /**
+     * Names the generated simple wrapper after its entity class.
+     *
+     * @param classesPackage target package of the generated class (unused by the
+     *                       simple name scheme)
+     * @param cl             the entity class being wrapped
+     * @return {@code SimpleName + "SimpleWrapper"}
+     */
     protected String buildClassName(final String classesPackage, final Class<?> cl) {
         return cl.getSimpleName() + "SimpleWrapper";
     }

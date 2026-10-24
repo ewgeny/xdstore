@@ -24,6 +24,18 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * The XML implementation of {@link IXdStorageObjectsReader}: parses the StAX event
+ * stream of a resource file and restores live objects (and typed data records) through
+ * reflection, using the simple-type helper for scalar attributes. Handles the full
+ * element grammar — nested {@code object}, {@code array}, {@code primitive},
+ * {@code enum}, {@code collection}, {@code map} and id-only {@code reference} entries.
+ *
+ * <p>Thread-safety: instances are confined to one worker thread (handed out per thread
+ * by {@link XdStorageDefaultIOFactory}); the {@code properties} reflection cache is a
+ * {@code ConcurrentHashMap} and safe under concurrent population. Engine-internal —
+ * not part of the public API.</p>
+ */
 public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageDefaultObjectsReader.class);
@@ -32,6 +44,11 @@ public class XdStorageDefaultObjectsReader implements IXdStorageObjectsReader {
 
     private final Map<Class<?>, Map<String, XdStorageObjectField>> properties = new ConcurrentHashMap<>();
 
+    /**
+     * Creates the XML reader.
+     *
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar attribute values
+     */
     public XdStorageDefaultObjectsReader(final IXdStorageSimpleTypeHelper simpleTypeHelper) {
         this.simpleTypeHelper = simpleTypeHelper;
     }

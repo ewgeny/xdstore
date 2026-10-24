@@ -15,15 +15,21 @@ import java.util.ArrayList;
 import java.util.Collection;
 
 /**
- * Высокоуровневый транзакционный диспетчер демаршаллинга YAML.
- * Делегирует сборку блоков в специализированные компоненты.
+ * The YAML implementation of {@link IXdStorageObjectsReader}: the top-level
+ * transactional demarshalling dispatcher. Tokenizes the resource file and delegates the
+ * assembly of each block to the specialized components
+ * ({@link XdStorageYamlBlockObjectsReader}, {@link XdStorageYamlBlockContainersReader}).
  *
- * <p>S-1 (truncation detection): в строгом режиме ({@code strictEof = true}) файл без
- * сентинела конца файла {@link XdStorageYamlTokenizer#EOF_SENTINEL_LINE} отвергается —
- * обрезанный ресурс НЕ загружается молча как частичная база. Движок включает строгий
- * режим по умолчанию (см. {@code XdStorageConfig.acceptMissingEofSentinel} для миграции
- * легаси-хранилищ). Прямое конструирование в компонентных тестах по умолчанию
- * нестрогое (легаси-фикстуры без сентинела читаются как раньше).</p>
+ * <p>S-1 (truncation detection): in strict mode ({@code strictEof = true}) a file
+ * without the end-of-file sentinel {@link XdStorageYamlTokenizer#EOF_SENTINEL_LINE} is
+ * rejected — a truncated resource is never silently served as a partial database. The
+ * engine enables strict mode by default (see {@code XdStorageConfig.acceptMissingEofSentinel}
+ * for migrating legacy storages). Instances built through the one-argument constructor
+ * are non-strict (legacy fixtures without a sentinel keep reading as before).</p>
+ *
+ * <p>Thread-safety: instances are confined to one worker thread (handed out per thread
+ * by {@link XdStorageYamlIOFactory}); the held references are immutable. Engine-internal
+ * — not part of the public API.</p>
  */
 public class XdStorageYamlObjectsReader implements IXdStorageObjectsReader {
 
@@ -32,15 +38,39 @@ public class XdStorageYamlObjectsReader implements IXdStorageObjectsReader {
     private final IXdStorageSimpleTypeHelper simpleTypeHelper;
     private final boolean strictEof;
 
+    /**
+     * Creates a non-strict reader: a resource file missing the S-1 EOF sentinel is
+     * accepted with a WARN instead of a load failure (legacy compatibility mode).
+     *
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar attribute values
+     */
     public XdStorageYamlObjectsReader(final IXdStorageSimpleTypeHelper simpleTypeHelper) {
         this(simpleTypeHelper, false);
     }
 
+    /**
+     * Creates a reader with an explicit S-1 truncation-detection policy.
+     *
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar attribute values
+     * @param strictEof {@code true} to reject a resource file missing the EOF sentinel
+     *                  with {@link XdStorageIOException}; {@code false} to accept it with a WARN
+     */
     public XdStorageYamlObjectsReader(final IXdStorageSimpleTypeHelper simpleTypeHelper, final boolean strictEof) {
         this.simpleTypeHelper = simpleTypeHelper;
         this.strictEof = strictEof;
     }
 
+    /**
+     * Reads an {@code objects} root block: restores each {@code - object} list entry as a
+     * live instance of its class. An empty (0-byte) stream yields an empty collection; a
+     * non-empty file whose root block is missing or unrecognized is checked for the EOF
+     * sentinel per this reader's strictness before an empty result is returned.
+     *
+     * @param reader the character stream of the resource file
+     * @return the restored objects, in file order
+     * @throws XdStorageIOException when the stream cannot be parsed, or in strict mode
+     *         when the EOF sentinel is missing (truncated file)
+     */
     public Collection<Object> readObjects(final Reader reader) throws XdStorageIOException {
         Collection<Object> result = new ArrayList<>();
         try {

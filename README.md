@@ -137,7 +137,13 @@ DECISION-GUIDE § ["Where XdStorage loses today"](docs/DECISION-GUIDE.md#where-x
 ## The full guide
 
 The deep reference moved out of this README — [docs/GUIDE.md](docs/GUIDE.md) carries it, section for
-section:
+section. **The API reference is the javadoc**: the facade javadoc
+(`IXdStorage`/`IXdFileStorage`/`XdStorageProvider`) mirrors the EMBEDDING.md contract — the
+thread-transaction binding, rollback-only marks, deferred-id timing and folder-lock rules are
+documented on the methods themselves — and the published jar's pages live at
+`https://javadoc.io/doc/io.github.xdstorage/xdstorage/latest`. The build enforces the coverage:
+`mvn javadoc:javadoc -Ddoclint=missing` must stay green, and the release profile fails on any
+javadoc warning. Guide contents:
 
 - [Features at a glance](docs/GUIDE.md#features-at-a-glance) — the complete capability list.
 - [Defining the data model](docs/GUIDE.md#defining-the-data-model) — entity rules, storage policies,

@@ -17,6 +17,18 @@ import java.util.Map;
  */
 public class XdStorageWrapperBlockGettersGenerator {
 
+    /** Inert holder: the generator blocks are fully static. */
+    public XdStorageWrapperBlockGettersGenerator() {
+    }
+
+    /**
+     * Emits overriding delegating getters for the simple-typed fields of the context:
+     * each generated accessor forwards to the wrapped object.
+     *
+     * @param builder target of the generated source
+     * @param ctx     method classification of the current generation run
+     * @param gen     host generator supplying method-header emission
+     */
     public static void generateSimpleGetters(final StringBuilder builder, final XdStorageAbstractClassCodeGenerator.GenerationContext ctx, final XdStorageAbstractClassCodeGenerator gen) {
         for (Method getter : ctx.fieldsGetters) {
             builder.append("\r\n\t@Override\r\n\t");
@@ -25,6 +37,16 @@ public class XdStorageWrapperBlockGettersGenerator {
         }
     }
 
+    /**
+     * Emits overriding getters for the strong (reference) fields of the context: the
+     * parent getter returns the parent wrapper when present, every other reference
+     * delegates directly to the wrapped object (the simple wrapper itself is the
+     * lazy-loading proxy).
+     *
+     * @param builder target of the generated source
+     * @param ctx     method classification of the current generation run
+     * @param gen     host generator supplying method-header emission
+     */
     public static void generateStrongGetters(final StringBuilder builder, final XdStorageAbstractClassCodeGenerator.GenerationContext ctx, final XdStorageAbstractClassCodeGenerator gen) {
         for (Method getter : ctx.strongGetters) {
             final Class<?> returnType = getter.getReturnType();
@@ -42,6 +64,18 @@ public class XdStorageWrapperBlockGettersGenerator {
         }
     }
 
+    /**
+     * Emits overriding lazy-load getters for the {@code XdStorageLoadByGetMethod}
+     * fields of the context: generated with double-checked locking on the wrapper's
+     * own lock, loading single references, arrays, collections and map values through
+     * the storage's current transaction on first access. Invisible collection/map
+     * elements are silently dropped from the iteration; any other load failure marks
+     * the transaction rollback-only and surfaces as {@code XdStorageRuntimeException}.
+     *
+     * @param builder target of the generated source
+     * @param ctx     method classification of the current generation run
+     * @param gen     host generator supplying method-header emission
+     */
     public static void generateLoadByGetGetters(final StringBuilder builder, final XdStorageAbstractClassCodeGenerator.GenerationContext ctx, final XdStorageAbstractClassCodeGenerator gen) {
         for (Method getter : ctx.strongLoadByGetGetters) {
             final Class<?> returnType = getter.getReturnType();

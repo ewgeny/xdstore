@@ -5,8 +5,25 @@ import io.github.xdstorage.search.data.XdStorageSearchIndexRecord;
 
 import java.util.Collection;
 
+/** The comparison operators of the search-query criteria (FP-1a/FP-1b semantics,
+ * pinned by the range/shaping suites).
+ *
+ * <p>Range-operator contract ({@code GT}, {@code GTE}, {@code LT}, {@code LTE},
+ * {@code BETWEEN}, {@code IN}):
+ * <ul>
+ *   <li>{@code null} field values NEVER satisfy a range operator — {@code IS_NULL} /
+ *       {@code IS_NOT_NULL} are the null tests;</li>
+ *   <li>comparisons are per field type: numbers numerically, strings lexicographically,
+ *       otherwise the {@code Comparable} contract;</li>
+ *   <li>a comparable-type mismatch or a {@code null} criterion bound fails LOUDLY
+ *       ({@code XdStorageRuntimeException}) — never a silently-empty result;</li>
+ *   <li>on the ordered search-index tree the range family evaluates as a bounded ordered
+ *       walk (early termination); on non-ordered surfaces it degrades to the scan with
+ *       identical result semantics.</li>
+ * </ul> */
 public interface IXdStorageCriterionOperator {
 
+    /** Passes when the indexed field value is {@code null}. The criterion value is ignored. */
     IXdStorageCriterionOperator IS_NULL = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -19,6 +36,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Passes when the indexed field value is not {@code null}. The criterion value is ignored. */
     IXdStorageCriterionOperator IS_NOT_NULL = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -31,6 +49,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Equality ({@code equals} semantics; {@code null} matches only {@code null}). */
     IXdStorageCriterionOperator EQUALS = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -55,6 +74,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Negated equality: passes when the values differ, including a non-null field against a {@code null} criterion. */
     IXdStorageCriterionOperator NOT_EQUALS = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -79,6 +99,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Substring test for String fields: passes when the field value contains the criterion String (both must be Strings). */
     IXdStorageCriterionOperator CONTAINS = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -113,6 +134,7 @@ public interface IXdStorageCriterionOperator {
     // on any non-ordered surface they degrade to the scan with identical result semantics.
     // =========================================================================
 
+    /** Strictly greater than the bound; {@code null} never passes; mixed types fail loudly. */
     IXdStorageCriterionOperator GT = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -125,6 +147,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Greater than or equal to the bound; {@code null} never passes; mixed types fail loudly. */
     IXdStorageCriterionOperator GTE = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -137,6 +160,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Strictly less than the bound; {@code null} never passes; mixed types fail loudly. */
     IXdStorageCriterionOperator LT = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -149,6 +173,7 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Less than or equal to the bound; {@code null} never passes; mixed types fail loudly. */
     IXdStorageCriterionOperator LTE = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -161,6 +186,8 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Inside the inclusive {@code [from, to]} interval — the criterion value must be an
+     * {@link XdStorageRange} (anything else fails loudly); {@code null} never passes. */
     IXdStorageCriterionOperator BETWEEN = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -184,6 +211,8 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
+    /** Equals-membership against a Collection or array criterion value (anything else
+     * fails loudly); {@code null} field values never pass. */
     IXdStorageCriterionOperator IN = new IXdStorageCriterionOperator() {
         @Override
         public boolean passed(final XdStorageSearchIndexRecord record, final String fieldName, final Object value) {
@@ -205,9 +234,17 @@ public interface IXdStorageCriterionOperator {
         }
     };
 
-    /** Comparison core of the range family: the caller guarantees a non-null objectValue
-     * (null never satisfies — the operators short-circuit); a null bound or a
-     * non-comparable/mismatched type fails loudly. */
+    /**
+     * Comparison core of the range family: the caller guarantees a non-null
+     * {@code objectValue} (null never satisfies — the operators short-circuit).
+     *
+     * @param objectValue the indexed field value (non-null)
+     * @param bound       the criterion bound (must be non-null and comparable with the value)
+     * @param operator    the operator name, for the failure message
+     * @return a negative/zero/positive integer as {@code compareTo} answers
+     * @throws XdStorageRuntimeException when the bound is {@code null}, the value is not
+     *         {@code Comparable}, or the two types are not comparable with each other
+     */
     static int compareForRange(final Object objectValue, final Object bound, final String operator) {
         if (bound == null) {
             throw new XdStorageRuntimeException("range operator " + operator
@@ -226,7 +263,13 @@ public interface IXdStorageCriterionOperator {
         }
     }
 
-    /** IN accepts a Collection or an array; anything else fails loudly. */
+    /**
+     * Normalizes the {@code IN} criterion value to an iterable of candidates.
+     *
+     * @param criterionValue a {@link java.util.Collection} or an array
+     * @return the candidates to test membership against
+     * @throws XdStorageRuntimeException for any other type (and for {@code null})
+     */
     static Iterable<?> valuesOf(final Object criterionValue) {
         if (criterionValue instanceof Collection) {
             return (Collection<?>) criterionValue;
@@ -238,7 +281,23 @@ public interface IXdStorageCriterionOperator {
                 + (criterionValue == null ? "null" : criterionValue.getClass().getName()));
     }
 
+    /**
+     * Evaluates the operator against a record's indexed field.
+     *
+     * @param record    the index record being filtered
+     * @param fieldName the indexed field to read
+     * @param value     the criterion value (semantics per operator; ignored by the null tests)
+     * @return {@code true} when the record passes
+     */
     boolean passed(XdStorageSearchIndexRecord record, String fieldName, Object value);
 
+    /**
+     * Evaluates the operator against a raw value pair (the in-memory comparison form,
+     * used for secondary criteria and for checks outside the index tree).
+     *
+     * @param objectValue    the indexed value (a {@code null} field value)
+     * @param criterionValue the criterion value
+     * @return {@code true} when the pair satisfies the operator
+     */
     boolean passed(Object objectValue, Object criterionValue);
 }

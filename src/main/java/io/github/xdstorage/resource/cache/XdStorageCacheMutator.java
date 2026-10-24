@@ -23,10 +23,28 @@ public final class XdStorageCacheMutator {
 
     private final XdStorageCacheContext cache;
 
+    /**
+     * Binds the mutator to a cache context.
+     *
+     * @param cache the cache context (records registry, workspace, id field) this mutator operates on
+     */
     public XdStorageCacheMutator(final XdStorageCacheContext cache) {
         this.cache = cache;
     }
 
+    /**
+     * Body of the facade's insert, executed inside the transaction's critical section.
+     * Observable wrappers without an id yet are parked as unidentified objects and get a
+     * record created later via an id observer; objects with an id create their cache record
+     * immediately (refusing null ids, double inserts and records held by other transactions)
+     * and register the mutation in the transaction's write-set.
+     *
+     * @param newObject   the object to insert into the resource
+     * @param transaction the inserting transaction
+     * @throws XdStorageException if the object has a null id, an object with the same id
+     *                            already exists, was deleted earlier in this transaction,
+     *                            or its record cannot be locked by this transaction
+     */
     public void insertInternal(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         log.debug("INSERT by transaction {} of {}", transaction.getTransactionId(), newObject.getClass().getSimpleName());
         if (IXdStorageIdObservableWrapper.class.isAssignableFrom(newObject.getClass())) {
@@ -133,6 +151,19 @@ public final class XdStorageCacheMutator {
         }
     }
 
+    /**
+     * Body of the facade's update: locks the object's record before entering the transaction's
+     * critical section, then applies the change. A repeated update of an object this transaction
+     * already inserted or updated takes the fast path (replace the pending content); otherwise
+     * the record is re-read from the registry after the lock wait and the update is applied
+     * under the isolation/conflict checks, with infrastructure records relaxed per R-42.
+     *
+     * @param newObject   the object carrying the new state (its id selects the record)
+     * @param transaction the updating transaction
+     * @throws XdStorageException if no record exists for the object's id (and the cache is not
+     *                            infrastructure), the object was deleted in this transaction,
+     *                            or the conflict checks refuse the update
+     */
     public void update(final Object newObject, final XdStorageTransaction transaction) throws XdStorageException {
         final Object objectId = cache.idField().get(newObject);
         XdStorageCacheRecord record = cache.records().get(objectId);
@@ -261,6 +292,19 @@ public final class XdStorageCacheMutator {
         cache.workspace().registerMutation(transactionId, objectId, record);
     }
 
+    /**
+     * Body of the facade's delete: locks the object's record before entering the transaction's
+     * critical section, then marks the record deleted (clearing the pending content), drops the
+     * object from the transaction's materialized set and registers the mutation. Infrastructure
+     * objects whose record has already disappeared are treated as already deleted (R-42);
+     * for domain objects a missing record is a hard failure.
+     *
+     * @param objectId    the id of the object to delete
+     * @param transaction the deleting transaction
+     * @throws XdStorageException if no record exists for the id (and the cache is not
+     *                            infrastructure), the object was already deleted in this
+     *                            transaction, or the conflict checks refuse the delete
+     */
     public void delete(final Object objectId, final XdStorageTransaction transaction) throws XdStorageException {
         XdStorageCacheRecord record = cache.records().get(objectId);
         if (record == null) {

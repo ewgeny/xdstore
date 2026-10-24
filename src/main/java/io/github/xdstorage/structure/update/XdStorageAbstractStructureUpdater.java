@@ -17,6 +17,21 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Base class for structure updaters that rewrite the stored records of a class one by one.
+ * {@code execute} walks the class's stored records according to its storage policy — through
+ * the id hash index for {@code StoreAsClassObjects}, through the references resource and the
+ * per-object resources for {@code StoreAsSingleObject} — applies {@code transform} to each
+ * record's old state and writes the migrated state back inside the migration transaction.
+ * The embedded policy ({@code StoreWithParentObject}) has no own records and fails the
+ * migration. The outcome (result, message, error) is kept in fields readable through the
+ * {@code IXdStorageStructureUpdater} getters.
+ *
+ * <p>Instances are executed under the structure manager's per-class lock and are not safe
+ * for concurrent executions on their own. Engine-internal — not part of the public API.</p>
+ *
+ * @param <T> the migrated record type produced by {@code transform}
+ */
 public abstract class XdStorageAbstractStructureUpdater<T> implements IXdStorageStructureUpdater<T> {
 
     private final String updateName;
@@ -27,15 +42,32 @@ public abstract class XdStorageAbstractStructureUpdater<T> implements IXdStorage
 
     private Throwable e;
 
+    /**
+     * Creates an updater journalled under the given script name.
+     *
+     * @param updateName the unique name this update script is journalled under
+     */
     protected XdStorageAbstractStructureUpdater(final String updateName) {
         this.updateName = updateName;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @return the unique name of this update script
+     */
     @Override
     public String getUpdateName() {
         return updateName;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @param result  the execution result
+     * @param message the human-readable result message
+     * @param e       the failure cause, or {@code null} when the script did not fail
+     */
     @Override
     public void setResult(final XdStorageUpdateStructureResult result, final String message, final Throwable e) {
         this.result = result;
@@ -43,21 +75,50 @@ public abstract class XdStorageAbstractStructureUpdater<T> implements IXdStorage
         this.e = e;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @return the result of the last execution, or {@code null} before the first one
+     */
     @Override
     public XdStorageUpdateStructureResult getResult() {
         return result;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @return the message of the last execution, or {@code null} before the first one
+     */
     @Override
     public String getMessage() {
         return message;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @return the error of the last failed execution, or {@code null} when it did not fail
+     */
     @Override
     public Throwable getError() {
         return e;
     }
 
+    /**
+     * Migrates every stored record of the target class: reads the records per the class
+     * storage policy, transforms each old state with {@code transform} and updates the
+     * record in place, all within the given transaction. Stops at the first failing record
+     * and reports the failure through {@code setResult}.
+     *
+     * @param resourcesManager the engine resources manager to lock and read/write the
+     *                         stored resources through
+     * @param transaction      the transaction the migration runs in
+     * @return {@code SUCCESSFULLY} when every stored record was migrated, {@code FAILURE}
+     *         when the storage policy is unsupported or a record migration failed
+     * @throws XdStorageException           when the migration fails with a storage error
+     * @throws XdStorageConnectionException when the storage connection fails
+     */
     @Override
     public XdStorageUpdateStructureResult execute(final XdStorageAbstractResourcesManager resourcesManager,
                                                   final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
@@ -137,5 +198,11 @@ public abstract class XdStorageAbstractStructureUpdater<T> implements IXdStorage
         return success.get() ? XdStorageUpdateStructureResult.SUCCESSFULLY : XdStorageUpdateStructureResult.FAILURE;
     }
 
+    /**
+     * Transforms the old persisted state of one stored record into its migrated state.
+     *
+     * @param oldStateOfObject the record as currently stored
+     * @return the migrated state to write back for the record
+     */
     protected abstract T transform(final XdStorageIdentifiableObject oldStateOfObject);
 }

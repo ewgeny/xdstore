@@ -26,6 +26,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * One file-backed DAO resource — the physical home of an entity's records (a class-shared
+ * fragment, a per-object file or a references file). On top of the abstract base it adds the
+ * disk I/O (read/write through the configured serialization factory, atomic write-out) and
+ * the real transactional machinery: lazy prepare-from-disk with commit-journal replay, the
+ * two commit phases (full-file write-out, or an O(delta) journal append when journaling is
+ * on), compensation of a failed phase 1, and the shutdown journal checkpoint.
+ *
+ * <p>Thread-safety: one instance serves all threads; commits are serialized per resource by
+ * a {@code ReentrantLock} acquired with the committing transaction's timeout
+ * ({@link #lockForCommit}), while {@code prepare} is double-checked under its own lock.
+ * Reads and staged writes resolve through the MVCC cache.</p>
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageResource extends XdStorageAbstractResource implements IXdStorageJournalCheckpoint {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageResource.class);
@@ -46,6 +61,16 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
 
     private AtomicBoolean prepared = new AtomicBoolean(false);
 
+    /**
+     * Builds a resource with in-process id generation; journaling follows the storage
+     * configuration and is applied only to user-data resources.
+     *
+     * @param services   engine services shared with collaborators
+     * @param manager    the owning resources manager
+     * @param resourceId the storage-wide unique resource id (the file path)
+     * @param clInfo     metadata of the entity class
+     * @param factory    the serialization factory creating the record reader and writer
+     */
     public XdStorageResource(final XdStorageServicesLocator services,
                              final XdStorageAbstractResourcesManager manager,
                              final Object resourceId,
@@ -54,6 +79,20 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         this(services, manager, resourceId, clInfo, null, false, factory);
     }
 
+    /**
+     * Builds a resource with full configuration. Journaling is enabled only when the storage
+     * configuration turns it on AND the resource stores user data — B+-tree infrastructure
+     * caches keep the full-rewrite strategy because journal replays of their UPSERTs would
+     * fork the canonical in-memory graphs.
+     *
+     * @param services     engine services shared with collaborators
+     * @param manager      the owning resources manager
+     * @param resourceId   the storage-wide unique resource id (the file path)
+     * @param clInfo       metadata of the entity class
+     * @param idGenerator  external id generator, or {@code null} for in-process ids
+     * @param isReferences whether this is a references resource
+     * @param factory      the serialization factory creating the record reader and writer
+     */
     public XdStorageResource(final XdStorageServicesLocator services,
                              final XdStorageAbstractResourcesManager manager,
                              final Object resourceId, final XdStorageClassInfo clInfo,
@@ -122,6 +161,11 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         super.unlockAfterCommit(transaction);
     }
 
+    /**
+     * The path of this resource's backing file (the resource id rendered as a string).
+     *
+     * @return the backing file path
+     */
     public String getFileName() {
         return resourceId.toString();
     }
@@ -210,6 +254,15 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         return objects;
     }
 
+    /**
+     * Loads the resource state from disk into the cache on the first call: parses the base
+     * file, replays the commit journal over it when journaling is on, runs the subclass
+     * hook and syncs the manager's object counter. Later calls (double-checked under the
+     * prepare lock) are no-ops.
+     *
+     * @param transaction the transaction the resource is prepared for
+     * @throws XdStorageException when the base file or the journal cannot be read or parsed
+     */
     public void prepare(final XdStorageTransaction transaction) throws XdStorageException {
         if (prepared.get()) {
             return;
@@ -275,6 +328,18 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         }
     }
 
+    /**
+     * Phase 1: persists the transaction's changes durably without publishing them. With
+     * journaling on, fills the collector and appends an O(delta) redo record to the commit
+     * journal (checkpointing the journal first when it grew past its size threshold);
+     * otherwise falls back to the atomic full-file write-out of the transaction's view.
+     * A resource without changes in the transaction is skipped.
+     *
+     * @param transaction the committing transaction
+     * @param record      the collector filled with the staged changes for phase 2 and
+     *                    compensation
+     * @throws XdStorageException on a storage-level failure
+     */
     public void performFirstPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
         if (cache.hasChanges(transaction)) {
             if (journalWrites) {
@@ -315,6 +380,14 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         }
     }
 
+    /**
+     * Phase 2: publishes the phase-1 persisted changes into the cache (visible state), then
+     * runs the subclass hook. In-memory only — durability was established in phase 1.
+     *
+     * @param transaction the committing transaction
+     * @param record      the collector filled by phase 1
+     * @throws XdStorageException on a storage-level failure
+     */
     public void performSecondPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
         cache.performCommit(transaction, record);
         cache.commit(transaction);
@@ -352,6 +425,16 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         }
     }
 
+    /**
+     * Compensation after a failed phase 1: undoes the prepared changes in the cache and
+     * persists the restored pre-commit state — a compensation append to the journal when
+     * journaling is on (mandatory: without it a crash right after the redo append would
+     * resurrect the rejected transaction at replay), otherwise a full-file write-out.
+     *
+     * @param transaction the failed transaction
+     * @param changes     the staged changes phase 1 persisted
+     * @throws XdStorageException on a storage-level failure
+     */
     public void rollbackPerformingFirstPhaseCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) throws XdStorageException {
         cache.rollbackFailedCommit(transaction, changes);
         if (journalWrites) {
@@ -369,6 +452,14 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         postRollback(transaction);
     }
 
+    /**
+     * Discards the transaction's staged changes in the cache (pre-commit rollback) and runs
+     * the subclass hook; as a fail-safe it also releases the commit lock if this thread
+     * still holds it. The persistent state is untouched.
+     *
+     * @param transaction the transaction being rolled back
+     * @throws XdStorageException on a storage-level failure
+     */
     @Override
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
         // Гарантируем fail-safe отпуск ReentrantLock замка при откате изменений страницы

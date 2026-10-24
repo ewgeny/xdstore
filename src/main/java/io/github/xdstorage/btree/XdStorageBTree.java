@@ -19,6 +19,32 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * The B+tree index structure of the engine: an ordered key-to-record map persisted as one
+ * file per node ({@code XdStorageBTreeNode}), with the tree object itself holding the root
+ * and the first leaf. Leaves form an ordered chain over next-level pointers — the backbone
+ * of the horizontal scans {@code read}/{@code readRange}. A tree is either UNIQUE
+ * ({@code multiple == false}, one record per key — the primary id-address index) or MULTI
+ * ({@code multiple == true}, duplicates allowed — a search index); for MULTI trees the
+ * engine deliberately forbids vertical descents on reads (R-46: splits may reorder duplicate
+ * keys across left/right branches), so scans traverse the whole leaf chain from
+ * {@code firstLeaf}, and {@code readRange} (FP-1a) recovers sub-linear behavior through
+ * early termination once the ordered chain passes the upper bound.
+ *
+ * <p>Thread safety: every operation serializes on the tree-level read/write lock; mutations
+ * additionally hold write locks along the rebalanced node path under a bounded
+ * retry-with-backoff budget (livelock containment). On a search the tree read lock is
+ * released by the node descent itself at the lock-coupling point — callers must not wrap
+ * {@code find}/{@code read} in an external unlock. The structure-mutation counters
+ * ({@code currentStructureVersion}, {@code activeMutationCount}) let the invariant
+ * validator reject non-atomic observations.</p>
+ *
+ * <p>After a reopen the generic deserializer hands back raw-String keys/records for search
+ * indexes; the types are restored once per tree instance by
+ * {@code restoreSearchKeyTypes} (task 18 / BUG-E).</p>
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 @XdStorageObjectPolicy(policy = XdStoragePolicy.StoreAsSingleObject)
 public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.serialization.IXdStorageSerializationGuard {
 
@@ -50,10 +76,24 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
     // Позволяет надежно отличать первичную пустую базу от базы, опустошенной в ходе транзакции очистки!
     private boolean wasInitialized = false;
 
+    /**
+     * Default constructor for the persistence layer — an empty, unresolved tree whose
+     * fields the deserializer fills in.
+     */
     public XdStorageBTree() {
         // do nothing
     }
 
+    /**
+     * Creates a live tree with the given identity and fill factor.
+     *
+     * @param id       the tree's persistent identity (indexed class + index name)
+     * @param multiple {@code true} for a duplicate-bearing (search) index,
+     *                 {@code false} for a unique index
+     * @param t        the fill factor (minimum degree): a settled node holds between
+     *                 {@code t-1} and {@code 2t-1} keys and splits at {@code 2t}
+     * @throws XdStorageRuntimeException when {@code t} is less than or equal to 1
+     */
     public XdStorageBTree(final XdStorageBTreeId id, final boolean multiple, final int t) {
         this.id = id;
         this.isReference = false;
@@ -87,15 +127,31 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
     private final java.util.concurrent.ConcurrentHashMap<Thread, String> activeMutatorThreads =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * R-56 support for the invariant validator: the structure-mutation version grows on
+     * every structural mutation, so an unchanged version across two traversals certifies
+     * that the observation was atomic with respect to structure changes.
+     *
+     * @return the current structure-mutation version counter
+     */
     public long currentStructureVersion() {
         return structureVersion.get();
     }
 
+    /**
+     * R-56 support for the invariant validator: a nonzero count means a mutation is in
+     * flight and no structural observation may be trusted.
+     *
+     * @return the number of structural mutations currently in flight
+     */
     public int activeMutationCount() {
         return activeMutations.get();
     }
 
-    /** R-56: снимок активных мутаторов для диагностики сигналов валидатора. */
+    /** R-56: снимок активных мутаторов для диагностики сигналов валидатора.
+     *
+     * @return a diagnostic dump of the in-flight mutators (thread to operation description)
+     */
     public String describeActiveMutators() {
         return activeMutatorThreads.toString();
     }
@@ -105,17 +161,33 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
     // вешающий потоки (дефект зависания cleanShutdown в merge-стрессе).
     private static final int REBALANCE_RETRY_BUDGET = 10;
 
+    /**
+     * Reports the calling thread's hold of the tree-level write lock.
+     *
+     * @return {@code true} when the calling thread holds the tree write lock
+     */
     @Override
     public boolean isWriteLocked() {
         return lock.isWriteLocked();
     }
 
     // R-43: сериализация дерева (root/firstLeaf) — tryLock-версия, см. ноду.
+
+    /**
+     * R-43 serialization guard: takes the tree write lock non-blockingly so a disk
+     * serializer snapshots the tree header (root/firstLeaf) consistently. Best-effort —
+     * when the lock is busy the serializer proceeds unlocked and relies on the
+     * collection-monitor snapshots. Paired with {@link #endConsistentSerialization()}.
+     */
     @Override
     public void beginConsistentSerialization() {
         tryLockWrite(null);
     }
 
+    /**
+     * R-43 serialization guard: releases the tree write lock taken by
+     * {@link #beginConsistentSerialization()} (no-op when it was not captured).
+     */
     @Override
     public void endConsistentSerialization() {
         if (isWriteLocked()) {
@@ -123,11 +195,24 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         }
     }
 
+    /**
+     * Reports the calling thread's hold of the tree-level read lock.
+     *
+     * @return {@code true} when the calling thread holds the tree read lock
+     */
     @Override
     public boolean isReadLocked() {
         return lock.isReadLocked();
     }
 
+    /**
+     * Acquires the tree-level write lock, blocking (with polling) until success or the
+     * transaction's lock timeout expires. Mutators hold it around root/firstLeaf
+     * materialization; the rebalance descent re-acquires it per attempt.
+     *
+     * @param transaction the owning transaction providing the lock timeout ({@code null} — engine default)
+     * @throws XdStorageException when the acquiring thread is interrupted while waiting
+     */
     @Override
     public void lockWrite(final IXdStorageTransaction transaction) throws XdStorageException {
         try {
@@ -137,6 +222,14 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         }
     }
 
+    /**
+     * Acquires the tree-level read lock, blocking (with polling) until success or the
+     * transaction's lock timeout expires. On a search/scan the descent releases it at the
+     * lock-coupling point — do not release it externally afterwards.
+     *
+     * @param transaction the owning transaction providing the lock timeout ({@code null} — engine default)
+     * @throws XdStorageException when the acquiring thread is interrupted while waiting
+     */
     @Override
     public void lockRead(final IXdStorageTransaction transaction) throws XdStorageException {
         try {
@@ -146,54 +239,114 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         }
     }
 
+    /**
+     * Attempts to capture the tree write lock without waiting for other holders.
+     *
+     * @param transaction the owning transaction (part of the interface contract; not used by the try-variant)
+     * @return {@code true} when the lock was captured
+     */
     @Override
     public boolean tryLockWrite(final IXdStorageTransaction transaction) {
         return lock.tryLockWrite();
     }
 
+    /**
+     * Attempts to capture the tree read lock without waiting for other holders.
+     *
+     * @param transaction the owning transaction (part of the interface contract; not used by the try-variant)
+     * @return {@code true} when the lock was captured
+     */
     @Override
     public boolean tryLockRead(final IXdStorageTransaction transaction) {
         return lock.tryLockRead();
     }
 
+    /**
+     * Releases one write-lock hold of the calling thread on the tree lock.
+     */
     @Override
     public void unlockWrite() {
         lock.unlockWrite();
     }
 
+    /**
+     * Releases one read-lock hold of the calling thread on the tree lock.
+     */
     @Override
     public void unlockRead() {
         lock.unlockRead();
     }
 
+    /**
+     * Returns the tree's persistent identity — the indexed class plus the index name.
+     *
+     * @return the tree's persistent identity (indexed class + index name)
+     */
     public XdStorageBTreeId getId() {
         return id;
     }
 
+    /**
+     * Sets the tree's persistent identity (used by the parser on materialization).
+     *
+     * @param id the persistent identity to set
+     */
     public void setId(final XdStorageBTreeId id) {
         this.id = id;
     }
 
+    /**
+     * Reports whether this tree is still an unloaded parser stub.
+     *
+     * @return {@code true} while this instance is an unloaded parser stub that must be
+     *         materialized from storage before use
+     */
     public boolean isReference() {
         return isReference;
     }
 
+    /**
+     * Sets the parser-stub marker (cleared by the parser when the tree is materialized).
+     *
+     * @param reference the parser-stub marker to set ({@code false} for a live instance)
+     */
     public void setReference(boolean reference) {
         isReference = reference;
     }
 
+    /**
+     * Reports the tree's uniqueness mode.
+     *
+     * @return {@code true} for a duplicate-bearing (search) index, {@code false} for a unique index
+     */
     public boolean isMultiple() {
         return multiple;
     }
 
+    /**
+     * Sets the tree's uniqueness mode.
+     *
+     * @param multiple the uniqueness mode to set ({@code true} — duplicates allowed)
+     */
     public void setMultiple(boolean multiple) {
         this.multiple = multiple;
     }
 
+    /**
+     * Returns the tree's fill factor (minimum degree).
+     *
+     * @return the fill factor (minimum degree) of the tree
+     */
     public int getT() {
         return t;
     }
 
+    /**
+     * Sets the tree's fill factor (minimum degree).
+     *
+     * @param t the fill factor to set; a settled node holds between {@code t-1} and {@code 2t-1} keys
+     * @throws XdStorageRuntimeException when {@code t} is less than or equal to 1
+     */
     public void setT(final int t) {
         if (t <= 1) {
             throw new XdStorageRuntimeException("Parameter t of BTree cannot be letter or equal 1");
@@ -201,22 +354,58 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         this.t = t;
     }
 
+    /**
+     * Returns the current root node of the tree.
+     *
+     * @return the current root node ({@code null} for an empty, never-initialized tree)
+     */
     public XdStorageBTreeNode getRoot() {
         return root;
     }
 
+    /**
+     * Sets the root node of the tree.
+     *
+     * @param root the root node to set
+     */
     public void setRoot(final XdStorageBTreeNode root) {
         this.root = root;
     }
 
+    /**
+     * Returns the head of the ordered leaf chain — the entry point of range walks.
+     *
+     * @return the first (leftmost) leaf of the ordered leaf chain, {@code null} when the tree is empty
+     */
     public XdStorageBTreeNode getFirstLeaf() {
         return firstLeaf;
     }
 
+    /**
+     * Sets the head of the ordered leaf chain.
+     *
+     * @param firstLeaf the first-leaf pointer to set
+     */
     public void setFirstLeaf(final XdStorageBTreeNode firstLeaf) {
         this.firstLeaf = firstLeaf;
     }
 
+    /**
+     * Inserts the record under the key, creating the root on the first insert. Parser stubs
+     * of root/firstLeaf are materialized under the tree write lock first; the descent itself
+     * runs under lock coupling. On sustained rebalance-lock contention the descent is retried
+     * within a bounded attempt budget (with backoff) and fails loudly when the budget is
+     * exhausted. A duplicate key fails loudly on a unique ({@code multiple == false}) tree.
+     *
+     * @param key         the insertion key (Comparable contract of the indexed field's type)
+     * @param object      the record to store under the key
+     * @param storage     the storage facade used to persist the tree and its nodes
+     * @param transaction the owning transaction
+     * @throws XdStorageException           when the thread is interrupted, the rebalance retry
+     *                                      budget is exhausted, or a unique tree already
+     *                                      contains the key
+     * @throws XdStorageConnectionException when persisting a node or the tree fails
+     */
     public void insert(final Comparable key, final Object object,
                        final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         // ИСПРАВЛЕНИЕ: Fail-fast проверка прерывания потока на входе в СУБД
@@ -299,6 +488,20 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         storage.update(this, transaction);
     }
 
+    /**
+     * Removes the record stored under the key and rebalances the tree on underflow
+     * (borrow from a sibling, merge, parent recursion, root collapse; an emptied root also
+     * clears the root and first-leaf pointers). Deleting from a never-initialized
+     * non-reference tree fails loudly; a no-op otherwise when the tree is empty. Sustained
+     * rebalance contention is retried within a bounded budget, then fails loudly.
+     *
+     * @param key         the key to remove
+     * @param storage     the storage facade used to persist the tree and its nodes
+     * @param transaction the owning transaction
+     * @throws XdStorageException           when the thread is interrupted, the key is not
+     *                                      present, or the rebalance retry budget is exhausted
+     * @throws XdStorageConnectionException when persisting a node or the tree fails
+     */
     public void delete(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         if (Thread.currentThread().isInterrupted()) {
             throw new XdStorageException("interrupted", new InterruptedException("Поток прерван перед удалением из B+ Дерева"));
@@ -391,6 +594,19 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         } while (retryDelete.get());
     }
 
+    /**
+     * Replaces the record stored under the key with the new value in place (a leaf-list
+     * write, no structural change); a missing key fails loudly. Sustained rebalance
+     * contention is retried within a bounded budget, then fails loudly.
+     *
+     * @param key         the key whose record is replaced
+     * @param value       the replacement record
+     * @param storage     the storage facade used to persist the affected node
+     * @param transaction the owning transaction
+     * @throws XdStorageException           when the thread is interrupted, the key is not
+     *                                      present, or the rebalance retry budget is exhausted
+     * @throws XdStorageConnectionException when persisting the node fails
+     */
     public void update(final Comparable key, final Object value, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         if (Thread.currentThread().isInterrupted()) {
             throw new XdStorageException("interrupted", new InterruptedException("Поток прерван перед обновлением в B+ Дереве"));
@@ -477,6 +693,21 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         } while (retryUpdate.get());
     }
 
+    /**
+     * Searches the records stored under the key. On a unique tree this is a single vertical
+     * descent; on a MULTI tree the whole leaf chain is scanned (no vertical descents — R-46).
+     * The search retries under a time budget derived from the transaction timeout with
+     * exponential backoff and fails loudly when the budget expires under sustained write
+     * pressure. The tree read lock is released by the descent itself (lock coupling).
+     *
+     * @param key         the key to look up
+     * @param storage     the storage facade used to lazily load stub nodes
+     * @param transaction the owning transaction
+     * @return the records stored under the key — several for a MULTI tree; empty when the key is absent
+     * @throws XdStorageException           when the thread is interrupted or the search retry
+     *                                      budget expires under sustained contention
+     * @throws XdStorageConnectionException when lazily loading a node fails
+     */
     public List<Object> find(final Comparable key, final IXdStorage storage, final IXdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         if (root == null && wasInitialized) {
             lockWrite(transaction);
@@ -593,6 +824,11 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
      * key fields are declared Object), and the first typed seek crashes with a CCE. Runs
      * ONCE per tree instance (CAS-guarded; O(N) one-time per open), delegating the walk to
      * the first leaf (same lock discipline as {@link #read}).
+     * @param keyRestorer maps each raw key/record to its typed form (identity when already typed)
+     * @param storage     the storage facade used to resolve leaf-chain stubs
+     * @param transaction the owning transaction
+     * @throws XdStorageException           when a lock acquisition is interrupted or the walk fails
+     * @throws XdStorageConnectionException when lazily loading a leaf-chain stub fails
      */
     public void restoreSearchKeyTypes(final java.util.function.UnaryOperator<Object> keyRestorer,
                                       final IXdStorage storage, final IXdStorageTransaction transaction)
@@ -620,6 +856,21 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         chainStart.restoreSearchKeyTypes(this, storage, transaction, keyRestorer);
     }
 
+    /**
+     * Feeds every entry of the tree to the viewer in ascending key order by walking the
+     * ordered leaf chain from the first leaf. The chain's parser stubs are prewarmed first
+     * (disk IO under per-node write locks — never under the tree lock, R-38); the walk then
+     * proceeds under per-node read locks with lock coupling and releases the tree read lock
+     * at the first node lock. Each leaf's keys/records are snapshotted under the list
+     * monitors before the viewer sees them.
+     *
+     * @param storage     the storage facade used to resolve leaf-chain stubs
+     * @param transaction the owning transaction
+     * @param viewer      the entry sink; may end the walk early by raising the
+     *                    {@code walkTerminated()} signal (see {@link #readRange})
+     * @throws XdStorageException           when a lock acquisition is interrupted or the walk fails
+     * @throws XdStorageConnectionException when lazily loading a leaf-chain stub fails
+     */
     public void read(final IXdStorage storage, final IXdStorageTransaction transaction, final IXdStorageBTreeViewer viewer) throws XdStorageException, XdStorageConnectionException {
         // R-38: ПРЕДПРОГРЕВ ЦЕПИ ЛИСТЬЕВ. На холодном кэше связный обход под read-локами
         // делал синхронный storage.load каждого стаба-узла (XML-парс с диска) ВНУТРИ
@@ -656,6 +907,17 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
      * multiple=true) the engine deliberately forbids descents (splits reorder duplicates across
      * branches — see the invariant comment in find), so positioning starts at the first leaf;
      * early termination is what makes selective upper-bounded ranges sub-linear.
+     *
+     * @param fromKey       the lower bound of the range ({@code null} — open lower bound)
+     * @param fromInclusive whether {@code fromKey} itself belongs to the range
+     * @param toKey         the upper bound of the range ({@code null} — open upper bound)
+     * @param toInclusive   whether {@code toKey} itself belongs to the range
+     * @param storage       the storage facade used to resolve leaf-chain stubs
+     * @param transaction   the owning transaction
+     * @param viewer        the entry sink for the entries inside the range; may end the walk
+     *                      early by raising {@link #walkTerminated()} (LIMIT pushdown)
+     * @throws XdStorageException           when a lock acquisition is interrupted or the walk fails
+     * @throws XdStorageConnectionException when lazily loading a leaf-chain stub fails
      */
     public void readRange(final Comparable fromKey, final boolean fromInclusive,
                           final Comparable toKey, final boolean toInclusive,
@@ -697,7 +959,10 @@ public class XdStorageBTree implements IXdStorageBTreeNode, io.github.xdstorage.
         }
     }
 
-    /** FP-1b: a fresh walk-termination signal for a viewer that has collected its page. */
+    /** FP-1b: a fresh walk-termination signal for a viewer that has collected its page.
+     *
+     * @return a fresh, stack-less termination signal to raise from a viewer's {@code look}
+     */
     public static WalkTerminated walkTerminated() {
         return new WalkTerminated();
     }

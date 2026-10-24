@@ -13,6 +13,21 @@ import java.util.Map;
  */
 public class XdStorageObservableWrapperClassCodeGenerator extends XdStorageAbstractClassCodeGenerator {
 
+    /** Creates a stateless generator with lazy-load generation switched off. */
+    public XdStorageObservableWrapperClassCodeGenerator() {
+    }
+
+    /**
+     * Generates the id-observable wrapper subclass source: a delegating subclass that
+     * keeps an observer list, fires {@code onNewIdIsSet} on the entity's id setter and
+     * delegates every other setter to the wrapped object, while closed methods reject
+     * modification of the reactive contour with {@code XdStorageRuntimeException}.
+     *
+     * @param classesPackage target package of the generated class
+     * @param cl             the entity class to generate the observable wrapper for
+     * @param code           accumulator map keyed by fully-qualified generated class name
+     * @return the same accumulator map with the generated source added
+     */
     @Override
     public Map<String, String> generate(final String classesPackage, final Class<?> cl, final Map<String, String> code) {
         // 1. Собираем методы во внутренний изолированный GenerationContext нити

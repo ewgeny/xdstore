@@ -15,14 +15,29 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Высокопроизводительный транзакционный менеджер ядра СУБД (Поинт Б).
- * Внедряет пуленепробиваемый счетчик активных потоков (Thread Reference Counter),
- * полностью блокируя асинхронное затирание живых транзакций фоновым пулом воркеров.
+ * The engine's transaction manager: begins root and nested transactions bound to the calling
+ * thread, commits them in two phases, rolls them back, and runs the asynchronous rollback-only
+ * sweep for transactions marked by timeout or conflict. Its core protection is a thread
+ * reference counter: the manager counts how many threads are currently executing inside each
+ * transaction, keeps such a transaction alive, and makes a background sweep defer and
+ * reschedule its rollback until every active thread has left — a parallel-stream operation is
+ * never shot in the back by the sweeper. Timeouts are enforced lazily (at lock waits, latches
+ * and this sweep), not by an expiry timer.
+ *
+ * <p>Thread-safety: the registries are concurrent maps; one transaction may be used from many
+ * threads. Nested transactions suspend on their parent and roll back downward-only — a nested
+ * rollback never poisons the parent, and the parent waits for open nested transactions at its
+ * own commit.
+ *
+ * <p>Engine-internal — not part of the public API.
  */
 public class XdStorageTransactionManager implements IXdStorageTransactionManager<XdStorageTransaction> {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageTransactionManager.class);
 
+    /**
+     * The storage's service locator (storage, metrics, triggers, executor, cloner).
+     */
     protected final XdStorageServicesLocator services;
 
     private final Map<String, XdStorageTransaction> transactionsById;
@@ -33,6 +48,11 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
     // выполняющих операции внутри конкретной транзакции прямо сейчас.
     private final Map<String, AtomicLong> transactionActiveThreadsCounter = new ConcurrentHashMap<>();
 
+    /**
+     * Creates a manager with empty transaction registries.
+     *
+     * @param provider the storage's service locator
+     */
     public XdStorageTransactionManager(final XdStorageServicesLocator provider) {
         this.services = provider;
         this.transactionsById = new ConcurrentHashMap<>();
@@ -41,12 +61,27 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
     }
 
     // УПРАВЛЕНИЕ СЧЕТЧИКАМИ ССЫЛОК ПОТОКОВ СУБД
+    /**
+     * Counts one more thread as executing inside the transaction (thread reference counting).
+     * While the count is above zero, {@code isTransactionAlive} reports the transaction alive
+     * and the rollback-only sweep defers and reschedules its rollback. A no-op for a
+     * {@code null} id.
+     *
+     * @param transactionId the id of the transaction being entered
+     */
     public void incrementActiveThreads(final String transactionId) {
         if (transactionId != null) {
             transactionActiveThreadsCounter.computeIfAbsent(transactionId, k -> new AtomicLong(0)).incrementAndGet();
         }
     }
 
+    /**
+     * Counts one thread out of the transaction; a count dropping to zero unregisters the
+     * counter, so a pending sweep stops deferring. A no-op for a {@code null} id or a
+     * transaction without a counter.
+     *
+     * @param transactionId the id of the transaction being left
+     */
     public void decrementActiveThreads(final String transactionId) {
         if (transactionId != null) {
             AtomicLong counter = transactionActiveThreadsCounter.get(transactionId);
@@ -134,6 +169,19 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         return createTransaction(manager, threadId, null, timeout, transactionId);
     }
 
+    /**
+     * Creates a transaction instance: {@code globalTransaction == null} for a root transaction,
+     * the parent for a nested one (the manager suspends a nested transaction on its parent right
+     * afterwards). Extension point for subclasses and tests that need a custom transaction type.
+     *
+     * @param manager           the manager the new transaction belongs to
+     * @param threadId          the id string of the thread the transaction is bound to
+     * @param globalTransaction the parent transaction of a nested transaction, {@code null} for
+     *                          a root transaction
+     * @param timeout           the transaction timeout in milliseconds
+     * @param transactionId     the unique id for the new transaction
+     * @return the created transaction
+     */
     protected XdStorageTransaction createTransaction(final XdStorageTransactionManager manager, final String threadId,
                                                      final XdStorageTransaction globalTransaction, final long timeout, final String transactionId) {
         return new XdStorageTransaction(manager, threadId, globalTransaction, timeout, transactionId);
@@ -206,6 +254,14 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
         log.debug(String.format("Committed transaction %s", transaction.getTransactionId()));
     }
 
+    /**
+     * Fires the persistence triggers for the committed changes, on the storage's executor and
+     * awaited inline — the commit does not count as done before the triggers ran. Trigger
+     * failures are logged, not rethrown: by then the commit itself is already durable.
+     *
+     * @param firstPhaseCommittedResources the per-resource change records of the finished commit
+     * @param transaction                  the committed transaction, handed to every trigger
+     */
     protected void fireChanges(final Map<Object, XdStorageTransactionResourceChanges> firstPhaseCommittedResources, final XdStorageTransaction transaction) {
         final Callable<Boolean> task = () -> {
             firstPhaseCommittedResources.entrySet().stream().forEach(entry -> {
@@ -276,6 +332,9 @@ public class XdStorageTransactionManager implements IXdStorageTransactionManager
      * ждущей в skipOrWaitForInternalTransactions своего родителя, никто никогда не завершит:
      * ее поток — сам родительский, он поймал исключение из nested-области и пытается
      * завершить родителя. Брошенная tx подлежит немедленному откату.
+     *
+     * @param transactionId the id of the transaction to test
+     * @return {@code true} when the transaction is registered on the current thread
      */
     public boolean isTransactionBoundToCurrentThread(final String transactionId) {
         final String threadId = threadsByTransactionId.get(transactionId);

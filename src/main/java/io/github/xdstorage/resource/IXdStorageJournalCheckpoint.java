@@ -16,6 +16,9 @@ public interface IXdStorageJournalCheckpoint {
      * prepared in this run (its journal belongs to the NEXT open's replay — checkpointing
      * an unprepared, empty cache would destroy the base file), or when the resource is
      * busy with a live commit. Never throws.
+     *
+     * @return {@code true} when the journal was checkpointed (full committed-state rewrite
+     *         plus journal reset), {@code false} when there was nothing to do
      */
     boolean checkpointJournalOnShutdown();
 }

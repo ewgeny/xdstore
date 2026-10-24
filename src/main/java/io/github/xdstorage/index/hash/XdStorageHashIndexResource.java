@@ -32,6 +32,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * The persistent hash id-index resource for one entity class: a journal-checkpointable id
+ * {@code ->} data-fragment index persisted as {@code XdStorageHashIndexRecord} entries.
+ * With {@code indexJournalWrites} enabled (default) and a YAML content factory, the first
+ * commit phase appends the delta to the resource's commit journal ({@code
+ * <base>-journal.yaml}) instead of rewriting the whole record file (O(delta) instead
+ * of O(N)); on reopen the base file is parsed once, every record key is restored to the
+ * ENTITY id-field type (the YAML round-trip does not know it — without the restore, by-id
+ * lookups would silently miss), and the journal replays on top. Commit phases are
+ * serialized by a {@code ReentrantLock} bounded by the transaction timeout.
+ *
+ * <p>Engine-internal — not part of the public API.</p>
+ */
 public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResource implements IXdStorageJournalCheckpoint {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageHashIndexResource.class);
@@ -55,6 +68,19 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
 
     private final io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory yamlJournalFactory;
 
+    /**
+     * Creates the resource without an id generator (ids must be set by the caller).
+     * Resolves the commit-journal file (and any superseded older-named journals) when index
+     * journaling is enabled by the storage config.
+     *
+     * @param services     the engine services locator
+     * @param manager      the resources manager owning this resource
+     * @param resourceId   the storage-wide unique resource id (the backing file path)
+     * @param indexName    the logical index name
+     * @param clInfo       metadata of the ENTITY class being indexed
+     * @param factory      the IO factory for the record file's content format
+     * @param fragmentSize the record capacity of one data fragment
+     */
     public XdStorageHashIndexResource(final XdStorageServicesLocator services,
                                       final XdStorageAbstractResourcesManager manager,
                                       final Object resourceId, final String indexName, final XdStorageClassInfo clInfo,
@@ -81,6 +107,20 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
                 : null;
     }
 
+    /**
+     * Creates the resource with an id generator used when an inserted object has no id yet.
+     * Resolves the commit-journal file (and any superseded older-named journals) when index
+     * journaling is enabled by the storage config.
+     *
+     * @param services     the engine services locator
+     * @param manager      the resources manager owning this resource
+     * @param resourceId   the storage-wide unique resource id (the backing file path)
+     * @param indexName    the logical index name
+     * @param clInfo       metadata of the ENTITY class being indexed
+     * @param factory      the IO factory for the record file's content format
+     * @param idGenerator  the id generator applied when an inserted object has no id yet
+     * @param fragmentSize the record capacity of one data fragment
+     */
     public XdStorageHashIndexResource(final XdStorageServicesLocator services,
                                       final XdStorageAbstractResourcesManager manager,
                                       final Object resourceId, final String indexName, final XdStorageClassInfo clInfo,
@@ -111,6 +151,15 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
 
     private AtomicBoolean locked = new AtomicBoolean(false);
 
+    /**
+     * Acquires the hash-index commit lock, waiting up to the transaction's timeout. Fails
+     * loudly with {@code XdStorageRuntimeException} when the lock cannot be acquired in
+     * time — deliberately breaking any commit-cycle deadlock — and re-asserts the thread's
+     * interrupt flag when interrupted while waiting.
+     *
+     * @param transaction the transaction acquiring the lock (its timeout bounds the wait;
+     *                    {@code null} means the default 3-second bound)
+     */
     @Override
     public void lockForCommit(final XdStorageTransaction transaction) {
         super.lockForCommit(transaction);
@@ -130,6 +179,12 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         }
     }
 
+    /**
+     * Releases the commit lock acquired by {@code #lockForCommit} (no-op when the current
+     * thread does not hold it), then runs the base release.
+     *
+     * @param transaction the transaction releasing the lock
+     */
     @Override
     public void unlockAfterCommit(final XdStorageTransaction transaction) {
         // ИСПРАВЛЕНИЕ ДЕДЛОКА СУБД: Освобождаем ReentrantLock хеш-индекса
@@ -139,6 +194,12 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         super.unlockAfterCommit(transaction);
     }
 
+    /**
+     * Returns the path of this resource's backing record file.
+     *
+     * @return the path of the backing record file of this resource (the resource id as a
+     *         string)
+     */
     public String getFileName() {
         return resourceId.toString();
     }
@@ -189,6 +250,17 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         }
     }
 
+    /**
+     * Reads the persisted id-index records as raw identifiable data (id plus serialized
+     * payload), without materializing them through the entity machinery. Absent file
+     * yields {@code null}.
+     *
+     * @param transaction the transaction context of the read (unused by the file read itself)
+     * @return the persisted identifiable objects, or {@code null} when the backing file
+     *         does not exist
+     * @throws XdStorageRuntimeException when the file exists but cannot be parsed — treated
+     *         as an invalid database state
+     */
     public Collection<XdStorageIdentifiableObject> readAsData(XdStorageTransaction transaction) {
         Collection<XdStorageIdentifiableObject> objects = null;
         try {
@@ -207,6 +279,16 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         return objects;
     }
 
+    /**
+     * Prepares the resource for use: on the first call (double-checked under the resource
+     * lock) parses the base record file, restores every record key to the ENTITY id-field
+     * type, fills the record cache, replays the commit journal over it and builds the id
+     * {@code ->} fragment map; later calls are no-ops.
+     *
+     * @param transaction the transaction the resource is prepared for
+     * @throws XdStorageException when the base file cannot be read or the commit journal
+     *         cannot be replayed — treated as an invalid database state
+     */
     public void prepare(final XdStorageTransaction transaction) throws XdStorageException {
         if (prepared.get()) {
             return;
@@ -261,6 +343,19 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         return restored;
     }
 
+    /**
+     * Phase 1 of the two-phase commit: when the transaction has staged changes, durably
+     * persists them — as an O(delta) append to the commit journal (when index journaling
+     * is on, followed by a size-threshold checkpoint), or otherwise as a crash-safe atomic
+     * full-file rewrite — without making them visible to other transactions.
+     *
+     * @param transaction the committing transaction
+     * @param record      the collector the phase fills with the staged changes for phase 2
+     *                    and compensation
+     * @throws XdStorageException           on a storage-level failure
+     * @throws XdStorageRuntimeException when the journal append fails — treated as an
+     *         invalid database state
+     */
     public void performFirstPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
         if (cache.hasChanges(transaction)) {
             if (indexJournal && yamlJournalFactory != null) {
@@ -283,12 +378,33 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         }
     }
 
+    /**
+     * Phase 2 of the two-phase commit: publishes the phase-1 persisted changes into the
+     * record cache, commits the transaction's contour and discards the rollback stack.
+     *
+     * @param transaction the committing transaction
+     * @param record      the collector filled by phase 1
+     * @throws XdStorageException on a storage-level failure
+     */
     public void performSecondPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
         cache.performCommit(transaction, record);
         cache.commit(transaction);
         postCommit(transaction);
     }
 
+    /**
+     * Compensates an already-persisted phase 1 after the overall commit failed: restores
+     * the pre-transaction committed state per changed id — as a journal compensation
+     * append when index journaling is on (so a torn redo cannot resurrect the rolled-back
+     * transaction), or otherwise as a full-file rewrite — then applies the id-map rollback
+     * compensations.
+     *
+     * @param transaction the failed transaction
+     * @param changes     the staged changes the first phase persisted
+     * @throws XdStorageException           on a storage-level failure
+     * @throws XdStorageRuntimeException when the journal compensation append fails —
+     *         treated as an invalid database state
+     */
     public void rollbackPerformingFirstPhaseCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) throws XdStorageException {
         cache.rollbackFailedCommit(transaction, changes);
         if (indexJournal && yamlJournalFactory != null) {
@@ -364,6 +480,14 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         }
     }
 
+    /**
+     * Discards the transaction's staged changes (pre-commit rollback): fail-safe releases
+     * the commit lock if the current thread still holds it (emergency rollback path),
+     * rolls the record cache back and applies the id-map rollback compensations.
+     *
+     * @param transaction the transaction being rolled back
+     * @throws XdStorageException on a storage-level failure
+     */
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
         // Гарантируем fail-safe отпуск ReentrantLock замка хеш-индекса при аварийном откате
         if (((ReentrantLock) lock).isHeldByCurrentThread()) {
@@ -417,6 +541,17 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         }
     }
 
+    /**
+     * Indexes a new object, guarding the base routing insert with a duplicate check and
+     * id generation: generates the id when the entity's id generator requires it and the
+     * id is still unset, and fails loudly when the id is already indexed.
+     *
+     * @param object      the object to insert
+     * @param transaction the transaction the insert is staged into
+     * @throws XdStorageException           when the object's id is already indexed, or on a
+     *         storage-level failure
+     * @throws XdStorageConnectionException on a connection-level failure (a retry may help)
+     */
     @Override
     public void insert(final Object object, final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         Object objectId = objectIdField.get(object);

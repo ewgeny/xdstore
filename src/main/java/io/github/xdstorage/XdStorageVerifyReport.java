@@ -23,7 +23,15 @@ import java.util.List;
  */
 public final class XdStorageVerifyReport {
 
-    public enum Verdict { OK, WARNINGS, CORRUPT }
+    /** The overall verdict of the walk — see the class javadoc for the severity model. */
+    public enum Verdict {
+        /** Nothing to act on: the folder is structurally clean. */
+        OK,
+        /** Damage the engine tolerates by design (torn journal tails, legacy files, litter). */
+        WARNINGS,
+        /** Damage needing action before trust: missing sentinel on a v2 file, unparseable file, count mismatch. */
+        CORRUPT
+    }
 
     /** Per-file structural state. */
     public enum State {
@@ -45,18 +53,30 @@ public final class XdStorageVerifyReport {
         public final String path;
         /** base | index | structure | journal | btree | btree-node | references | marker. */
         public final String kind;
+        /** The structural state (see {@link State}). */
         public final State state;
         /** Structural entry count: objects/records for content files, journal records for journals. */
         public final long entries;
+        /** File size in bytes. */
         public final long bytes;
         /** Journal files only: written under the 2.0.0-era stacked naming (auto-migrated at replay). */
         public final boolean legacyNaming;
         /** Non-fatal qualifications (e.g. "legacy v1 file without a sentinel"). */
         public final List<String> notes;
 
+        /**
+         * Builds one file's verdict row.
+         *
+         * @param path         folder-relative path of the file, '{@code /}'-separated
+         * @param kind         engine role of the file (see {@link #kind})
+         * @param state        structural state (see {@link State})
+         * @param entries      structural entry count (objects/records; journal records for journals)
+         * @param bytes        file size in bytes
+         * @param legacyNaming journal files only: written under the 2.0.0-era stacked naming
+         * @param notes        non-fatal qualifications; copied, never {@code null}
+         */
         public FileReport(final String path, final String kind, final State state, final long entries,
-                          final long bytes, final boolean legacyNaming, final List<String> notes) {
-            this.path = path;
+                          final long bytes, final boolean legacyNaming, final List<String> notes) {            this.path = path;
             this.kind = kind;
             this.state = state;
             this.entries = entries;
@@ -65,10 +85,17 @@ public final class XdStorageVerifyReport {
             this.notes = notes == null ? Collections.<String>emptyList() : Collections.unmodifiableList(notes);
         }
 
+        /**
+         * Whether this file contributes to the report at all: a non-{@link State#OK OK},
+         * non-{@link State#EMPTY EMPTY} state or any note.
+         *
+         * @return {@code true} when the file has something worth looking at
+         */
         public boolean hasProblems() {
             return state != State.OK && state != State.EMPTY || !notes.isEmpty();
         }
 
+        /** One-line human-readable form: state, kind, counts, path, then notes. */
         @Override
         public String toString() {
             final StringBuilder sb = new StringBuilder(String.format("%-8s %-12s %6d entries %8d bytes  %s",
@@ -85,6 +112,7 @@ public final class XdStorageVerifyReport {
 
     /** The verified folder (as given). */
     public final String folder;
+    /** The overall verdict (see {@link Verdict}). */
     public final Verdict verdict;
     /** The marker's formatVersion, or null when the marker is absent (legacy 1.x folder). */
     public final String formatVersion;
@@ -95,6 +123,17 @@ public final class XdStorageVerifyReport {
     /** Folder-level findings; every problem names its file or class directory. */
     public final List<String> findings;
 
+    /**
+     * Builds the report (the constructor copies both lists unmodifiable).
+     *
+     * @param folder        the verified folder, as given
+     * @param verdict       the overall verdict
+     * @param formatVersion the marker's {@code formatVersion}, or {@code null} when
+     *                      absent (a legacy 1.x folder)
+     * @param inUse         whether a live storage holds the folder lock
+     * @param files         every engine-owned file inspected; copied and unmodifiable
+     * @param findings      folder-level findings; copied and unmodifiable
+     */
     public XdStorageVerifyReport(final String folder, final Verdict verdict, final String formatVersion,
                                  final boolean inUse, final List<FileReport> files, final List<String> findings) {
         this.folder = folder;
@@ -105,10 +144,17 @@ public final class XdStorageVerifyReport {
         this.findings = Collections.unmodifiableList(findings);
     }
 
+    /**
+     * The one-word answer to "can I open this folder and move on":
+     * {@code true} when the verdict is {@link Verdict#OK} — nothing to act on.
+     *
+     * @return {@code true} when the walk found nothing requiring action
+     */
     public boolean isOk() {
         return verdict == Verdict.OK;
     }
 
+    /** Multi-line human-readable report: the header line, then every problem file and finding. */
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder();

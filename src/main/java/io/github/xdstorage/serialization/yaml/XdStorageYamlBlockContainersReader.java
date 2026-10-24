@@ -10,11 +10,31 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Выделенный stateless-компонент для разбора Java Collections, Maps и Enums.
- * Извлекает элементы строго из объектной структуры - item: и entry: key/value.
+ * Dedicated stateless component for demarshalling Java collections, maps and enums
+ * from the token stream. Elements are extracted strictly from the typed cell structure
+ * written by {@link XdStorageYamlBlockContainersWriter} — {@code - item:} list cells
+ * and {@code - entry:} cells with {@code key:}/{@code value:} pairs, each carrying an
+ * explicit {@code type:} and a scalar or nested {@code value:} block.
+ *
+ * <p>Thread-safety: all methods are static and stateless, so the class is thread-safe.
+ * Engine-internal — not part of the public API.</p>
  */
 public class XdStorageYamlBlockContainersReader {
 
+    /**
+     * Utility class — no instances.
+     */
+    public XdStorageYamlBlockContainersReader() {
+    }
+
+    /**
+     * Reads an {@code enum} block: consumes the {@code class:} and {@code value:} keys at
+     * the current level and restores the constant through {@code Enum.valueOf}.
+     *
+     * @param tokenizer the token stream positioned at the enum's {@code class:}/{@code value:} keys
+     * @return the restored enum constant, or {@code null} when the class or value key is absent
+     * @throws Exception when the enum class cannot be resolved or has no constant with the stored name
+     */
     public static Object readEnum(final XdStorageYamlTokenizer tokenizer) throws Exception {
         String className = null;
         String enumValue = null;
@@ -39,6 +59,19 @@ public class XdStorageYamlBlockContainersReader {
         return m.invoke(cl, enumValue);
     }
 
+    /**
+     * Reads a {@code collection} block: instantiates the stored collection class (falling
+     * back to {@code LinkedList} for non-instantiable wrappers) and restores every
+     * {@code - item:} cell below {@code parentLevel} as a typed value.
+     *
+     * @param tokenizer        the token stream positioned at the collection's {@code class:} key
+     * @param parentLevel      the tab level of the {@code collection} block itself; deeper
+     *                         tokens belong to the collection
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar item values
+     * @return the restored collection, or {@code null} when the {@code class:} key is absent
+     * @throws Exception when the collection class cannot be resolved or instantiated, or an
+     *         item value cannot be materialized
+     */
     @SuppressWarnings("unchecked")
     public static Object readCollection(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         YamlLineToken classToken = tokenizer.nextToken();
@@ -75,6 +108,15 @@ public class XdStorageYamlBlockContainersReader {
     /**
      * Читает блок array: тип компонента из 'class:' и элементы '- item'.
      * Восстанавливает массив через java.lang.reflect.Array.newInstance.
+     *
+     * @param tokenizer        the token stream positioned at the array's {@code class:} key
+     * @param parentLevel      the tab level of the {@code array} block itself; deeper tokens
+     *                         belong to the array
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar item values
+     * @return the restored array (via {@code java.lang.reflect.Array.newInstance}), or
+     *         {@code null} when the {@code class:} key is absent
+     * @throws Exception when the component type cannot be resolved or an item value cannot
+     *         be materialized
      */
     public static Object readArray(final XdStorageYamlTokenizer tokenizer, final int parentLevel,
                                    final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
@@ -105,6 +147,20 @@ public class XdStorageYamlBlockContainersReader {
         return array;
     }
 
+    /**
+     * Reads a {@code map} block: instantiates the stored map class (falling back to
+     * {@code HashMap} for non-instantiable wrappers) and restores each {@code - entry:}
+     * cell's {@code key:}/{@code value:} pair as a typed value. Entries whose restored key
+     * is {@code null} are skipped.
+     *
+     * @param tokenizer        the token stream positioned at the map's {@code class:} key
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar key/value values
+     * @param parentLevel      the tab level of the {@code map} block itself; deeper tokens
+     *                         belong to the map
+     * @return the restored map, or {@code null} when the {@code class:} key is absent
+     * @throws Exception when the map class cannot be resolved or instantiated, or a
+     *         key/value cannot be materialized
+     */
     @SuppressWarnings("unchecked")
     public static Object readMap(final XdStorageYamlTokenizer tokenizer, IXdStorageSimpleTypeHelper simpleTypeHelper,
                                  final int parentLevel) throws Exception {
@@ -226,11 +282,33 @@ public class XdStorageYamlBlockContainersReader {
         return null;
     }
 
+    /**
+     * Reads a collection cell inside a typed data record; an alias of
+     * {@link #readCollection} kept for symmetry with the record-oriented API.
+     *
+     * @param tokenizer        the token stream positioned at the collection's {@code class:} key
+     * @param parentLevel      the tab level of the {@code collection} block itself
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar item values
+     * @return the restored collection, or {@code null} when the {@code class:} key is absent
+     * @throws Exception when the collection class cannot be resolved or instantiated, or an
+     *         item value cannot be materialized
+     */
     @SuppressWarnings("unchecked")
     public static Object readObjectDataCollection(final XdStorageYamlTokenizer tokenizer, final int parentLevel, final IXdStorageSimpleTypeHelper simpleTypeHelper) throws Exception {
         return readCollection(tokenizer, parentLevel, simpleTypeHelper);
     }
 
+    /**
+     * Reads a map cell inside a typed data record; an alias of {@link #readMap} kept for
+     * symmetry with the record-oriented API.
+     *
+     * @param tokenizer        the token stream positioned at the map's {@code class:} key
+     * @param simpleTypeHelper the simple-type SPI used to restore scalar key/value values
+     * @param parentLevel      the tab level of the {@code map} block itself
+     * @return the restored map, or {@code null} when the {@code class:} key is absent
+     * @throws Exception when the map class cannot be resolved or instantiated, or a
+     *         key/value cannot be materialized
+     */
     @SuppressWarnings("unchecked")
     public static Object readObjectDataMap(final XdStorageYamlTokenizer tokenizer, IXdStorageSimpleTypeHelper simpleTypeHelper,
                                            final int parentLevel) throws Exception {

@@ -22,6 +22,12 @@ public final class XdStorageVersion {
     private XdStorageVersion() {
     }
 
+    /**
+     * The library version, read once from the filtered resource and cached.
+     *
+     * @return the library version from the filtered {@code /xdstorage.properties} resource,
+     *         "unknown" when the resource is absent or unreadable
+     */
     public static String getVersion() {
         String v = cached;
         if (v == null) {

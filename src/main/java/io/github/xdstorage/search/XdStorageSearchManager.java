@@ -33,12 +33,32 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * The query executor of the secondary search indexes: maintains every declared index on
+ * insert/update/delete (assembling one {@code XdStorageSearchIndexRecord} per index from
+ * the live object, deferring id-less members until their ids are assigned) and executes
+ * queries by picking an access plan per criterion — a bounded ordered B+tree walk for the
+ * range family (FP-1a), an exact key lookup for EQUALS, a whole-index scan otherwise —
+ * with FP-1b ORDER BY / LIMIT / OFFSET shaping (and its LIMIT pushdown) and a record-level
+ * {@code count()} path. Every result object is re-read through the caller's transaction,
+ * so results stay snapshot-consistent even against a live index tree.
+ *
+ * <p>Engine-internal — not part of the public API. Instances are stateless beyond the
+ * services locator and safe to share across threads; per-query state lives in the call.
+ * </p>
+ */
 public class XdStorageSearchManager implements IXdStorageSearchManager {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageSearchManager.class);
 
+    /** The engine's service locator (storage, resources manager, canonical instances). */
     protected final XdStorageServicesLocator services;
 
+    /**
+     * Creates a manager bound to the engine's services.
+     *
+     * @param provider the services locator of the owning storage engine
+     */
     public XdStorageSearchManager(final XdStorageServicesLocator provider) {
         this.services = provider;
     }
@@ -48,6 +68,21 @@ public class XdStorageSearchManager implements IXdStorageSearchManager {
         return !XdStorageObjectUtils.getClassInfo(object.getClass()).getIndexes().isEmpty();
     }
 
+    /**
+     * Assembles the index record of one object for one declared index: the id, the
+     * PRIMARY index value (the first declared index field — the tree's ordering key),
+     * the remaining indexed fields, and the indexed child-entity references. When the
+     * object or one of its children has no id yet, the record is returned inside an
+     * observable wrapper that completes the identification as soon as the engine assigns
+     * the missing id.
+     *
+     * @param index       the declared index definition to build the record for
+     * @param object      the entity instance to read the indexed values from
+     * @param transaction the caller's transaction (used to resolve the object's resource id)
+     * @return the assembled record, possibly wrapped while an id is still pending
+     * @throws XdStorageException           when the object's resource id cannot be resolved
+     * @throws XdStorageConnectionException on a storage I/O failure (a retry may help)
+     */
     protected XdStorageSearchIndexRecord buildIndexRecord(final XdStorageSearchIndex index, final Object object,
                                                           final XdStorageTransaction transaction) throws XdStorageException, XdStorageConnectionException {
         final XdStorageSearchIndexRecord record = new XdStorageSearchIndexRecord();

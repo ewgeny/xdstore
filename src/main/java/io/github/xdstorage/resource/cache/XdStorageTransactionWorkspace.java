@@ -30,6 +30,10 @@ public final class XdStorageTransactionWorkspace {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageTransactionWorkspace.class);
 
+    /** Creates an empty workspace: all per-transaction contours are created lazily on demand. */
+    public XdStorageTransactionWorkspace() {
+    }
+
     private final Map<String, Map<Object, XdStorageCacheRecord>> changes = new ConcurrentHashMap<>();
 
     private final Map<String, Deque<XdStorageCacheRecord>> undoLogs = new ConcurrentHashMap<>();
@@ -38,7 +42,13 @@ public final class XdStorageTransactionWorkspace {
 
     private final Map<String, Map<Object, XdStorageCacheObjectChange>> readObjects = new ConcurrentHashMap<>();
 
-    /** Write-set транзакции (без создания): null, если транзакция ничего не меняла. */
+    /**
+     * Write-set транзакции (без создания): null, если транзакция ничего не меняла.
+     *
+     * @param transactionId id of the transaction whose write-set is requested
+     * @return the transaction's write-set (id to cache record), or {@code null} if the
+     *         transaction has not mutated anything
+     */
     public Map<Object, XdStorageCacheRecord> changes(final String transactionId) {
         return changes.get(transactionId);
     }
@@ -63,12 +73,22 @@ public final class XdStorageTransactionWorkspace {
         return undoLogs.get(transactionId);
     }
 
-    /** Неидентифицированные observable-обертки (без создания): null, если нет. */
+    /** Неидентифицированные observable-обертки (без создания): null, если нет.
+     *
+     * @param transactionId id of the transaction whose unidentified wrappers are requested
+     * @return the map of not-yet-identified observable wrappers, or {@code null} if the
+     *         transaction has none
+     */
     public Map<Object, IXdStorageIdObservableWrapper> unidentified(final String transactionId) {
         return unidentified.get(transactionId);
     }
 
-    /** Неидентифицированные observable-обертки (с ленивым созданием). */
+    /** Неидентифицированные observable-обертки (с ленивым созданием).
+     *
+     * @param transactionId id of the transaction whose unidentified wrapper map is requested
+     * @return the transaction's map of not-yet-identified observable wrappers, created empty
+     *         if it did not exist yet
+     */
     public Map<Object, IXdStorageIdObservableWrapper> unidentifiedOf(final String transactionId) {
         Map<Object, IXdStorageIdObservableWrapper> records = unidentified.get(transactionId);
         if (records == null) {
@@ -78,12 +98,22 @@ public final class XdStorageTransactionWorkspace {
         return records;
     }
 
-    /** Материализованные объекты транзакции (без создания): null, если нет. */
+    /** Материализованные объекты транзакции (без создания): null, если нет.
+     *
+     * @param transactionId id of the transaction whose materialized objects are requested
+     * @return the map of the transaction's materialized (read/transit) objects, or {@code null}
+     *         if it has none
+     */
     public Map<Object, XdStorageCacheObjectChange> readObjects(final String transactionId) {
         return readObjects.get(transactionId);
     }
 
-    /** Материализованные объекты транзакции (с ленивым созданием). */
+    /** Материализованные объекты транзакции (с ленивым созданием).
+     *
+     * @param transaction the transaction whose materialized-object map is requested
+     * @return the transaction's map of materialized (read/transit) objects, created empty if
+     *         it did not exist yet
+     */
     public Map<Object, XdStorageCacheObjectChange> readObjectsOf(final XdStorageTransaction transaction) {
         final String transactionId = transaction.getTransactionId();
         Map<Object, XdStorageCacheObjectChange> transactionReadObjects = readObjects.get(transactionId);
@@ -97,6 +127,10 @@ public final class XdStorageTransactionWorkspace {
     /**
      * Регистрация мутации записи в write-set транзакции. Первая мутация записи
      * попадает в журнал отката (каждая запись — ровно один вход в журнал).
+     *
+     * @param transactionId id of the mutating transaction
+     * @param objectId      the id of the mutated object
+     * @param record        the cache record holding the pending mutation
      */
     public void registerMutation(final String transactionId, final Object objectId, final XdStorageCacheRecord record) {
         final Map<Object, XdStorageCacheRecord> map = changesOf(transactionId);
@@ -105,7 +139,12 @@ public final class XdStorageTransactionWorkspace {
         }
     }
 
-    /** Есть ли у транзакции незакоммиченные мутации (write-set или неидентифицированные). */
+    /** Есть ли у транзакции незакоммиченные мутации (write-set или неидентифицированные).
+     *
+     * @param transactionId id of the transaction to test
+     * @return {@code true} if the transaction has a non-empty write-set or at least one
+     *         unidentified observable wrapper
+     */
     public boolean hasChanges(final String transactionId) {
         final Map<Object, XdStorageCacheRecord> transactionChanges = changes.get(transactionId);
         final Map<Object, IXdStorageIdObservableWrapper> transactionUnidentifiedObjects = unidentified.get(transactionId);
@@ -113,17 +152,29 @@ public final class XdStorageTransactionWorkspace {
                 (transactionUnidentifiedObjects != null && !transactionUnidentifiedObjects.isEmpty());
     }
 
-    /** Изъять write-set (при commit/rollback/rollbackFailedCommit). */
+    /** Изъять write-set (при commit/rollback/rollbackFailedCommit).
+     *
+     * @param transactionId id of the finishing transaction
+     * @return the removed write-set (id to cache record), or {@code null} if there was none
+     */
     public Map<Object, XdStorageCacheRecord> removeChanges(final String transactionId) {
         return changes.remove(transactionId);
     }
 
-    /** Изъять журнал отката (при commit/rollback/rollbackFailedCommit). */
+    /** Изъять журнал отката (при commit/rollback/rollbackFailedCommit).
+     *
+     * @param transactionId id of the finishing transaction
+     * @return the removed undo journal (records in first-mutation order), or {@code null} if
+     *         there was none
+     */
     public Deque<XdStorageCacheRecord> removeUndoLog(final String transactionId) {
         return undoLogs.remove(transactionId);
     }
 
-    /** Полная очистка транзакционного контура (cache.clear). */
+    /** Полная очистка транзакционного контура (cache.clear).
+     *
+     * @param transactionId id of the transaction whose whole contour is discarded
+     */
     public void clear(final String transactionId) {
         readObjects.remove(transactionId);
         unidentified.remove(transactionId);
@@ -132,7 +183,10 @@ public final class XdStorageTransactionWorkspace {
         log.debug("transaction contour of {} cleared (write-set, undo journal, unidentified wrappers, read objects)", transactionId);
     }
 
-    /** Завершение коммита/отката: транзитные и неидентифицированные объекты больше не нужны. */
+    /** Завершение коммита/отката: транзитные и неидентифицированные объекты больше не нужны.
+     *
+     * @param transactionId id of the finished transaction
+     */
     public void finishTransaction(final String transactionId) {
         unidentified.remove(transactionId);
         readObjects.remove(transactionId);

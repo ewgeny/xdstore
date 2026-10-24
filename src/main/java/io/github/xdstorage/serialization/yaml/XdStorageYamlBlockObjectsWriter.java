@@ -19,13 +19,41 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Изолированный рефлексивный маршаллер JavaBeans-сущностей и ORM-ссылок СУБД.
- * Генерирует тотально типизированную структуру полей name/type/value.
+ * Isolated reflective marshaller of JavaBeans entities and ORM references: emits every
+ * persisted field as a totally typed {@code name}/{@code type}/{@code value} structure
+ * (the exact inverse of {@link XdStorageYamlBlockObjectsReader}). It is also the
+ * journal's body encoder — commit records embed full object bodies produced by
+ * {@link #writeObjectData}. Nested values follow the storage policy: embedded classes
+ * are written inline, independent ones as id-only {@code reference} blocks.
+ *
+ * <p>Thread-safety: all methods are static; the {@code propertiesCache} is a
+ * {@code ConcurrentHashMap} and safe under concurrent population. Engine-internal —
+ * not part of the public API.</p>
  */
 public class XdStorageYamlBlockObjectsWriter {
 
     private static final Map<Class<?>, Collection<XdStorageObjectField>> propertiesCache = new ConcurrentHashMap<>();
 
+    /**
+     * Utility class — no instances.
+     */
+    public XdStorageYamlBlockObjectsWriter() {
+    }
+
+    /**
+     * Writes one object body: the {@code class} key plus a {@code fields} block with one
+     * typed {@code - field:} entry per non-null persisted property. Engine-managed id
+     * fields still holding {@code null} are assigned a generated id while being written.
+     * {@code null}-valued properties are skipped entirely.
+     *
+     * @param object           the entity instance to persist (never {@code null})
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by id generation)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar field values
+     * @param idGenerator      the engine id generator applied to engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails
+     */
     public static void writeObjectData(final Object object, final XdStorageYamlEmitter emitter,
                                        final XdStorageServicesLocator services,
                                        final IXdStorageSimpleTypeHelper simpleTypeHelper,
@@ -101,6 +129,22 @@ public class XdStorageYamlBlockObjectsWriter {
         emitter.closeBlock(); // Закрываем "fields"
     }
 
+    /**
+     * Writes one property value that is neither a simple type, enum, collection, map nor
+     * array: an embedded class ({@code StoreWithParentObject} policy or no policy) is
+     * written as a full inline {@code object} block, an independent one as an id-only
+     * {@code reference} block. Composite (non-scalar) ids are written as a nested object
+     * body so the read side can restore them exactly.
+     *
+     * @param cl               the declared runtime class of the value
+     * @param value            the value to persist (never {@code null})
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by id generation)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar id values
+     * @param idGenerator      the engine id generator applied to engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails
+     */
     public static void writeSingleObjectOrReferenceInline(final Class<?> cl, final Object value,
                                                           final XdStorageYamlEmitter emitter,
                                                           final XdStorageServicesLocator services,
@@ -142,6 +186,21 @@ public class XdStorageYamlBlockObjectsWriter {
         }
     }
 
+    /**
+     * Writes a pure transactional reference body: the referenced entity's {@code class}
+     * plus its id. A {@code java.lang.Class} id is written as the class-name scalar (as in
+     * the XML format), a simple-type id as its string scalar, and a composite id as a
+     * nested object body — mirrored by the read side of {@link XdStorageYamlBlockObjectsReader#readReference}.
+     *
+     * @param reference        the referencing object whose id field is read
+     * @param field            the id field accessor of the reference
+     * @param emitter          the YAML output target
+     * @param services         the storage services locator (used by nested id generation)
+     * @param simpleTypeHelper the simple-type SPI used to render scalar id values
+     * @param idGenerator      the engine id generator applied to nested engine-managed id fields
+     * @throws IOException        when the underlying writer fails
+     * @throws XdStorageException when id generation fails
+     */
     public static void writeReferenceData(final Object reference, final XdStorageObjectIdField field, final XdStorageYamlEmitter emitter,
                                           final XdStorageServicesLocator services,
                                           final IXdStorageSimpleTypeHelper simpleTypeHelper,
@@ -169,6 +228,13 @@ public class XdStorageYamlBlockObjectsWriter {
         }
     }
 
+    /**
+     * Encodes a scalar for safe storage between single quotes: each {@code '} becomes the
+     * YAML escape pair {@code ''}. The inverse is {@link XdStorageYamlBlockObjectsReader#decode}.
+     *
+     * @param value the raw scalar (may be {@code null})
+     * @return the quoted-form-safe scalar, or {@code null} when {@code value} is {@code null}
+     */
     public static String encode(final String value) {
         if (value == null) return null;
         return value.replace("'", "''");

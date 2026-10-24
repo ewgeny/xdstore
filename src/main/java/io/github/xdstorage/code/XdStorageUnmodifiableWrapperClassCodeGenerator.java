@@ -10,10 +10,24 @@ import java.util.Map;
  */
 public class XdStorageUnmodifiableWrapperClassCodeGenerator extends XdStorageAbstractClassCodeGenerator {
 
+    /** Creates the generator with lazy-load (load-by-get) accessors enabled. */
     public XdStorageUnmodifiableWrapperClassCodeGenerator() {
         super(true);
     }
 
+    /**
+     * Generates the unmodifiable wrapper subclass source: a snapshot view carrying the
+     * wrapped object, parent reference, storage and transaction, with simple getters
+     * delegating, strong getters materializing nested unmodifiable wrappers, lazy-load
+     * getters loading through the view's transaction, and setters/closed methods
+     * marking the transaction rollback-only and throwing
+     * {@code XdStorageRuntimeException}.
+     *
+     * @param classesPackage target package of the generated class
+     * @param cl             the entity class to generate the unmodifiable wrapper for
+     * @param code           accumulator map keyed by fully-qualified generated class name
+     * @return the same accumulator map with the generated source added
+     */
     @Override
     public Map<String, String> generate(final String classesPackage, final Class<?> cl, final Map<String, String> code) {
         final GenerationContext ctx = collectMethodsAndClasses(cl);
@@ -102,6 +116,14 @@ public class XdStorageUnmodifiableWrapperClassCodeGenerator extends XdStorageAbs
         builder.append("\r\n\t@Override\r\n\tpublic String toString() {\r\n\t\treturn object.toString();\r\n\t}\r\n");
     }
 
+    /**
+     * Names the generated unmodifiable wrapper after its entity class.
+     *
+     * @param classesPackage target package of the generated class (unused by the
+     *                       simple name scheme)
+     * @param cl             the entity class being wrapped
+     * @return {@code SimpleName + "UnmodifiableWrapper"}
+     */
     @Override
     protected String buildClassName(final String classesPackage, final Class<?> cl) {
         return cl.getSimpleName() + "UnmodifiableWrapper";

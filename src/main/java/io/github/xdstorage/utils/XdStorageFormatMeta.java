@@ -29,6 +29,7 @@ public final class XdStorageFormatMeta {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageFormatMeta.class);
 
+    /** Name of the marker file inside the storage folder ({@code .xdstorage.meta}). */
     public static final String META_FILE_NAME = ".xdstorage.meta";
 
     /** The current generation of the on-disk format. Bump ONLY with a documented migration path in EMBEDDING.md. */
@@ -47,6 +48,12 @@ public final class XdStorageFormatMeta {
      * Open-time flow, called by the provider under the exclusive folder lock, before any engine
      * state is built: initialize the marker on a fresh folder, announce the format version on
      * a known folder, flag a legacy 1.x folder, reject a folder from a newer library.
+     *
+     * @param folder the storage folder whose marker is checked or initialized
+     * @param storageName the open-time storage name (used in the messages)
+     * @param format the storage format name announced at open
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the marker is corrupt
+     *         or was written by a newer library generation
      */
     public static void onOpen(final File folder, final String storageName, final String format) {
         final Properties meta = read(folder);
@@ -74,7 +81,12 @@ public final class XdStorageFormatMeta {
                 storageName, folder, meta.getProperty(KEY_FORMAT, format), version, XdStorageVersion.getVersion());
     }
 
-    /** Reads the marker; null when absent (fresh or legacy folder). */
+    /** Reads the marker; null when absent (fresh or legacy folder).
+     *
+     * @param folder the storage folder to read the marker from
+     * @return the marker properties, or {@code null} when the folder has no marker file
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the marker exists but cannot be read
+     */
     public static Properties read(final File folder) {
         final File metaFile = new File(folder, META_FILE_NAME);
         if (!metaFile.isFile()) {
@@ -89,6 +101,17 @@ public final class XdStorageFormatMeta {
         return props;
     }
 
+    /**
+     * Writes the marker file with the given format version plus the library version and the
+     * creation timestamp. Called at storage creation (and by tests/tools that materialize a
+     * folder directly); the marker file is overwritten.
+     *
+     * @param folder the storage folder to write the marker into
+     * @param storageName the storage name recorded in the marker
+     * @param format the storage format name recorded in the marker
+     * @param formatVersion the on-disk format generation to record
+     * @throws io.github.xdstorage.exceptions.XdStorageRuntimeException when the file cannot be written
+     */
     public static void write(final File folder, final String storageName, final String format, final int formatVersion) {
         final Properties props = new Properties();
         props.setProperty(KEY_FORMAT_VERSION, String.valueOf(formatVersion));

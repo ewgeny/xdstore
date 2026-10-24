@@ -22,6 +22,24 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * The check-and-update flow for stored class structures: on the first use of a class (and
+ * on every subsequent structure check) it builds a fresh {@code XdStorageClassStructure}
+ * snapshot from the class metadata and compares it with the persisted record. A missing
+ * record is simply persisted; a changed one first triggers the registered
+ * {@code IXdStorageStructureUpdater} migration scripts (their executions are journalled in
+ * {@code XdStorageUpdateStructureRecord} records) and then the refreshed snapshot.
+ *
+ * <p>To avoid cross-cycles between transaction monitors and the per-class structure locks,
+ * the disk verification and the migration run inside an autonomous transaction on the
+ * engine executor, strictly before this manager returns to the caller. Each class is
+ * guarded by its own {@code ReentrantLock} and its readiness is remembered, so repeated
+ * checks take a lock-free fast path; an already-updated class is never migrated twice.
+ * Updater registration is not synchronized — register scripts before the store serves
+ * concurrent load. Engine-internal — not part of the public API (applications reach it via
+ * {@code XdStorage#registerStructureUpdater} and {@code XdStorage#executeStructureUpdate}).
+ * </p>
+ */
 public class XdStorageStructureManager {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageStructureManager.class);
@@ -34,10 +52,24 @@ public class XdStorageStructureManager {
 
     private final Map<Class<?>, List<IXdStorageStructureUpdater>> updaters = new HashMap<>();
 
+    /**
+     * Creates the manager bound to the given engine services.
+     *
+     * @param provider the engine services locator supplying the resources manager,
+     *                 transactions manager and executor the flow runs on
+     */
     public XdStorageStructureManager(final XdStorageServicesLocator provider) {
         this.services = provider;
     }
 
+    /**
+     * Registers a structure update (migration) script for the class it targets
+     * ({@code getDataClass()}). Scripts of a class are executed in registration order when
+     * the class's persisted structure is found changed. Not synchronized — call it during
+     * setup, before concurrent structure checks start.
+     *
+     * @param updater the migration script to register
+     */
     public void registerUpdater(final IXdStorageStructureUpdater updater) {
         final Class<?> cl = updater.getDataClass();
         List<IXdStorageStructureUpdater> tmp = updaters.get(cl);
@@ -47,6 +79,24 @@ public class XdStorageStructureManager {
         tmp.add(updater);
     }
 
+    /**
+     * Verifies that the persisted structure record of the class matches its current Java
+     * schema and, when it does not, persists the new snapshot or executes the registered
+     * migration scripts against the stored data. The work runs under the class structure
+     * lock and inside an autonomous transaction on the engine executor, and this method
+     * returns only after the migration transaction has settled — ready classes short-circuit
+     * on a lock-free fast path.
+     *
+     * @param cl the stored class to verify and, if needed, migrate
+     * @param tx the caller's transaction context (the verification and migration themselves
+     *           run in an internally managed autonomous transaction)
+     * @return the migration scripts executed by this call in execution order, empty when
+     *         the structure was already up to date
+     * @throws XdStorageException           when the structure synchronization or a migration
+     *                                       script failed
+     * @throws XdStorageConnectionException when the storage connection failed during the
+     *                                       migration
+     */
     public List<IXdStorageStructureUpdater> checkAndUpdateStructureIfNeed(final Class<?> cl, final XdStorageTransaction tx) throws XdStorageException, XdStorageConnectionException {
         AtomicBoolean state = states.get(cl);
         if (state != null && state.get()) {
@@ -144,6 +194,15 @@ public class XdStorageStructureManager {
         lock.unlock();
     }
 
+    /**
+     * Tells whether a structure record is persisted for the class.
+     *
+     * @param cl the stored class to look up
+     * @param tx the transaction to read the structure resource in
+     * @return {@code true} when the class already has a persisted structure record
+     * @throws XdStorageException           when the structure resource cannot be accessed
+     * @throws XdStorageConnectionException when the storage connection fails
+     */
     public boolean hasStructure(final Class<?> cl, final XdStorageTransaction tx) throws XdStorageException, XdStorageConnectionException {
         final Class<?> structureCl = XdStorageClassStructure.class;
         final XdStorageClassInfo clInfo = XdStorageObjectUtils.getClassInfo(structureCl);
