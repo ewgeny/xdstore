@@ -12,6 +12,7 @@ import io.github.xdstorage.idgeneration.XdStorageIdGeneratorType;
 import io.github.xdstorage.object.XdStorageIdentifiableObject;
 import io.github.xdstorage.observing.XdStorageObserverService;
 import io.github.xdstorage.resource.XdStorageAbstractResourcesManager;
+import io.github.xdstorage.resource.IXdStorageJournalCheckpoint;
 import io.github.xdstorage.resource.XdStorageObjectChange;
 import io.github.xdstorage.serialization.IXdStorageIOFactory;
 import io.github.xdstorage.serialization.IXdStorageObjectsReader;
@@ -30,7 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResource {
+public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResource implements IXdStorageJournalCheckpoint {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageHashIndexResource.class);
 
@@ -42,6 +43,14 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
 
     private final Lock lock = new ReentrantLock();
 
+    /** W-4a (docs/tasks/2.1.0/32, W4-DESIGN.md): journal the hash id-index — phase-1 becomes
+     * an O(delta) append instead of the O(N) full-file rewrite of every cached record. */
+    private final boolean indexJournal;
+
+    private final java.nio.file.Path indexJournalFile;
+
+    private final io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory yamlJournalFactory;
+
     public XdStorageHashIndexResource(final XdStorageServicesLocator services,
                                       final XdStorageAbstractResourcesManager manager,
                                       final Object resourceId, final String indexName, final XdStorageClassInfo clInfo,
@@ -49,6 +58,17 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         super(services, manager, resourceId, indexName, clInfo, fragmentSize);
         this.reader = factory.newInstanceReader();
         this.writer = factory.newInstanceWriter();
+        // W-4a: the journal covers the id-index resource itself; YAML content only (the
+        // yamlJournalFactory gate — non-YAML formats keep the full-file write-out), and the
+        // references variant keeps the legacy full-file write in this phase.
+        final io.github.xdstorage.XdStorageConfig storageConfig = services.getStorageConfig();
+        this.indexJournal = storageConfig != null && storageConfig.isIndexJournalWrites() && !isReferences;
+        this.indexJournalFile = indexJournal
+                ? io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.journalFileFor(getFileName())
+                : null;
+        this.yamlJournalFactory = factory instanceof io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory
+                ? (io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory) factory
+                : null;
     }
 
     public XdStorageHashIndexResource(final XdStorageServicesLocator services,
@@ -58,6 +78,17 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         super(services, manager, resourceId, indexName, clInfo, idGenerator, fragmentSize);
         this.reader = factory.newInstanceReader();
         this.writer = factory.newInstanceWriter();
+        // W-4a: the journal covers the id-index resource itself; YAML content only (the
+        // yamlJournalFactory gate — non-YAML formats keep the full-file write-out), and the
+        // references variant keeps the legacy full-file write in this phase.
+        final io.github.xdstorage.XdStorageConfig storageConfig = services.getStorageConfig();
+        this.indexJournal = storageConfig != null && storageConfig.isIndexJournalWrites() && !isReferences;
+        this.indexJournalFile = indexJournal
+                ? io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.journalFileFor(getFileName())
+                : null;
+        this.yamlJournalFactory = factory instanceof io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory
+                ? (io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory) factory
+                : null;
     }
 
     private Map<String, Long> blockingTime = new HashMap<>();
@@ -187,6 +218,7 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
                 }
                 cache.fillCache(objects);
             }
+            replayIndexJournal();
             postPrepare(transaction);
 
             prepared.set(true);
@@ -215,9 +247,23 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
 
     public void performFirstPhaseCommit(final XdStorageTransaction transaction, final XdStorageTransactionResourceChanges record) throws XdStorageException {
         if (cache.hasChanges(transaction)) {
-            final Collection<Object> objects = cache.readUnsafe(transaction);
-            cache.prepareCommit(transaction, record);
-            writeObjects(objects);
+            if (indexJournal && yamlJournalFactory != null) {
+                // W-4a: O(delta) journal append instead of the O(N) full-file rewrite — the
+                // commit's durability point moves to the journal (W-1 semantics verbatim).
+                cache.prepareCommit(transaction, record);
+                try {
+                    io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.appendRedo(indexJournalFile,
+                            transaction.getCommitSerial(), record.getChangesObjects(),
+                            services, yamlJournalFactory, services.getStorageConfig().isDurableWrites());
+                } catch (final Throwable e) {
+                    throw new XdStorageRuntimeException("invalid state of database: error by appending commit journal of index resource " + resourceId, e);
+                }
+                checkpointIndexJournalIfTooBig(transaction);
+            } else {
+                final Collection<Object> objects = cache.readUnsafe(transaction);
+                cache.prepareCommit(transaction, record);
+                writeObjects(objects);
+            }
         }
     }
 
@@ -229,8 +275,72 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
 
     public void rollbackPerformingFirstPhaseCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) throws XdStorageException {
         cache.rollbackFailedCommit(transaction, changes);
-        writeObjects(cache.readUnsafe(transaction));
+        if (indexJournal && yamlJournalFactory != null) {
+            // W-4a: compensation — the restored (pre-tx committed) state per changed id, so a
+            // torn redo from the failed phase-1 cannot resurrect a rolled-back transaction.
+            try {
+                io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.appendCompensation(indexJournalFile,
+                        changes, services, yamlJournalFactory, services.getStorageConfig().isDurableWrites());
+            } catch (final Throwable e) {
+                throw new XdStorageRuntimeException("invalid state of database: error by appending index journal compensation of resource " + resourceId, e);
+            }
+        } else {
+            writeObjects(cache.readUnsafe(transaction));
+        }
         postRollback(transaction);
+    }
+
+    /** W-4a: recovery replay of the id-index journal over the parsed base (W-1 semantics:
+     * idempotent by id, last record wins; torn tail discarded by the reader). The id type
+     * authority is the ENTITY's id field — the BUG-C lesson applied to the replay path. */
+    private void replayIndexJournal() throws XdStorageException {
+        if (indexJournalFile == null || yamlJournalFactory == null) {
+            return;
+        }
+        try {
+            final io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.Replay replay =
+                    io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.readForReplay(
+                            indexJournalFile, objectClInfo.getIdField().field.getType(), yamlJournalFactory);
+            for (final Object upsert : replay.upserts) {
+                if (upsert instanceof XdStorageHashIndexRecord) {
+                    ((XdStorageHashIndexRecord) upsert).setObjectId(
+                            restoreKeyValueType(((XdStorageHashIndexRecord) upsert).getObjectId()));
+                }
+                if (idField.get(upsert) == null) {
+                    log.error("index resource {} journal replay skips an upsert with an unrestorable identity "
+                            + "(class {}): the record is dropped from the read contour", getFileName(),
+                            upsert != null ? upsert.getClass().getName() : "null");
+                    continue;
+                }
+                cache.applyCommittedJournalUpsert(upsert);
+            }
+            for (final Object id : replay.deletes) {
+                cache.applyCommittedJournalDelete(id);
+            }
+            if (!replay.upserts.isEmpty() || !replay.deletes.isEmpty()) {
+                log.debug("index resource {} replayed commit journal: {} upsert(s), {} delete(s), {} discarded tail record(s)",
+                        getFileName(), replay.upserts.size(), replay.deletes.size(), replay.discardedTailRecords);
+            }
+        } catch (final Throwable e) {
+            throw new XdStorageException("invalid state of database: commit journal of index resource " + resourceId + " cannot be replayed", e);
+        }
+    }
+
+    /** W-4a: the size-threshold checkpoint — full index rewrite + journal reset. */
+    private void checkpointIndexJournalIfTooBig(final XdStorageTransaction transaction) throws XdStorageException {
+        final long threshold = services.getStorageConfig().getJournalCheckpointBytes();
+        if (io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.sizeOf(indexJournalFile) <= threshold) {
+            return;
+        }
+        log.info("index resource {} commit journal exceeded {} bytes — checkpointing (full index rewrite + journal reset)",
+                getFileName(), threshold);
+        writeObjects(cache.readUnsafe(transaction));
+        try {
+            io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.reset(indexJournalFile);
+        } catch (final Throwable e) {
+            log.warn("index journal {} could not be reset after checkpoint (safe: replay is idempotent): {}",
+                    indexJournalFile, e.getMessage());
+        }
     }
 
     public void rollback(final XdStorageTransaction transaction) throws XdStorageException {
@@ -240,6 +350,50 @@ public class XdStorageHashIndexResource extends XdStorageAbstractHashIndexResour
         }
         cache.rollback(transaction);
         postRollback(transaction);
+    }
+
+    /**
+     * W-4c: shutdown checkpoint — the full committed index rewrite + journal reset, no
+     * transaction. Guarded by {@code prepared} (an unprepared resource's journal belongs to
+     * the NEXT open's replay) and by the resource lock with a short timeout (a live commit
+     * keeps its journal — replay handles it). Atomic vs appends: the checkpoint holds the
+     * journal's append lock across the base write + reset.
+     */
+    @Override
+    public boolean checkpointJournalOnShutdown() {
+        if (!indexJournal || indexJournalFile == null || !prepared.get()) {
+            return false;
+        }
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        if (!locked) {
+            log.warn("index resource {} is busy at shutdown — journal left for replay at the next open", getFileName());
+            return false;
+        }
+        try {
+            synchronized (io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.lockFor(indexJournalFile)) {
+                if (io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.sizeOf(indexJournalFile) == 0) {
+                    return false;
+                }
+                log.info("index resource {} shutdown checkpoint: full index rewrite + journal reset", getFileName());
+                writeObjects(cache.readCommittedForCheckpoint());
+                io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.reset(indexJournalFile);
+                return true;
+            }
+        } catch (final Throwable e) {
+            log.warn("index resource {} shutdown checkpoint failed (safe: the journal replays at the next open): {}",
+                    getFileName(), e.getMessage());
+            return false;
+        } finally {
+            if (((ReentrantLock) lock).isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
     }
 
     @Override

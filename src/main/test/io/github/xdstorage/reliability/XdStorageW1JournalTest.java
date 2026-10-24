@@ -30,24 +30,34 @@ public class XdStorageW1JournalTest {
     private static final String DATA_DIR = "data/BenchmarkEntity";
 
     @Test
-    @DisplayName("Данные живут ТОЛЬКО в журнале (базовый файл не пишется); реплей при открытии возвращает все записи")
+    @DisplayName("Данные живут в журнале до чекпоинта; W-4c: чистый shutdown чекпоинтит (база пишется, журнал пуст)")
     public void testJournalOnlyRoundTrip() throws Exception {
         final Path dir = Files.createTempDirectory("w1_roundtrip");
         try {
-            openSaveShutdown(dir, config(), saver -> {
-                saver.save(new BenchmarkEntity("j-1", "alpha"));
-                saver.save(new BenchmarkEntity("j-2", "beta"));
-                saver.save(new BenchmarkEntity("j-3", "gamma"));
-            });
+            // W-4c (task 32): commits live in the journal UNTIL a checkpoint — and a clean
+            // shutdown IS a checkpoint now. The journal-only state is asserted before the
+            // shutdown; after it the base is authoritative and the journal is empty.
+            final IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128, config());
+            try {
+                final IXdStorageTransaction tx = storage.beginTransaction();
+                storage.save(new BenchmarkEntity("j-1", "alpha"), tx);
+                storage.save(new BenchmarkEntity("j-2", "beta"), tx);
+                storage.save(new BenchmarkEntity("j-3", "gamma"), tx);
+                tx.commit();
 
-            assertNull(findDataBaseFile(dir), "base file must NOT be written under journalWrites");
-            final Path journalPath = findJournalFile(dir);
-            assertNotNull(journalPath, "commit journal must exist");
-            final String journal = new String(Files.readAllBytes(journalPath), StandardCharsets.UTF_8);
-            assertTrue(journal.contains("# xdstorage-eof"), "each append ends with the EOF sentinel");
-            assertTrue(journal.contains("UPSERT"));
+                assertNull(findDataBaseFile(dir), "base file must NOT be written before the checkpoint");
+                final Path journalPath = findJournalFile(dir);
+                assertNotNull(journalPath, "commit journal must exist");
+                final String journal = new String(Files.readAllBytes(journalPath), StandardCharsets.UTF_8);
+                assertTrue(journal.contains("# xdstorage-eof"), "each append ends with the EOF sentinel");
+                assertTrue(journal.contains("UPSERT"));
+            } finally {
+                storage.shutdown();
+            }
 
-            assertEquals(3, loadCount(dir, config()), "recovery must replay the journal over the absent base");
+            assertNotNull(findDataBaseFile(dir), "W-4c: the shutdown checkpoint writes the base");
+            assertNull(findJournalFile(dir), "W-4c: the shutdown checkpoint empties the journal");
+            assertEquals(3, loadCount(dir, config()), "data loads from the checkpointed base");
         } finally {
             deleteQuietly(dir);
         }
@@ -116,40 +126,80 @@ public class XdStorageW1JournalTest {
     }
 
     @Test
-    @DisplayName("Оборванный хвост журнала отбрасывается с WARN (не роняет открытие)")
+    @DisplayName("Оборванный хвост журнала отбрасывается с WARN (не роняет открытие) — crash proxy: копия при открытом хранилище")
     public void testTornTailDiscarded() throws Exception {
         final Path dir = Files.createTempDirectory("w1_torn_tail");
+        final Path copy = dir.resolveSibling("w1_torn_tail_copy");
         try {
-            openSaveShutdown(dir, config(), saver -> {
-                saver.save(new BenchmarkEntity("t-1", "alpha"));
-                saver.save(new BenchmarkEntity("t-2", "beta"));
-            });
+            // W-4c: a torn journal only exists when NO clean shutdown happened — the crash
+            // proxy is a folder copy taken while the storage is open (task 19 semantics):
+            // the copy carries the journals exactly as the power loss left them.
+            IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128, config());
+            try {
+                final IXdStorageTransaction tx = storage.beginTransaction();
+                storage.save(new BenchmarkEntity("t-1", "alpha"), tx);
+                storage.save(new BenchmarkEntity("t-2", "beta"), tx);
+                tx.commit();
 
-            final Path journalPath = findJournalFile(dir);
-            assertNotNull(journalPath);
+                try (Stream<Path> walk = Files.walk(dir)) {
+                    walk.forEach(source -> {
+                        try {
+                            final Path target = copy.resolve(dir.relativize(source).toString());
+                            if (source.toFile().isDirectory()) {
+                                Files.createDirectories(target);
+                            } else {
+                                Files.createDirectories(target.getParent());
+                                Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            }
+                        } catch (final java.io.IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+                }
+            } finally {
+                storage.shutdown();
+                storage = null;
+            }
+
+            final Path journalPath = findJournalFile(copy);
+            assertNotNull(journalPath, "the crash artifact carries the journal");
             // эмулируем сбой посреди аппенда: обрывок записи без сентинела
             Files.write(journalPath, "\r\n- record:\r\n\tserial: 99\r\n\top: UPS".getBytes(StandardCharsets.UTF_8),
                     java.nio.file.StandardOpenOption.APPEND);
 
-            assertEquals(2, loadCount(dir, config()),
-                    "committed records (before the tear) must load; torn tail discarded");
+            final IXdFileStorage reopened = XdStorageProvider.newOrGetFileStorage(NAME + "-copy", copy.toString(), 128, config());
+            try {
+                final IXdStorageTransaction tx = reopened.beginTransaction();
+                final int size = reopened.load(BenchmarkEntity.class, tx).size();
+                tx.commit();
+                assertEquals(2, size, "committed records (before the tear) must load; torn tail discarded");
+            } finally {
+                reopened.shutdown();
+            }
         } finally {
             deleteQuietly(dir);
         }
     }
 
     @Test
-    @DisplayName("W-3: журнал включен по умолчанию — данные в журнале, база до чекпоинта не пишется")
+    @DisplayName("W-3: журнал по умолчанию — данные в журнале до чекпоинта; W-4c: shutdown чекпоинтит")
     public void testJournalOnByDefault() throws Exception {
         final Path dir = Files.createTempDirectory("w1_default_on");
         try {
-            openSaveShutdown(dir, XdStorageConfig.defaults(), saver -> {
-                saver.save(new BenchmarkEntity("o-1", "alpha"));
-            });
+            final IXdFileStorage storage = XdStorageProvider.newOrGetFileStorage(NAME, dir.toString(), 128, XdStorageConfig.defaults());
+            try {
+                final IXdStorageTransaction tx = storage.beginTransaction();
+                storage.save(new BenchmarkEntity("o-1", "alpha"), tx);
+                tx.commit();
 
-            assertNull(findDataBaseFile(dir), "default (W-3): commits are journaled, base not written before checkpoint");
-            assertNotNull(findJournalFile(dir), "default (W-3): journal file exists");
-            assertEquals(1, loadCount(dir, XdStorageConfig.defaults()), "default (W-3): replay recovers the data");
+                assertNull(findDataBaseFile(dir), "default (W-3): commits are journaled, base not written before checkpoint");
+                assertNotNull(findJournalFile(dir), "default (W-3): journal file exists");
+            } finally {
+                storage.shutdown();
+            }
+            assertNotNull(findDataBaseFile(dir), "W-4c: the shutdown checkpoint writes the base");
+            assertNull(findJournalFile(dir), "W-4c: the shutdown checkpoint empties the journal");
+            assertEquals(1, loadCount(dir, XdStorageConfig.defaults()), "default (W-3): the data survives");
         } finally {
             deleteQuietly(dir);
         }

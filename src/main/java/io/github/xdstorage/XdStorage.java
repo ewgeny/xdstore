@@ -1432,6 +1432,18 @@ class XdStorage implements IXdFileStorage {
             }
             shutdownHook = null;
         }
+        // W-4c: best-effort shutdown checkpoint — after a clean close every journal is
+        // empty, so a later power loss loses nothing even with durableWrites=false
+        // (W4-DESIGN.md §W-4c). Busy/unprepared resources are skipped (replay covers them).
+        try {
+            final int checkpointed = services.getResourcesManager().checkpointAllJournals();
+            if (checkpointed > 0) {
+                log.info("storage '{}' shutdown checkpoint: {} journal(s) checkpointed", name, checkpointed);
+            }
+        } catch (final Throwable t) {
+            log.warn("shutdown checkpoint of storage '{}' failed (safe: journals replay at the next open): {}",
+                    name, t.getMessage());
+        }
         XdStorageProvider.unregisterStorage(this);
         services.shutdown();
         if (folderLock != null) {

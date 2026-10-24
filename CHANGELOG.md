@@ -90,6 +90,14 @@ Planned scope; items land here as they merge:
   un-checkpointed commits survive the upgrade. The journal content stays YAML for every
   storage format (an XML storage's `Order.xml` carries `Order-journal.yaml`).
 
+- **Index journaling (W-4a/c)** — the hash id-index commits are journaled
+  ([32](docs/tasks/2.1.0/32-w4-write-path-implementation.md), design in
+  [W4-DESIGN.md](W4-DESIGN.md)): the O(N)-per-commit full-file index rewrite becomes an
+  O(delta) append; measured small-write cost at 50 000 objects: **64.9 → 0.13 ms/tx** (the
+  write-scaling wall across the design point is gone). A clean shutdown now checkpoints
+  every journal — after a clean close, a power loss loses nothing even with
+  `durableWrites=false`. Flag: `indexJournalWrites` (default ON after a green full-suite
+  soak; `false` restores the legacy full-file rewrite).
 - **`explain()`** (planned, [25](docs/tasks/2.1.0/25-explain-query-plan.md)) — query-plan
   visibility: the plan the engine would take (index used, seek vs ordered range walk vs
   scan, bound shape, post-filter criteria, fallback reason) without executing the query.

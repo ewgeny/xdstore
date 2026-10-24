@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class XdStorageResource extends XdStorageAbstractResource {
+public class XdStorageResource extends XdStorageAbstractResource implements IXdStorageJournalCheckpoint {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageResource.class);
 
@@ -305,6 +305,37 @@ public class XdStorageResource extends XdStorageAbstractResource {
         cache.performCommit(transaction, record);
         cache.commit(transaction);
         postCommit(transaction);
+    }
+
+    /**
+     * W-4c: shutdown checkpoint — full committed-state rewrite + journal reset, no
+     * transaction (the cache's committed view; see
+     * {@link XdStorageResourceCache#readCommittedForCheckpoint()}). Guarded by
+     * {@code prepared}: a resource never prepared in THIS run has an empty cache and a
+     * journal that belongs to the NEXT open's replay — checkpointing it would destroy
+     * the base. Atomic vs appends: the whole checkpoint holds the journal's append lock.
+     */
+    @Override
+    public boolean checkpointJournalOnShutdown() {
+        if (!journalWrites || journalFile == null || !prepared.get()) {
+            return false;
+        }
+        synchronized (io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.lockFor(journalFile)) {
+            try {
+                if (io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.sizeOf(journalFile) == 0) {
+                    return false;
+                }
+                log.info("resource {} shutdown checkpoint: full committed-state rewrite + journal reset", getFileName());
+                writeObjects(cache.readCommittedForCheckpoint());
+                io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.reset(journalFile);
+                return true;
+            } catch (final Throwable e) {
+                // безвредно: журнал остается — реплей при следующем открытии вернет состояние
+                log.warn("resource {} shutdown checkpoint failed (safe: the journal replays at the next open): {}",
+                        getFileName(), e.getMessage());
+                return false;
+            }
+        }
     }
 
     public void rollbackPerformingFirstPhaseCommit(final XdStorageTransaction transaction, final Collection<XdStorageObjectChange> changes) throws XdStorageException {

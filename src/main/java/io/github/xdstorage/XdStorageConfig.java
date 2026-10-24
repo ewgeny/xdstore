@@ -39,6 +39,7 @@ public final class XdStorageConfig {
     private final long defaultTransactionTimeoutMillis;
     private final XdStorageIsolationLevel isolationLevel;
     private final boolean journalWrites;
+    private final boolean indexJournalWrites;
     private final long journalCheckpointBytes;
     private final long txMaterializedObjectsCap;
 
@@ -51,6 +52,7 @@ public final class XdStorageConfig {
         this.defaultTransactionTimeoutMillis = builder.defaultTransactionTimeoutMillis;
         this.isolationLevel = builder.isolationLevel;
         this.journalWrites = builder.journalWrites;
+        this.indexJournalWrites = builder.indexJournalWrites;
         this.journalCheckpointBytes = builder.journalCheckpointBytes;
         this.txMaterializedObjectsCap = builder.txMaterializedObjectsCap;
     }
@@ -96,6 +98,13 @@ public final class XdStorageConfig {
         return journalWrites;
     }
 
+    /** W-4a (docs/tasks/2.1.0/32, W4-DESIGN.md): append-only commit journal for the HASH
+     * id-index resource — the O(N)-per-commit full-file rewrite becomes O(delta). YAML
+     * format only; default off = full-file rewrite as before (flag lifecycle: soak, then flip). */
+    public boolean isIndexJournalWrites() {
+        return indexJournalWrites;
+    }
+
     /** Journal size above which a checkpoint (full base rewrite + journal reset) runs after a commit. */
     public long getJournalCheckpointBytes() {
         return journalCheckpointBytes;
@@ -120,6 +129,7 @@ public final class XdStorageConfig {
         private long defaultTransactionTimeoutMillis = 3 * 1000L;
         private XdStorageIsolationLevel isolationLevel = XdStorageIsolationLevel.SNAPSHOT;
         private boolean journalWrites = true;   // W-3: journal is the default write path
+        private boolean indexJournalWrites = true;   // W-4a: index journaling is the default write path (task 32; green soak 808/0, the W-3 flip protocol)
         private long journalCheckpointBytes = 16L * 1024 * 1024;
         private long txMaterializedObjectsCap = 0;
 
@@ -166,6 +176,12 @@ public final class XdStorageConfig {
 
         public Builder journalWrites(final boolean value) {
             this.journalWrites = value;
+            return this;
+        }
+
+        /** W-4a: journal the hash id-index resource (docs/tasks/2.1.0/32). */
+        public Builder indexJournalWrites(final boolean value) {
+            this.indexJournalWrites = value;
             return this;
         }
 

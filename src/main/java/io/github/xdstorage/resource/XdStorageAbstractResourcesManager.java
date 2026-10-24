@@ -329,6 +329,7 @@ public abstract class XdStorageAbstractResourcesManager {
             // Удержание ресурса делает карту ресурсов ограниченной числом когда-либо открытых
             // файлов (объекты и так живут в record-кэшах — потолок heap≈DB задокументирован
             // как предстоящий W-4). Освобождение ресурсов происходит в storage.shutdown().
+
             counter.decrementAndGet();
         }
     }
@@ -376,5 +377,28 @@ public abstract class XdStorageAbstractResourcesManager {
             }
         }
         return null;
+    }
+    /**
+     * W-4c (docs/tasks/2.1.0/32, W4-DESIGN.md): best-effort shutdown checkpoint of every
+     * journal-bearing resource — full committed-state rewrite + journal reset. After a
+     * clean close every journal is empty, so a later power loss loses nothing even with
+     * {@code durableWrites=false}. Never throws; returns the number of journals
+     * checkpointed (busy or unprepared resources are skipped — their journals replay at
+     * the next open).
+     */
+    public int checkpointAllJournals() {
+        int checkpointed = 0;
+        for (final IXdStorageResourceObject<?> resource : resources.values()) {
+            if (resource instanceof IXdStorageJournalCheckpoint) {
+                try {
+                    if (((IXdStorageJournalCheckpoint) resource).checkpointJournalOnShutdown()) {
+                        checkpointed++;
+                    }
+                } catch (final Throwable t) {
+                    // безвредно: журнал остается — реплей при следующем открытии
+                }
+            }
+        }
+        return checkpointed;
     }
 }

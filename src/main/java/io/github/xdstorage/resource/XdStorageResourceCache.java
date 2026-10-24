@@ -193,6 +193,30 @@ public class XdStorageResourceCache implements XdStorageCacheContext {
     }
 
     /**
+     * W-4c (docs/tasks/2.1.0/32, W4-DESIGN.md): the COMMITTED view of every cached record
+     * for a shutdown checkpoint — no transaction, no isolation. {@code record.getObject()}
+     * is the last committed body; a record locked by a live transaction yields its
+     * pre-transaction committed body, which is exactly the state the base+journal pair
+     * already describes (an abandoned tx never reached phase-1, a committing tx's redo is
+     * in the journal and replay is idempotent). Records without a committed body
+     * (uncommitted inserts) are skipped — their journal redo re-creates them at replay.
+     */
+    public java.util.Collection<Object> readCommittedForCheckpoint() {
+        final java.util.List<Object> result = new java.util.ArrayList<>();
+        for (final Object node : cache.values().toArray()) {
+            if (node == null) {
+                continue;
+            }
+            final XdStorageCacheRecord record = (XdStorageCacheRecord) node;
+            final Object committed = record.getObject();
+            if (committed != null) {
+                result.add(committed);
+            }
+        }
+        return result;
+    }
+
+    /**
      * W-2: per-transaction materialization budget (XdStorageConfig.txMaterializedObjectsCap,
      * 0 = unlimited). Checked at the exit of every READ-path materialization; WRITE_OUT
      * (коммитная выписка) сознательно не бюджетируется. Превышение — громкий отказ с

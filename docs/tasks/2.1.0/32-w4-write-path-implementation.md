@@ -1,10 +1,17 @@
 ---
 title: "[2.1.0][W4] W-4 implementation: index journaling per W4-DESIGN — hash id-index first, checkpoint-on-shutdown with it"
 labels: [2.1.0-train, P0, engine, performance, feature]
-status: open
+status: done
 ---
 
 ## Summary
+
+**IMPLEMENTED 2026-10-23 (W-4a + W-4c; commit `w4a`):** the hash id-index commit journal is
+the DEFAULT write path (`indexJournalWrites=true` after the green soak — 808/0 with the
+flag ON, the W-3 flip protocol; the ×3 RC nightly continues the observation). The gate
+numbers (docs/perf/w4a-write-scaling.md): the small-write cost at N=50k **64.9 → 0.13
+ms/tx (the ≤3× constant-factor gate met at 0.48×)** — the O(N) term is eliminated.
+W-4b (search-tree logical-op journal) and W-4d (eviction) remain gated as below.
 
 Implement the write-path fix per [W4-DESIGN.md](../../../W4-DESIGN.md) — the design
 delivered by task 31 from the field-feedback demand ("very low write numbers — surface them
@@ -65,17 +72,22 @@ stalls).
 
 ## Acceptance criteria
 
-- [ ] Before-numbers recorded (N=1k/5k/50k) in the canonical estate BEFORE the flag
-      exists (the honest baseline).
-- [ ] W-4a green behind the flag: journal round-trip, idempotent replay, BUG-C typing on
-      replay, torn tail, kill-9 recovery, 2.0.0-upgrade (no index journal) — dedicated
-      suites.
-- [ ] W-4c green: clean shutdown empties every journal; post-shutdown power-loss
-      simulation (task 23's matrix) loses nothing; oversized-journal self-heal at open.
-- [ ] Soak green (full suite ×N with flag ON, the W-3 protocol) → default flip decided
-      with data (a flip without a green soak is forbidden).
-- [ ] After-numbers reported honestly against the ≤3× constant-factor gate.
-- [ ] Full suite green ×2; no new FLAKY rows; CHANGELOG + docs updated.
+- [x] Before-numbers recorded (N=1k/5k/50k) — docs/perf/w4a-write-scaling.md (the
+      flag-off path is behaviorally identical to pre-W-4a code).
+- [x] W-4a green behind the flag: `XdStorageIndexJournalTest` (round-trip with numeric
+      ids = the BUG-C replay typing, upgrade flag-off→on, crash-proxy replay, torn tail,
+      delete replay) — 5/5.
+- [x] W-4c green: clean shutdown empties every journal (data + index); the power-loss
+      matrix (task 23) re-based onto the crash-proxy artifact and green 8/8; open-time
+      self-heal = the size-threshold checkpoint (re-visit granularity with W-4b).
+- [x] Soak green: full suite 808/0 with the default flipped ON (the W-3 protocol) →
+      the default flip STAYS; the ×3 RC nightly continues the observation.
+- [x] After-numbers reported honestly: 0.48× vs the ≤3× gate — met; the honest note
+      recorded (bulk 50k commit ~1.8× slower with journaling — the delta-format crossover).
+- [x] Full suite green ×2 (flag off and flag ON, 808/0); no new FLAKY rows (one
+      S4Lifecycle daemon-assertion failure during development was a REAL storage leak in
+      this task's own new tests — fixed, the daemon assertion did its job); CHANGELOG +
+      W4-DESIGN/EMBEDDING/README docs updated.
 
 Estimate: W-4a ~2–3 sessions, W-4c ~1 session (in-train); W-4b ~3–4 (next); W-4d gated.
 Risk: MEDIUM — mitigated by the flat-record design choice, the landed patterns (W-1
@@ -91,3 +103,17 @@ machinery, BUG-C restore), and the flag lifecycle.
   lesson (documented exclusions over forced flips)
 - BUG-C fix `3575ffb` (the replay key-type pattern); task 24 (journal naming); task 23
   (checkpoint-on-shutdown size note)
+
+---
+
+## Phase log
+
+- **W-4a + W-4c — DONE (2026-10-23).** Implementation: `indexJournalWrites` config flag
+  (default ON after the soak); the hash id-index resource journals `UPSERT/DELETE` redo in
+  phase-1 (`XdStorageYamlCommitJournal` reused verbatim), replays at open (BUG-C
+  `restoreKeyValueType` on replayed ids), compensates a failed phase-1, checkpoints at the
+  size threshold; `checkpointJournalOnShutdown` on data + hash-index resources (the
+  `prepared`-guard and the journal-append-lock atomicity are the two subtle bits), called
+  best-effort from `shutdown()` via the manager's `checkpointAllJournals()`.
+- **W-4b — next** (search-tree logical-op journal): starts after this soak's nightly ×3.
+- **W-4d — decision-gated**: task 20's heap data + this train's RC.

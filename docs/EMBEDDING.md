@@ -143,7 +143,10 @@ copy: object counts, load-by-id, indexed EQUALS and range queries across all sto
 
 ## Configuration recap
 
-`XdStorageConfig`: `journalWrites=true` (W-3 default — data-class commits journaled,
+`XdStorageConfig`: `indexJournalWrites=true` (W-4a default — hash id-index commits journaled: O(delta)
+appends instead of the O(N) full-file rewrite; a clean shutdown checkpoints every journal,
+so after a clean close a power loss loses nothing even with `durableWrites=false`),
+`journalWrites=true` (W-3 default — data-class commits journaled,
 `false` = classic full-file rewrite), `journalCheckpointBytes=16MB`, `durableWrites=false`,
 `acceptMissingEofSentinel=false`, `txMaterializedObjectsCap=0` (unlimited),
 `daemonWorkerThreads=false`, `registerShutdownHook=false`,

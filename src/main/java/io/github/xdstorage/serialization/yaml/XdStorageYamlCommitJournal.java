@@ -133,6 +133,13 @@ public final class XdStorageYamlCommitJournal {
      * Same-folder cross-process exclusion is the folder lock's job (S-3); inside one JVM
      * the canonical-path interned string is the lock identity.
      */
+    /** W-4a/c: the per-file append lock exposed for atomic checkpointing — a checkpoint
+     * (base rewrite + journal reset) holds the same lock as appends, so a concurrent
+     * commit's redo can never be lost between the base write and the reset. */
+    public static Object lockFor(final Path file) {
+        return appendLockFor(file);
+    }
+
     private static Object appendLockFor(final Path file) {
         try {
             return file.toFile().getCanonicalFile().getPath().intern();

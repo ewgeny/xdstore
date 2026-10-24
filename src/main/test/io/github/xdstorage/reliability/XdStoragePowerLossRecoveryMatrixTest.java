@@ -53,21 +53,35 @@ public class XdStoragePowerLossRecoveryMatrixTest {
     // ------------------------------------------------------------------------
 
     private Path buildStorage(final String tag, final boolean durableWrites) throws Exception {
-        final Path dir = tempDir.resolve("built-" + tag);
-        Files.createDirectories(dir);
-        final IXdFileStorage storage = open(dir, false, durableWrites);
+        // W-4c (task 32): a clean shutdown now CHECKPOINTS every journal (base authoritative,
+        // journals empty) — the crash artifact must instead carry the journals exactly as a
+        // power loss left them. The crash proxy is a folder copy taken while the storage is
+        // still open (task 19 semantics); the live original is clean-closed afterwards.
+        final Path live = tempDir.resolve("live-" + tag);
+        Files.createDirectories(live);
+        final IXdFileStorage storage = open(live, false, durableWrites);
         final IXdStorageTransaction tx = storage.beginTransaction(TX_TIMEOUT);
         try {
             for (long i = 1; i <= 10; i++) {
                 storage.save(ship(i), tx);
             }
             storage.commitTransaction(tx);
-        } catch (final RuntimeException e) {
-            storage.rollbackTransaction(tx);
-            throw e;
+            final Path artifact = tempDir.resolve("built-" + tag);
+            try (Stream<Path> walk = Files.walk(live)) {
+                for (final Path src : walk.collect(Collectors.toList())) {
+                    final Path dest = artifact.resolve(live.relativize(src).toString());
+                    if (src.toFile().isDirectory()) {
+                        Files.createDirectories(dest);
+                    } else {
+                        Files.createDirectories(dest.getParent());
+                        Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+            return artifact;
+        } finally {
+            storage.shutdown();
         }
-        storage.shutdown();
-        return dir;
     }
 
     private IXdFileStorage open(final Path dir, final boolean acceptMissingEof, final boolean durableWrites) {
