@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * W-1 (WRITE-PATH-DESIGN.md): append-only commit journal за флагом journalWrites
  * (default OFF = прежняя полная перезапись файла). Данные класса живут в
- * {@code <basefile>.journal.yaml}; prepare() реплеит журнал поверх базы идемпотентно;
+ * {@code <base-without-ext>-journal.yaml (JRNLNAME)}; prepare() реплеит журнал поверх базы идемпотентно;
  * оборванный хвост после последнего сентинела отбрасывается с WARN.
  */
 @DisplayName("W-1: журнал коммитов (append-only, за флагом)")
@@ -219,15 +219,19 @@ public class XdStorageW1JournalTest {
         try (Stream<Path> files = Files.list(dir.resolve(DATA_DIR))) {
             return files.filter(p -> {
                         final String n = p.getFileName().toString();
-                        return n.startsWith("BenchmarkEntity") && n.endsWith(".yaml") && !n.endsWith(".journal.yaml");
+                        // JRNLNAME: journals ride the base name under BOTH spellings — neither is a base file
+                        return n.startsWith("BenchmarkEntity") && n.endsWith(".yaml")
+                                && !n.endsWith(".journal.yaml") && !n.endsWith("-journal.yaml");
                     })
                     .findFirst().orElse(null);
         }
     }
 
     private Path findJournalFile(final Path dir) throws Exception {
-        try (Stream<Path> files = Files.list(dir.resolve(DATA_DIR))) {
-            return files.filter(p -> p.getFileName().toString().endsWith(".journal.yaml"))
+        // JRNLNAME: journals live in the journal/ subdirectory of the resource's directory
+        try (Stream<Path> files = Files.walk(dir.resolve(DATA_DIR))) {
+            return files.filter(p -> p.getFileName().toString()
+                            .endsWith(io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.JOURNAL_SUFFIX))
                     .findFirst().orElse(null);
         }
     }

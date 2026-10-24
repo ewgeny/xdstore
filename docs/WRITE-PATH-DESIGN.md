@@ -1,6 +1,6 @@
 # Write-path design: journal-based commit (Phase W)
 
-Status: **W-1..W-3 IMPLEMENTED (2026-10-19; W-3: `journalWrites` defaults ON)**. W-2 shipped as the per-transaction MATERIALIZATION BUDGET (`txMaterializedObjectsCap`, default 0=unlimited) — NOT record-cache eviction: eviction without disk-anchored scans silently drops rows from `load(Class)`/predicate scans and breaks snapshot reads (prev-versions are not on disk); disk-anchored scans are the follow-up design round (W-4). W-1 note: the first soak caught journaling the B+Tree's own node/tree/reference resources (they ride the generic XdStorageResource machinery) — journal-replaying canonical live graphs diverged from the canonical registry at reopen (XdStorageW2ReopenBTreeTest went red); fixed by the scope exclusion the design always mandated (`!cache.isInfrastructureCache() && !cache.isStructuralNodeCache()`). W-3 soak: full suite 655 tests journalized (2 failures = the documented flake families); benchmark honest verdict below. — journal append/replay/checkpoint behind the flag; W-2 cache bounds and W-3 default flip remain. Two implemented deviations from the sketch below (simpler and crash-safer): (1) the journal file is per-RESOURCE (`<basefile>.journal.yaml`) rather than per-class — fragments journal independently, same semantics; (2) there is NO `journal.checkpoint` marker file — replay is idempotent (UPSERT/DELETE by id, last-writer-wins), so a crash anywhere between "base rewritten" and "journal deleted" is safe and the marker is unnecessary; checkpoint = existing full-file write + journal reset. Failed-commit recovery appends COMPENSATION records (the restored pre-tx state per changed id, taken from the prepareCommit changes collector) — deleting the journal would lose earlier un-checkpointed commits. Torn-tail policy: records after the LAST sentinel are discarded with a WARN (the interrupted commit was never reported durable) — unlike a truncated BASE file which fails loudly (S-1). (SRE-OPTIMIZATION-PLAN Phase W; supersedes
+Status: **W-1..W-3 IMPLEMENTED (2026-10-19; W-3: `journalWrites` defaults ON)**. W-2 shipped as the per-transaction MATERIALIZATION BUDGET (`txMaterializedObjectsCap`, default 0=unlimited) — NOT record-cache eviction: eviction without disk-anchored scans silently drops rows from `load(Class)`/predicate scans and breaks snapshot reads (prev-versions are not on disk); disk-anchored scans are the follow-up design round (W-4). W-1 note: the first soak caught journaling the B+Tree's own node/tree/reference resources (they ride the generic XdStorageResource machinery) — journal-replaying canonical live graphs diverged from the canonical registry at reopen (XdStorageW2ReopenBTreeTest went red); fixed by the scope exclusion the design always mandated (`!cache.isInfrastructureCache() && !cache.isStructuralNodeCache()`). W-3 soak: full suite 655 tests journalized (2 failures = the documented flake families); benchmark honest verdict below. — journal append/replay/checkpoint behind the flag; W-2 cache bounds and W-3 default flip remain. Two implemented deviations from the sketch below (simpler and crash-safer): (1) the journal file is per-RESOURCE, in the JOURNAL SUBDIRECTORY of the resource's directory (`<dir>/journal/<base-without-ext>-journal.yaml` since JRNLNAME, docs/tasks/2.1.0/24; the 2.0.0-era stacked name and the pre-subdirectory sibling name are read-compatible and auto-migrate) rather than per-class — fragments journal independently, same semantics; (2) there is NO `journal.checkpoint` marker file — replay is idempotent (UPSERT/DELETE by id, last-writer-wins), so a crash anywhere between "base rewritten" and "journal deleted" is safe and the marker is unnecessary; checkpoint = existing full-file write + journal reset. Failed-commit recovery appends COMPENSATION records (the restored pre-tx state per changed id, taken from the prepareCommit changes collector) — deleting the journal would lose earlier un-checkpointed commits. Torn-tail policy: records after the LAST sentinel are discarded with a WARN (the interrupted commit was never reported durable) — unlike a truncated BASE file which fails loudly (S-1). (SRE-OPTIMIZATION-PLAN Phase W; supersedes
 the parked D-3 "batching" item). One design round is mandatory before any code: this changes
 crash/commit semantics, the hardest class of change in this engine.
 
@@ -25,10 +25,22 @@ O(size of every file it touches), and it is I/O on the commit's critical path:
 ### 2.1 Layout
 
 ```
-<folder>/data/<Class>/journal.yaml          — redo log, append-only
-<folder>/data/<Class>/<Class>[-frag].yaml   — base files (today's format, unchanged)
-<folder>/data/<Class>/journal.checkpoint    — marker: journal offset/serial covered by base files
+<folder>/data/<Class>/journal/<base>-journal.yaml  — redo log, append-only (JRNLNAME: the
+                                                     journal/ subdirectory of the resource's
+                                                     directory; same for structure/journal/)
+<folder>/data/<Class>/<base>.yaml                  — base files (today's format, unchanged)
 ```
+
+Implemented deviations from the sketch below: the per-resource journal lives in the
+JOURNAL SUBDIRECTORY of its resource's directory (`data/<Class>/journal/`,
+`structure/journal/`), named with a SUFFIX on the extension-less base
+(`Order-1.yaml` → `journal/Order-1-journal.yaml`; JRNLNAME, docs/tasks/2.1.0/24 —
+the 2.0.0-era stacked name `<base>.journal.yaml` and the pre-subdirectory sibling name
+`<base>-journal.yaml` are both read-compatible and auto-migrate into the subdirectory at
+the file's next replay), and there is NO `journal.checkpoint` marker file — replay is
+idempotent (UPSERT/DELETE by id, last-writer-wins), so a crash anywhere between "base
+rewritten" and "journal deleted" is safe and the marker is unnecessary; checkpoint =
+existing full-file write + journal reset (deletion).
 
 The base files and the existing full-file writer stay exactly as they are — they become the
 *checkpoint artifact* instead of the per-commit artifact.

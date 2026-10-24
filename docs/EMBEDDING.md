@@ -151,7 +151,16 @@ so after a clean close a power loss loses nothing even with `durableWrites=false
 `acceptMissingEofSentinel=false`, `txMaterializedObjectsCap=0` (unlimited),
 `daemonWorkerThreads=false`, `registerShutdownHook=false`,
 `workerPoolSize=15`, `defaultTransactionTimeoutMillis=3000`, `isolationLevel=SNAPSHOT`.
-Journal files (`<basefile>.journal.yaml`) are engine-owned like the rest of the folder.
+Journal files live in the `journal` SUBDIRECTORY of their resource's directory
+(`data/<Class>/journal/<base>-journal.yaml`, e.g. `data/Order/journal/Order-1-journal.yaml`,
+`data/Order/journal/index-journal.yaml`, `structure/journal/...`) — a class folder holds only
+bases. JRNLNAME (2.1): the journal name is a SUFFIX on the extension-less base — never a stacked
+extension. Older namings are read-compatible and migrate automatically at the file's next replay:
+the 2.0.0-era stacked name (`Order-1.yaml.journal.yaml`) and the pre-subdirectory sibling name
+(`Order-1-journal.yaml` next to the base); when several namings are present the journal-directory
+file wins and the superseded twins are removed (WARN). A journal of a resource the session never
+touches keeps its old name (its appends land inside it, nothing is lost) until that resource's
+next prepare.
 
 ## Compatibility & support statement
 
@@ -173,7 +182,7 @@ The format generation is recorded per storage folder in `.xdstorage.meta`
 
 | Folder was written by | 2.0 library behavior |
 |---|---|
-| 2.0+ (marker `formatVersion=2`) | opens normally; startup INFO announces `format v2` |
+| 2.0+ (marker `formatVersion=2`) | opens normally; startup INFO announces `format v2`. Older folders may carry journals in pre-subdirectory namings (the 2.0.0-era `<base>.journal.yaml` stack, or the sibling `<base>-journal.yaml`) — 2.1 replays them and migrates the files into the `journal/` subdirectory automatically; no manual rename |
 | 1.x (no marker, files present) | opens with a legacy INFO; **YAML** content additionally requires `acceptMissingEofSentinel(true)` until the first commit rewrites the files; **XML** content opens as-is |
 | a **newer** library (marker `formatVersion` > 2) | loud `XdStorageRuntimeException` before any engine state is built — upgrade the library |
 | fresh/empty folder | marker `formatVersion=2` written at open |

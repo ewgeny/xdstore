@@ -111,7 +111,9 @@ public class XdStoragePowerLossRecoveryMatrixTest {
 
     private Path dataJournal(final Path storageDir) throws Exception {
         try (Stream<Path> walk = Files.walk(storageDir)) {
-            return walk.filter(f -> f.getFileName().toString().endsWith(".yaml.journal.yaml"))
+            // JRNLNAME: journals ride the extension-less base — filter by the choke-point suffix
+            return walk.filter(f -> f.getFileName().toString()
+                            .endsWith(io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.JOURNAL_SUFFIX))
                     .filter(f -> f.toString().replace(File.separatorChar, '/').contains("/data/XdStorageW2SearchShip"))
                     .findFirst().orElseThrow(() -> new IllegalStateException("no data journal found under " + storageDir));
         }
@@ -281,7 +283,8 @@ public class XdStoragePowerLossRecoveryMatrixTest {
     public void tornStructureJournalOpensClean() throws Exception {
         final Path built = buildStorage("t3", false);
         final Path cell = copyOf(built, "cell-t3");
-        truncate(cell.resolve("structure/XdStorageLongIdCounterRecord.yaml.journal.yaml"), 0.6);
+        truncate(cell.resolve("structure/journal/XdStorageLongIdCounterRecord"
+                + io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.JOURNAL_SUFFIX), 0.6);
         final IXdFileStorage storage = open(cell, false, false);
         try {
             final IXdStorageTransaction tx = storage.beginTransaction(TX_TIMEOUT);
@@ -306,6 +309,8 @@ public class XdStoragePowerLossRecoveryMatrixTest {
             // craft the torn base: a mid-journal cut posing as a checkpointed base
             Files.write(base, journalContent.substring(0, journalContent.length() / 2)
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // JRNLNAME: also plant the same journal under the LEGACY spelling — a both-present
+            // anomaly on top of the torn base; the new name must win and the twin is cleaned
             Files.copy(dataJournal(built), base.getParent().resolve(base.getFileName() + ".journal.yaml"),
                     StandardCopyOption.REPLACE_EXISTING);
 

@@ -35,7 +35,10 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
     private final IXdStorageObjectsWriter writer;
 
     /** W-1: append-only commit journal; null = journaling off (full-file rewrite per commit, прежнее поведение). */
-    private final java.nio.file.Path journalFile;
+    private java.nio.file.Path journalFile;
+
+    // JRNLNAME: older-named journals present at resolution (replay sources / superseded twins)
+    private java.util.List<java.nio.file.Path> supersededJournals = java.util.Collections.emptyList();
 
     private final io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory yamlJournalFactory;
 
@@ -66,9 +69,15 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
         // (реестр R-20) и рвет дерево: инфраструктура сохраняется полной перезаписью, как раньше.
         this.journalWrites = services.getStorageConfig() != null && services.getStorageConfig().isJournalWrites()
                 && !cache.isInfrastructureCache() && !cache.isStructuralNodeCache();
-        this.journalFile = journalWrites
-                ? io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.journalFileFor(getFileName())
-                : null;
+        if (journalWrites) {
+            final io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.Resolution resolution =
+                    io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.resolveFor(getFileName());
+            this.journalFile = resolution.file;
+            this.supersededJournals = resolution.superseded;
+        } else {
+            this.journalFile = null;
+            this.supersededJournals = java.util.Collections.emptyList();
+        }
         this.yamlJournalFactory = journalWrites && factory instanceof io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory
                 ? (io.github.xdstorage.serialization.yaml.XdStorageYamlIOFactory) factory
                 : null;
@@ -256,6 +265,11 @@ public class XdStorageResource extends XdStorageAbstractResource implements IXdS
                 log.debug("resource {} replayed commit journal: {} upsert(s), {} delete(s), {} discarded tail record(s)",
                         getFileName(), replay.upserts.size(), replay.deletes.size(), replay.discardedTailRecords);
             }
+            // JRNLNAME: a replayed older-named journal migrates into the journal directory;
+            // superseded twins (both-present anomaly) are removed — after a clean replay
+            journalFile = io.github.xdstorage.serialization.yaml.XdStorageYamlCommitJournal.settleAfterReplay(
+                    journalFile, supersededJournals, getFileName());
+            supersededJournals = java.util.Collections.emptyList();
         } catch (final Throwable e) {
             throw new XdStorageException("invalid state of database: commit journal of resource " + resourceId + " cannot be replayed", e);
         }

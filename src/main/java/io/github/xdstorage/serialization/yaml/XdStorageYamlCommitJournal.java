@@ -27,7 +27,14 @@ import java.util.List;
 /**
  * W-1: append-only commit journal for one resource (WRITE-PATH-DESIGN.md).
  *
- * <p>Layout: {@code <basefile>.journal.yaml} — a sequence of record blocks, each append
+ * <p>Layout (JRNLNAME, docs/tasks/2.1.0/24): journals live in the {@link #JOURNAL_DIR journal}
+ * SUBDIRECTORY of their resource's directory — {@code Order-1.yaml → <dir>/journal/Order-1-journal.yaml}
+ * — so a class folder holds only bases. The journal content is YAML for every storage format,
+ * so the name always ends in .yaml. Read-compatibility, resolved in this priority: the
+ * 2.1.0-dev sibling spelling ({@code <dir>/Order-1-journal.yaml}, pre-subdirectory) and the
+ * 2.0.0-era stacked name ({@code <dir>/Order-1.yaml.journal.yaml}) are both replay sources —
+ * after a clean replay the file is migrated into the journal subdirectory, and any additional
+ * older-named twin is removed (WARN). A sequence of record blocks, each append
  * terminated by the S-1 EOF sentinel:</p>
  * <pre>
  * - record:
@@ -57,13 +64,104 @@ public final class XdStorageYamlCommitJournal {
 
     private static final Logger log = LoggerFactory.getLogger(XdStorageYamlCommitJournal.class);
 
-    public static final String JOURNAL_SUFFIX = ".journal.yaml";
+    // JRNLNAME (docs/tasks/2.1.0/24): journals live in the journal SUBDIRECTORY of their
+    // resource's directory, named with a SUFFIX on the extension-less base — never a stacked
+    // extension. The journal content is YAML for every storage format, so the name ends in .yaml.
+    public static final String JOURNAL_DIR = "journal";
+
+    public static final String JOURNAL_SUFFIX = "-journal.yaml";
+
+    /** The 2.0.0-era naming (baseFileName + ".journal.yaml", a stacked extension, base's dir) —
+     * read-compatible: a legacy file is replayed and migrated into the journal directory. */
+    public static final String LEGACY_JOURNAL_SUFFIX = ".journal.yaml";
 
     private XdStorageYamlCommitJournal() {
     }
 
+    /** The journal path for one base file: {@code <dir-of-base>/journal/<base-without-ext>-journal.yaml}. */
     public static Path journalFileFor(final String baseFileName) {
-        return new File(baseFileName + JOURNAL_SUFFIX).toPath();
+        final File base = new File(baseFileName);
+        final File parent = base.getParentFile();
+        final String journalName = stripFormatExtension(base.getName()) + JOURNAL_SUFFIX;
+        return (parent == null
+                ? new File(JOURNAL_DIR, journalName)
+                : new File(new File(parent, JOURNAL_DIR), journalName)).toPath();
+    }
+
+    /** The 2.1.0-dev sibling spelling (the journal NEXT to the base, no subdirectory) —
+     * read-compatible within the unreleased train: replayed and migrated into {@link #JOURNAL_DIR}. */
+    public static Path siblingJournalFileFor(final String baseFileName) {
+        return new File(stripFormatExtension(baseFileName) + JOURNAL_SUFFIX).toPath();
+    }
+
+    /** The 2.0.0-era path (the stacked-extension name in the base's dir) — resolution + migration only. */
+    public static Path legacyJournalFileFor(final String baseFileName) {
+        return new File(baseFileName + LEGACY_JOURNAL_SUFFIX).toPath();
+    }
+
+    /** Strips a known format extension (yaml/xml/json) — class-derived base names carry no other dots. */
+    public static String stripFormatExtension(final String baseFileName) {
+        if (baseFileName.endsWith(".yaml")) return baseFileName.substring(0, baseFileName.length() - 5);
+        if (baseFileName.endsWith(".json")) return baseFileName.substring(0, baseFileName.length() - 5);
+        if (baseFileName.endsWith(".xml")) return baseFileName.substring(0, baseFileName.length() - 4);
+        return baseFileName;
+    }
+
+    /** The resolved journal location for one base name (existence-aware). */
+    public static final class Resolution {
+        /** The path ALL journal I/O must use after resolution (migrating storage included). */
+        public final Path file;
+        /** Existing older-named journals (lower-priority namings) — migrated/removed after the clean replay. */
+        public final java.util.List<Path> superseded;
+
+        Resolution(final Path file, final java.util.List<Path> superseded) {
+            this.file = file;
+            this.superseded = java.util.Collections.unmodifiableList(superseded);
+        }
+    }
+
+    /**
+     * JRNLNAME resolution, priority order: the journal-directory file wins; a sibling-named
+     * (pre-subdirectory) or legacy stacked-named journal without the newer ones is the replay
+     * source (migrate after a successful replay); the fresh case creates in the journal directory.
+     */
+    public static Resolution resolveFor(final String baseFileName) {
+        Path chosen = null;
+        final java.util.List<Path> superseded = new java.util.ArrayList<>();
+        for (final Path candidate : new Path[]{
+                journalFileFor(baseFileName), siblingJournalFileFor(baseFileName), legacyJournalFileFor(baseFileName)}) {
+            if (Files.exists(candidate)) {
+                if (chosen == null) {
+                    chosen = candidate;
+                } else {
+                    superseded.add(candidate);
+                }
+            }
+        }
+        return new Resolution(chosen == null ? journalFileFor(baseFileName) : chosen, superseded);
+    }
+
+    /**
+     * JRNLNAME: called after a successful journal replay — migrates a replayed older-named
+     * file into the journal directory, and drops any additional superseded twin (the
+     * both-present anomaly, WARN). Returns the path all future journal I/O must use.
+     */
+    public static Path settleAfterReplay(final Path replayedFile, final java.util.List<Path> superseded,
+                                         final String baseFileName) throws java.io.IOException {
+        final Path target = journalFileFor(baseFileName);
+        if (!replayedFile.equals(target)) {
+            java.nio.file.Files.move(replayedFile, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            log.info("journal migrated into the journal directory: {} -> {}", replayedFile, target);
+        }
+        for (final Path stale : superseded) {
+            if (stale.equals(replayedFile)) {
+                continue;   // the replay source itself — already moved above
+            }
+            java.nio.file.Files.delete(stale);
+            log.warn("superseded journal naming removed for {}: {} ({} wins)",
+                    baseFileName, stale, replayedFile);
+        }
+        return target;
     }
 
     /** One durable redo/compensation record waiting to be appended. */

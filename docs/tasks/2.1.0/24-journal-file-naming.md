@@ -1,7 +1,7 @@
 ---
 title: "[2.1.0][JRNLNAME] Journal file naming: <base>-journal.<ext> with legacy read-compatibility"
 labels: [2.1.0-train, P1, engine, bug]
-status: open
+status: done
 ---
 
 ## Summary
@@ -65,12 +65,14 @@ the loss class this engine exists to prevent).
 
 ## Acceptance criteria
 
-- [ ] New storages write `Order-1-journal.yaml`-style names (no double extensions anywhere).
-- [ ] A 2.0.0-era folder with a legacy-named journal opens with its un-checkpointed commits
-      replayed, and the file migrates to the new name (the upgrade test pins this).
-- [ ] Both-present anomaly → new wins + WARN, no data loss.
-- [ ] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
-- [ ] CHANGELOG "Changed" entry (on-disk naming + automatic migration).
+- [x] New storages write `Order-1-journal.yaml`-style names (no double extensions anywhere).
+- [x] A 2.0.0-era folder with a legacy-named journal opens with its un-checkpointed commits
+      replayed, and the file migrates to the new name (the upgrade test pins this — the fixture
+      empties the base so only the legacy journal can restore the objects).
+- [x] Both-present anomaly → new wins + WARN, no data loss (the twin is removed after the clean
+      replay; the test discriminates by an update record that exists only in the new-name file).
+- [x] Full suite green ×2 (BUILD SUCCESS verdict); no new FLAKY rows.
+- [x] CHANGELOG "Changed" entry (on-disk naming + automatic migration).
 
 Estimate: ~0.5–1 dev-day (single choke point; the compat test is the careful part).
 
@@ -80,3 +82,44 @@ Estimate: ~0.5–1 dev-day (single choke point; the compat test is the careful p
   (the resolution site), S-5 `.tmp` sweep (the name-adjacent machinery)
 - [WRITE-PATH-DESIGN.md](../../WRITE-PATH-DESIGN.md) §2.1 (layout to update)
 - [EMBEDDING.md](../../EMBEDDING.md) § Files and durability (the contract to update)
+
+## Implementation notes (2026-10-24)
+
+- Single choke point as planned: `XdStorageYamlCommitJournal` (`JOURNAL_SUFFIX` = `-journal.yaml`,
+  `LEGACY_JOURNAL_SUFFIX` = the 2.0.0 `.journal.yaml`), `Resolution{file, legacyPresent}` +
+  `resolveFor(base)` + `settleAfterReplay(...)`; wired into `XdStorageResource` and
+  `XdStorageHashIndexResource` (non-final journal fields, ctor resolution, settle after a clean
+  replay). Checkpoint `reset` deletes the resolved file — the size checkpoint and the W4a
+  close-checkpoint both run under the new name.
+- **Lazy migration is the honest contract**: replay (and therefore settle) runs at a resource's
+  PREPARE, not at folder open — a read-only session over an upgraded folder migrates only the
+  resources it actually touches (the id index; the entity fragment at its first write) and the
+  close-checkpoint covers the prepared set. A never-prepared resource (e.g. the structure
+  counter) keeps its legacy name until its next prepare; its appends land INSIDE the legacy
+  file meanwhile, so nothing is lost. `XdStorageJournalNamingTest` pins exactly this scoping.
+- The XML acceptance item resolved differently than the task assumed: XML storages cannot
+  journal at all (the W-1 guard refuses `journalWrites` for non-YAML formats loudly at open —
+  the task's "an XML storage's Order.xml already carries a .journal.yaml" premise predates that
+  guard). The naming rule is still pinned for every base extension as a pure function
+  (`Order.xml` → `Order-journal.yaml` if a journal ever rides one).
+- Test-infra discovery (pre-existing engine trait, NOT touched here): the per-class structure
+  metadata persists ABSOLUTE data-resource paths, so a folder COPY opened mid-session redirects
+  its data resources to the original path (index/structure resources re-derive correctly; the
+  close-time path re-derives correctly too). The naming tests therefore let the fixture take
+  over the original path before reopening. Filed for a future task if folder relocation ever
+  becomes a supported flow.
+
+## Addendum (2026-10-24, post-implementation directive): journals move into a subdirectory
+
+User directive after the suffix naming shipped within this train: journals must live in a
+SUBDIRECTORY of their resource's directory, so a class folder holds only bases. Final layout:
+`data/<Class>/journal/<base>-journal.yaml` and `structure/journal/<Class>-journal.yaml`
+(`XdStorageYamlCommitJournal.JOURNAL_DIR`). The resolution chain is now three levels, priority
+order: the journal-directory file wins → the sibling spelling (`<base>-journal.yaml` next to
+the base, this train's intermediate naming) is a replay source → the 2.0.0-era stacked name is
+a replay source; after a clean replay everything settles into the journal directory and
+additional superseded twins are removed (WARN). `Resolution{file, superseded: List<Path>}`
+replaced the single-legacy shape; `XdStorageFolderVerifier` matches base-less journals across
+the subdirectory and keeps the per-class count consistency aware of `journal/`.
+`XdStorageJournalNamingTest` pins all three migrations (stacked, sibling, both-present) + the
+placement invariant.

@@ -83,12 +83,18 @@ Planned scope; items land here as they merge:
 
 ### Changed (planned)
 
-- **Journal file naming** (planned, [24](docs/tasks/2.1.0/24-journal-file-naming.md)) —
-  journal files are named `<base>-journal.yaml` (suffix, not stacked extension):
-  `Order-1.yaml` no longer carries an `Order-1.yaml.journal.yaml` twin. 2.0.0-era folders
-  are migrated automatically: legacy-named journals are replayed and renamed at open —
-  un-checkpointed commits survive the upgrade. The journal content stays YAML for every
-  storage format (an XML storage's `Order.xml` carries `Order-journal.yaml`).
+- **Journal file naming and placement** ([24](docs/tasks/2.1.0/24-journal-file-naming.md)) —
+  journal files live in the `journal` SUBDIRECTORY of their resource's directory
+  (`data/<Class>/journal/<base-without-ext>-journal.yaml`, `structure/journal/...`), named with
+  a suffix on the extension-less base — a class folder holds only bases, and no stacked
+  extensions (`Order-1.yaml` no longer carries an `Order-1.yaml.journal.yaml` twin). Older
+  namings are migrated automatically: a 2.0.0-era stacked-named journal (and the pre-subdirectory
+  sibling spelling) is replayed and moved into the journal directory at its replay
+  (un-checkpointed commits survive the upgrade); when several namings are present the
+  journal-directory file wins and the superseded twins are removed (WARN). A journal of a
+  resource the session never touches keeps its old name until that resource's next prepare —
+  content-safe either way. The journal content stays YAML; journaling itself remains
+  YAML-format only (an XML storage refuses `journalWrites` loudly at open, unchanged).
 
 - **Index journaling (W-4a/c)** — the hash id-index commits are journaled
   ([32](docs/tasks/2.1.0/32-w4-write-path-implementation.md), design in
